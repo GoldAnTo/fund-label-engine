@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.egg-info/
+*.db
+*.sqlite
+*.sqlite3
+*.parquet
+*.csv
+*.xlsx
+data/*
+!data/README.md
+.DS_Store

@@ -1,0 +1,72 @@
+# fund-label-engine
+
+基金标签计算引擎，用于给公募基金生成可解释、可追溯、可复核的标签，并服务资管产品池准入、观察池、人工复核和后续 FOF 研究。
+
+## 项目定位
+
+本项目不是自动交易系统，也不是基金推荐机器人。它的核心目标是把基金侧数据、持仓穿透、收益风险特征和规则标签组织成一个可审计的计算流程：
+
+```text
+基金数据 -> 数据覆盖率检查 -> 特征计算 -> 标签规则 -> 证据说明 -> 人工复核
+```
+
+第一版聚焦：
+
+- 股票型基金
+- 偏股混合型基金
+- 灵活配置型基金
+- 股票指数型基金
+
+第一版明确不做：
+
+- 不做自动交易
+- 不做实盘买卖建议
+- 不覆盖所有基金类型
+- 不用 LLM 自动下最终结论
+- 不在缺少股票因子时生成深度价值、质量成长、红利稳健等高级风格标签
+
+## 基准项目
+
+工程形态参考 [nai-he/fund-analysis-agent](https://github.com/nai-he/fund-analysis-agent)：借鉴其 FastAPI + React + 风险评分/分析模块的分层方式。
+
+辅助参考：
+
+- [xalpha](https://github.com/refraction-ray/xalpha)：基金组合、持仓穿透、基金投资管理。
+- [FactorHub](https://github.com/cn-vhql/FactorHub)：A 股因子管理和因子生命周期。
+
+本项目不会复制这些仓库的代码，只借鉴产品边界和模块拆分。
+
+## 当前目录
+
+```text
+backend/                  后端与标签引擎
+docs/                     需求、边界、数据契约、标签体系
+examples/                 示例输入输出
+frontend/                 后续标签工作台
+data/                     本地样例数据或缓存，不提交大数据文件
+```
+
+## 第一版最小闭环
+
+输入一只基金的结构化数据，输出：
+
+- 数据覆盖率
+- 基础画像
+- 收益风险特征
+- 持仓结构特征
+- 基金经理特征
+- 费用规模特征
+- 标签结果
+- 每个标签的证据
+- 观察池/人工复核建议
+
+## 开发命令
+
+```bash
+cd /Users/xiongjiali/Desktop/code/fund-label-engine
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+
