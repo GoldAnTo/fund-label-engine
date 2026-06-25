@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.label_engine.engine import DEFAULT_LABEL_DEFINITIONS, EngineResult, RuleConfig
+from app.factors.exposure_aggregator import FundFactorExposure
 
 
 SCHEMA_STATEMENTS = (
@@ -340,6 +341,36 @@ class LabelRunWriter:
                         item.reason_code,
                         item.evidence,
                         item.source,
+                    ),
+                )
+            conn.commit()
+
+    def write_factor_exposures(
+        self,
+        exposures: list[FundFactorExposure],
+    ) -> None:
+        if not exposures:
+            return
+        with self._connect() as conn:
+            for item in exposures:
+                conn.execute(
+                    "INSERT OR REPLACE INTO fund_factor_exposures "
+                    "(fund_code, report_date, factor_code, exposure_value, "
+                    " coverage_weight, holding_total_weight, stock_count, "
+                    " covered_stock_count, source, as_of_date, computed_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        item.fund_code,
+                        item.report_date,
+                        item.factor_code,
+                        item.exposure_value,
+                        item.coverage_weight,
+                        item.holding_total_weight,
+                        item.stock_count,
+                        item.covered_stock_count,
+                        item.source,
+                        item.as_of_date,
+                        item.computed_at,
                     ),
                 )
             conn.commit()

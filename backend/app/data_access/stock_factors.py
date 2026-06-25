@@ -86,6 +86,7 @@ def _load_from_narrow(
         target = pivoted.setdefault(stock_code, {"stock_code": stock_code})
         field = NARROW_FACTOR_FIELD_MAP.get(factor_code, factor_code)
         target[field] = factor_value
+        target["as_of_date"] = max(str(target.get("as_of_date") or ""), str(_as_of or ""))
     return list(pivoted.values())
 
 

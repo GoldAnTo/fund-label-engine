@@ -204,7 +204,38 @@ def _style_fund(stock_factors: list[dict]) -> FundInput:
     )
 
 
-def test_deep_value_label_emits_when_pb_and_valuation_pct_meet_threshold():
+def test_deep_value_label_emits_from_precomputed_factor_exposures():
+    fund = _style_fund(stock_factors=[])
+    fund = FundInput(
+        **{
+            **fund.__dict__,
+            "factor_exposures": [
+                {
+                    "factor_code": "deep_value_weight",
+                    "exposure_value": 0.70,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-01",
+                },
+                {
+                    "factor_code": "factor_coverage_weight",
+                    "exposure_value": 0.80,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-01",
+                },
+            ],
+        }
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "deep_value" in codes
+    assert "style_unlabeled_stock_factors_missing" not in codes
+    ev = evidence_for(result, "deep_value")[0]
+    assert ev.source == "fund_factor_exposures"
+
+
+def test_deep_value_label_emits_when_pb_and_valuation_percentile_meet_threshold():
     fund = _style_fund(
         stock_factors=[
             {"stock_code": "600519", "pb": 1.0, "valuation_percentile": 0.10},

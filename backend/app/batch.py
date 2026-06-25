@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import date
 from pathlib import Path
 
 from app.data_access import create_repository
+from app.factors.exposure_aggregator import aggregate_factor_exposures
 from app.label_engine import LabelEngine
 from app.label_engine.engine import RuleConfig
 from app.persistence import LabelRunWriter
@@ -89,6 +90,30 @@ def run_batch(
             fund = repo.load_fund_input(fund_code)
             if fund is None:
                 continue
+            if not fund.factor_exposures and fund.stock_holdings and fund.stock_factors:
+                try:
+                    exposures = aggregate_factor_exposures(
+                        fund_code=fund.fund_code,
+                        report_date=fund.holding_report_date,
+                        holdings=fund.stock_holdings,
+                        stock_factors=fund.stock_factors,
+                        rule_config=rule_config,
+                    )
+                    writer.write_factor_exposures(exposures)
+                    if exposures:
+                        fund = replace(
+                            fund,
+                            factor_exposures=[asdict(item) for item in exposures],
+                        )
+                except Exception as exc:  # noqa: BLE001 - 聚合失败降级走旧路径
+                    writer.write_failure(
+                        run_id=run_id,
+                        fund_code=fund_code,
+                        stage="aggregate_exposures",
+                        error_type=type(exc).__name__,
+                        message=str(exc)[:500],
+                    )
+                    failure_count += 1
             result = engine.evaluate(fund)
             writer.write_result(run_id, result)
             processed += 1

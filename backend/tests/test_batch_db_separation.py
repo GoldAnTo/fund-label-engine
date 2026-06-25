@@ -46,6 +46,7 @@ def test_separated_dbs_keep_source_untouched_and_results_in_output(
         "feature_values",
         "fund_run_coverage",
         "label_definitions",
+        "fund_factor_exposures",
     }.issubset(output_tables)
 
     # API 走 output_db 能直接查到 run / fund / report
@@ -54,6 +55,32 @@ def test_separated_dbs_keep_source_untouched_and_results_in_output(
     report = client.get(f"/v1/runs/{run_id}/funds/000001/report").json()
     assert report["fund_code"] == "000001"
     assert report["summary"]["label_count"] >= 1
+    assert "factor_exposures" in report
+
+
+def test_batch_persists_factor_exposures_in_output_not_source(
+    source_db: Path, tmp_path: Path
+) -> None:
+    with sqlite3.connect(source_db) as conn:
+        conn.executemany(
+            "INSERT INTO stock_factors "
+            "(stock_code, factor_date, pb, roe, dividend_yield, revenue_growth, "
+            " profit_growth, market_cap_bucket, valuation_percentile, style) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("600519", "2026-03-01", 1.0, 0.20, 0.04, 0.18, 0.12, "large", 0.20, "value"),
+                ("000858", "2026-03-01", 1.2, 0.18, 0.035, 0.17, 0.10, "large", 0.25, "value"),
+            ],
+        )
+        conn.commit()
+    output_db = tmp_path / "label_results.sqlite"
+
+    run_batch(source_db=source_db, output_db=output_db)
+
+    assert "fund_factor_exposures" not in _table_names(source_db)
+    with sqlite3.connect(output_db) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM fund_factor_exposures").fetchone()[0]
+    assert count >= 1
 
 
 def test_separated_mode_opens_source_read_only(

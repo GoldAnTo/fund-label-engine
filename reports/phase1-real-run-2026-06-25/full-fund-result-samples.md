@@ -47,7 +47,7 @@
 - `long_term_return_strong` / `annualized_return_1y`：value=0.443516，threshold=0.15；1Y 年化收益率 44.35%，达到 15.00% 阈值。
 - `manager_tenure_long` / `manager_tenure_years`：value=9.52，threshold=5.0；当前基金经理任期 9.5 年，达到 5.0 年稳定性阈值。
 - `sharpe_high` / `sharpe_ratio_1y`：value=2.991613，threshold=1.0；1Y 夏普 2.99，达到 1.00。
-- `style_pending_rule_definition` / `style_coverage_weight`：value=0.8352，threshold=deep_value≥40%, quality_growth≥40%, dividend_steady≥50%；股票因子已经存在，但没有任何风格指标达到阈值。deep_value=28%, quality_growth=3%, dividend_steady=21%.
+- `style_pending_rule_definition` / `style_factor_coverage_weight`：value=0.8352，threshold=style_weights_below_threshold；已有基金级因子暴露，但深度价值、质量成长、红利稳健权重均未达阈值。
 - `tracking_error_high` / `tracking_error_1y`：value=0.227556，threshold=0.08；1Y 年化跟踪误差 22.76%，达到相对基准阈值 8.00%。
 
 **没打出来的标签（前 8 项）**
@@ -79,7 +79,7 @@
 - `equity_position_high`（holding_structure，active，confidence=0.85）
 - `holding_concentration_high`（holding_structure，active，confidence=0.9）
 - `industry_concentration_high`（holding_structure，active，confidence=0.85）
-- `quality_growth`（holding_style，active，confidence=0.7）
+- `quality_growth`（holding_style，active，confidence=0.75）
 - `manager_tenure_long`（manager，active，confidence=0.9）
 - `alpha_positive`（relative_benchmark，active，confidence=0.75）
 - `beta_low`（relative_benchmark，active，confidence=0.75）
@@ -101,7 +101,7 @@
 - `information_ratio_high` / `information_ratio_1y`：value=4.580931，threshold=0.5；1Y 信息比率 458.09%，达到相对基准阈值 50.00%。
 - `long_term_return_strong` / `annualized_return_1y`：value=2.694468，threshold=0.15；1Y 年化收益率 269.45%，达到 15.00% 阈值。
 - `manager_tenure_long` / `manager_tenure_years`：value=10.06，threshold=5.0；当前基金经理任期 10.1 年，达到 5.0 年稳定性阈值。
-- `quality_growth` / `quality_growth_weight`：value=0.5542，threshold=0.4；ROE ≥ 15% 且营收增速 ≥ 15% 的持仓权重占 55%，达到 40% 阈值。
+- `quality_growth` / `quality_growth_weight`：value=0.5542，threshold=0.4；预聚合质量成长持仓权重 55%，达到 40% 阈值。 因子覆盖权重 95%。
 - `sharpe_high` / `sharpe_ratio_1y`：value=6.710162，threshold=1.0；1Y 夏普 6.71，达到 1.00。
 
 **没打出来的标签（前 8 项）**
@@ -112,7 +112,7 @@
 - `fund_size_small`：threshold_not_met，observed=1.52，threshold={'fund_size_max': 1.0}
 - `industry_concentration_observe`：threshold_not_met，observed=0.7931，threshold={'industry_top1_weight_min': 0.45, 'industry_top1_weight_max_exclusive': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.7931，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `deep_value`：threshold_not_met，observed=style_weight_below_threshold，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
+- `deep_value`：threshold_not_met，observed=0.001，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
 
 **因为数据不足/范围边界不能算**
 - 无
@@ -134,8 +134,8 @@
 - `equity_position_high`（holding_structure，active，confidence=0.85）
 - `holding_concentration_high`（holding_structure，active，confidence=0.9）
 - `industry_concentration_high`（holding_structure，active，confidence=0.85）
-- `deep_value`（holding_style，active，confidence=0.7）
-- `dividend_steady`（holding_style，active，confidence=0.7）
+- `deep_value`（holding_style，active，confidence=0.75）
+- `dividend_steady`（holding_style，active，confidence=0.75）
 - `manager_tenure_long`（manager，active，confidence=0.9）
 - `beta_low`（relative_benchmark，active，confidence=0.75）
 - `tracking_error_high`（relative_benchmark，active，confidence=0.75）
@@ -143,8 +143,8 @@
 **为什么打出来（证据摘要）**
 - `beta_low` / `beta_1y`：value=0.027991，threshold=0.8；1Y Beta 2.80%，达到相对基准阈值 80.00%。
 - `data_sufficient` / `required_fields_present`：value=yes，threshold=all_required_fields_present；基础净值、持仓、行业、经理、费率和规模数据均已提供。
-- `deep_value` / `deep_value_weight`：value=0.8067，threshold=0.4；PB ≤ 1.5 且估值分位数 ≤ 30% 的持仓权重占 81%，达到 40% 阈值。
-- `dividend_steady` / `dividend_steady_weight`：value=0.7401，threshold=0.5；股息率 ≥ 3% 的持仓权重占 74%，达到 50% 阈值。
+- `deep_value` / `deep_value_weight`：value=0.8067，threshold=0.4；预聚合深度价值持仓权重 81%，达到 40% 阈值。 因子覆盖权重 88%。
+- `dividend_steady` / `dividend_steady_weight`：value=0.7401，threshold=0.5；预聚合红利稳健持仓权重 74%，达到 50% 阈值。 因子覆盖权重 88%。
 - `equity_position_high` / `equity_position`：value=0.884，threshold=0.8；权益仓位 88.40%，达到 80.00% 权益仓位阈值。
 - `fund_size_moderate` / `fund_size`：value=10.77，threshold=5.00~100.00 亿元；基金规模 10.77 亿元，处于 5.00~100.00 亿元合理区间。
 - `holding_concentration_high` / `top_10_holding_weight`：value=0.677，threshold=0.55；前十大持仓合计 67.70%，达到持仓集中度高阈值 55.00%。
@@ -159,7 +159,7 @@
 - `fund_size_small`：threshold_not_met，observed=10.77，threshold={'fund_size_max': 1.0}
 - `industry_concentration_observe`：threshold_not_met，observed=0.8498，threshold={'industry_top1_weight_min': 0.45, 'industry_top1_weight_max_exclusive': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.8498，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `quality_growth`：threshold_not_met，observed=style_weight_below_threshold，threshold={'roe_weighted_min': 0.15, 'revenue_growth_weighted_min': 0.15, 'quality_growth_weight_min': 0.4}
+- `quality_growth`：threshold_not_met，observed=0.0485，threshold={'roe_weighted_min': 0.15, 'revenue_growth_weighted_min': 0.15, 'quality_growth_weight_min': 0.4}
 - `alpha_positive`：threshold_not_met，observed=-0.047398，threshold={'alpha_min': 0.03, 'window': '3y|1y'}
 
 **因为数据不足/范围边界不能算**
@@ -199,7 +199,7 @@
 - `long_term_return_strong` / `annualized_return_1y`：value=0.339692，threshold=0.15；1Y 年化收益率 33.97%，达到 15.00% 阈值。
 - `manager_tenure_long` / `manager_tenure_years`：value=10.11，threshold=5.0；当前基金经理任期 10.1 年，达到 5.0 年稳定性阈值。
 - `sharpe_high` / `sharpe_ratio_1y`：value=1.129617，threshold=1.0；1Y 夏普 1.13，达到 1.00。
-- `style_pending_rule_definition` / `style_coverage_weight`：value=0.8915，threshold=deep_value≥40%, quality_growth≥40%, dividend_steady≥50%；股票因子已经存在，但没有任何风格指标达到阈值。deep_value=0%, quality_growth=20%, dividend_steady=0%.
+- `style_pending_rule_definition` / `style_factor_coverage_weight`：value=0.8915，threshold=style_weights_below_threshold；已有基金级因子暴露，但深度价值、质量成长、红利稳健权重均未达阈值。
 - `volatility_high` / `annualized_volatility_1y`：value=0.300714，threshold=0.3；1Y 年化波动率 30.07%，高于 30.00%。
 
 **没打出来的标签（前 8 项）**
@@ -210,7 +210,7 @@
 - `holding_concentration_high`：threshold_not_met，observed=0.4468，threshold={'top_10_holding_weight_min': 0.55}
 - `industry_concentration_observe`：threshold_not_met，observed=0.8133，threshold={'industry_top1_weight_min': 0.45, 'industry_top1_weight_max_exclusive': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.8133，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `deep_value`：threshold_not_met，observed=style_weight_below_threshold，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
+- `deep_value`：threshold_not_met，observed=0.0，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
 
 **因为数据不足/范围边界不能算**
 - `alpha_positive`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
@@ -251,7 +251,7 @@
 - `fund_size_small` / `fund_size`：value=0.38，threshold=1.0；基金规模 0.38 亿元，低于 1.00 亿元。
 - `industry_concentration_high` / `industry_top1_weight`：value=0.7253，threshold=0.6；第一大行业占比 72.53%，达到 60.00% 行业高度集中阈值。
 - `manager_tenure_long` / `manager_tenure_years`：value=9.45，threshold=5.0；当前基金经理任期 9.4 年，达到 5.0 年稳定性阈值。
-- `style_pending_rule_definition` / `style_coverage_weight`：value=0.9379，threshold=deep_value≥40%, quality_growth≥40%, dividend_steady≥50%；股票因子已经存在，但没有任何风格指标达到阈值。deep_value=17%, quality_growth=12%, dividend_steady=22%.
+- `style_pending_rule_definition` / `style_factor_coverage_weight`：value=0.9379，threshold=style_weights_below_threshold；已有基金级因子暴露，但深度价值、质量成长、红利稳健权重均未达阈值。
 
 **没打出来的标签（前 8 项）**
 - `data_insufficient`：coverage_passed，observed=all_required_fields_present，threshold=any_required_field_missing
@@ -260,8 +260,8 @@
 - `holding_concentration_high`：threshold_not_met，observed=0.46816，threshold={'top_10_holding_weight_min': 0.55}
 - `industry_concentration_observe`：threshold_not_met，observed=0.725325，threshold={'industry_top1_weight_min': 0.45, 'industry_top1_weight_max_exclusive': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.725325，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `deep_value`：threshold_not_met，observed=style_weight_below_threshold，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
-- `dividend_steady`：threshold_not_met，observed=style_weight_below_threshold，threshold={'dividend_yield_min': 0.03, 'dividend_steady_weight_min': 0.5}
+- `deep_value`：threshold_not_met，observed=0.1691，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
+- `dividend_steady`：threshold_not_met，observed=0.21698，threshold={'dividend_yield_min': 0.03, 'dividend_steady_weight_min': 0.5}
 
 **因为数据不足/范围边界不能算**
 - `alpha_positive`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
@@ -287,7 +287,7 @@
 - `fund_size_moderate`（fee_size，active，confidence=0.8）
 - `equity_position_high`（holding_structure，active，confidence=0.85）
 - `industry_concentration_high`（holding_structure，active，confidence=0.85）
-- `quality_growth`（holding_style，active，confidence=0.7）
+- `quality_growth`（holding_style，active，confidence=0.75）
 - `manager_tenure_long`（manager，active，confidence=0.9）
 - `benchmark_data_missing`（relative_benchmark，observe，confidence=1.0）
 - `long_term_return_strong`（return_risk，active，confidence=0.8）
@@ -302,7 +302,7 @@
 - `industry_concentration_high` / `industry_top1_weight`：value=0.8093，threshold=0.6；第一大行业占比 80.93%，达到 60.00% 行业高度集中阈值。
 - `long_term_return_strong` / `annualized_return_1y`：value=2.753217，threshold=0.15；1Y 年化收益率 275.32%，达到 15.00% 阈值。
 - `manager_tenure_long` / `manager_tenure_years`：value=10.23，threshold=5.0；当前基金经理任期 10.2 年，达到 5.0 年稳定性阈值。
-- `quality_growth` / `quality_growth_weight`：value=0.4021，threshold=0.4；ROE ≥ 15% 且营收增速 ≥ 15% 的持仓权重占 40%，达到 40% 阈值。
+- `quality_growth` / `quality_growth_weight`：value=0.4021，threshold=0.4；预聚合质量成长持仓权重 40%，达到 40% 阈值。 因子覆盖权重 81%。
 - `sharpe_high` / `sharpe_ratio_1y`：value=7.362519，threshold=1.0；1Y 夏普 7.36，达到 1.00。
 - `volatility_high` / `annualized_volatility_1y`：value=0.37395，threshold=0.3；1Y 年化波动率 37.40%，高于 30.00%。
 
@@ -314,7 +314,7 @@
 - `holding_concentration_high`：threshold_not_met，observed=0.5368，threshold={'top_10_holding_weight_min': 0.55}
 - `industry_concentration_observe`：threshold_not_met，observed=0.8093，threshold={'industry_top1_weight_min': 0.45, 'industry_top1_weight_max_exclusive': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.8093，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `deep_value`：threshold_not_met，observed=style_weight_below_threshold，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
+- `deep_value`：threshold_not_met，observed=0.0，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
 
 **因为数据不足/范围边界不能算**
 - `alpha_positive`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
@@ -352,7 +352,7 @@
 - `holding_concentration_high` / `top_10_holding_weight`：value=0.5767，threshold=0.55；前十大持仓合计 57.67%，达到持仓集中度高阈值 55.00%。
 - `industry_concentration_observe` / `industry_top1_weight`：value=0.5398，threshold=45.00%~60.00%；第一大行业占比 53.98%，进入 45.00%~60.00% 行业集中观察区间。
 - `manager_tenure_long` / `manager_tenure_years`：value=10.84，threshold=5.0；当前基金经理任期 10.8 年，达到 5.0 年稳定性阈值。
-- `style_pending_rule_definition` / `style_coverage_weight`：value=0.7029，threshold=deep_value≥40%, quality_growth≥40%, dividend_steady≥50%；股票因子已经存在，但没有任何风格指标达到阈值。deep_value=25%, quality_growth=14%, dividend_steady=27%.
+- `style_pending_rule_definition` / `style_factor_coverage_weight`：value=0.7029，threshold=style_weights_below_threshold；已有基金级因子暴露，但深度价值、质量成长、红利稳健权重均未达阈值。
 - `volatility_low` / `annualized_volatility_1y`：value=0.104707，threshold=0.12；1Y 年化波动率 10.47%，不高于 12.00%。
 
 **没打出来的标签（前 8 项）**
@@ -363,7 +363,7 @@
 - `fund_size_small`：threshold_not_met，observed=109.88，threshold={'fund_size_max': 1.0}
 - `industry_concentration_high`：threshold_not_met，observed=0.5398，threshold={'industry_top1_weight_min': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.5398，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `deep_value`：threshold_not_met，observed=style_weight_below_threshold，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
+- `deep_value`：threshold_not_met，observed=0.2452，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
 
 **因为数据不足/范围边界不能算**
 - `alpha_positive`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
@@ -390,7 +390,7 @@
 - `fund_size_moderate`（fee_size，active，confidence=0.8）
 - `equity_position_high`（holding_structure，active，confidence=0.85）
 - `industry_concentration_observe`（holding_structure，observe，confidence=0.75）
-- `deep_value`（holding_style，active，confidence=0.7）
+- `deep_value`（holding_style，active，confidence=0.75）
 - `manager_tenure_long`（manager，active，confidence=0.9）
 - `alpha_positive`（relative_benchmark，active，confidence=0.75）
 - `information_ratio_high`（relative_benchmark，active，confidence=0.75）
@@ -400,7 +400,7 @@
 **为什么打出来（证据摘要）**
 - `alpha_positive` / `alpha_1y`：value=0.051816，threshold=0.03；1Y Alpha 5.18%，达到相对基准阈值 3.00%。
 - `data_sufficient` / `required_fields_present`：value=yes，threshold=all_required_fields_present；基础净值、持仓、行业、经理、费率和规模数据均已提供。
-- `deep_value` / `deep_value_weight`：value=0.4106，threshold=0.4；PB ≤ 1.5 且估值分位数 ≤ 30% 的持仓权重占 41%，达到 40% 阈值。
+- `deep_value` / `deep_value_weight`：value=0.4106，threshold=0.4；预聚合深度价值持仓权重 41%，达到 40% 阈值。 因子覆盖权重 93%。
 - `equity_position_high` / `equity_position`：value=0.9371，threshold=0.8；权益仓位 93.71%，达到 80.00% 权益仓位阈值。
 - `fee_low` / `total_annual_fee`：value=0.0118，threshold=0.012；管理费、托管费和销售服务费合计 1.18%，不高于 1.20%。
 - `fund_size_moderate` / `fund_size`：value=46.17，threshold=5.00~100.00 亿元；基金规模 46.17 亿元，处于 5.00~100.00 亿元合理区间。
@@ -417,8 +417,8 @@
 - `holding_concentration_high`：threshold_not_met，observed=0.1706，threshold={'top_10_holding_weight_min': 0.55}
 - `industry_concentration_high`：threshold_not_met，observed=0.4721，threshold={'industry_top1_weight_min': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.4721，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `dividend_steady`：threshold_not_met，observed=style_weight_below_threshold，threshold={'dividend_yield_min': 0.03, 'dividend_steady_weight_min': 0.5}
-- `quality_growth`：threshold_not_met，observed=style_weight_below_threshold，threshold={'roe_weighted_min': 0.15, 'revenue_growth_weighted_min': 0.15, 'quality_growth_weight_min': 0.4}
+- `dividend_steady`：threshold_not_met，observed=0.4488，threshold={'dividend_yield_min': 0.03, 'dividend_steady_weight_min': 0.5}
+- `quality_growth`：threshold_not_met，observed=0.0721，threshold={'roe_weighted_min': 0.15, 'revenue_growth_weighted_min': 0.15, 'quality_growth_weight_min': 0.4}
 
 **因为数据不足/范围边界不能算**
 - 无

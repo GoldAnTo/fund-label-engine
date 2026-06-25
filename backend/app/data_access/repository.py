@@ -96,6 +96,11 @@ class FundRepository:
                 stock_codes,
                 as_of=latest_holding_date,
             )
+            factor_exposures = self._load_factor_exposures(
+                conn,
+                fund_code,
+                latest_holding_date,
+            )
 
             manager_row = conn.execute(
                 "SELECT MAX(tenure_years) AS tenure FROM fund_manager_links "
@@ -131,6 +136,7 @@ class FundRepository:
             stock_holdings=stock_holdings,
             industry_allocations=industry_allocations,
             stock_factors=stock_factors,
+            factor_exposures=factor_exposures,
             benchmark_returns=benchmark_returns,
             manager_tenure_years=manager_tenure,
             management_fee=fee_row["management_fee"] if fee_row else None,
@@ -151,6 +157,44 @@ class FundRepository:
         if params is None:
             return []
         rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _load_factor_exposures(
+        conn: sqlite3.Connection,
+        fund_code: str,
+        as_of: str | None,
+    ) -> list[dict[str, Any]]:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='fund_factor_exposures'"
+        ).fetchone()
+        if table is None:
+            return []
+
+        if as_of is None:
+            report_date = conn.execute(
+                "SELECT MAX(report_date) AS d FROM fund_factor_exposures "
+                "WHERE fund_code = ?",
+                (fund_code,),
+            ).fetchone()["d"]
+        else:
+            report_date = conn.execute(
+                "SELECT MAX(report_date) AS d FROM fund_factor_exposures "
+                "WHERE fund_code = ? AND report_date <= ?",
+                (fund_code, as_of),
+            ).fetchone()["d"]
+
+        if report_date is None:
+            return []
+
+        rows = conn.execute(
+            "SELECT fund_code, report_date, factor_code, exposure_value, "
+            "coverage_weight, holding_total_weight, stock_count, covered_stock_count, "
+            "source, as_of_date, computed_at "
+            "FROM fund_factor_exposures WHERE fund_code = ? AND report_date = ? "
+            "ORDER BY factor_code",
+            (fund_code, report_date),
+        ).fetchall()
         return [dict(row) for row in rows]
 
     @staticmethod

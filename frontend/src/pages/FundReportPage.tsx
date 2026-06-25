@@ -74,6 +74,7 @@ export default function FundReportPage() {
             <dl className="kv">
               <dt>标签数</dt><dd>{data.summary.label_count}</dd>
               <dt>特征数</dt><dd>{data.summary.feature_count}</dd>
+              <dt>因子暴露</dt><dd>{data.summary.factor_exposure_count ?? data.factor_exposures.length}</dd>
               <dt>证据条数</dt><dd>{data.summary.evidence_count}</dd>
               <dt>缺失字段数</dt><dd>{data.summary.missing_field_count}</dd>
               <dt>已有复核</dt><dd>{data.summary.review_count}</dd>
@@ -130,6 +131,32 @@ export default function FundReportPage() {
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {data && data.factor_exposures.length > 0 && (
+        <div className="card">
+          <h2>基金级因子暴露</h2>
+          <p className="muted">基于持仓和股票因子预聚合，coverage 表示可用因子覆盖的持仓权重。</p>
+          <table>
+            <thead>
+              <tr>
+                <th>因子</th><th>暴露值</th><th>覆盖权重</th><th>持仓权重</th><th>股票覆盖</th><th>日期</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.factor_exposures.map((f) => (
+                <tr key={`${f.report_date}-${f.factor_code}-${f.as_of_date}`}>
+                  <td><code>{f.factor_code}</code></td>
+                  <td>{Number(f.exposure_value).toFixed(4)}</td>
+                  <td>{(Number(f.coverage_weight) * 100).toFixed(1)}%</td>
+                  <td>{(Number(f.holding_total_weight) * 100).toFixed(1)}%</td>
+                  <td>{f.covered_stock_count}/{f.stock_count}</td>
+                  <td className="muted">{f.report_date} / {f.as_of_date}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

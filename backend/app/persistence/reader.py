@@ -98,6 +98,7 @@ class LabelRunReader:
             "calculations": self.list_calculations(run_id, fund_code),
             "classifications": self.list_classifications(run_id, fund_code),
             "groups": self.list_groups(run_id, fund_code),
+            "factor_exposures": self.list_factor_exposures(fund_code),
             "reviews": self.list_reviews(run_id, fund_code),
         }
 
@@ -170,6 +171,31 @@ class LabelRunReader:
                 return []
         return [dict(row) for row in rows]
 
+    def list_factor_exposures(self, fund_code: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            try:
+                cols = [
+                    row[1]
+                    for row in conn.execute(
+                        "PRAGMA table_info(fund_factor_exposures)"
+                    ).fetchall()
+                ]
+                if not cols:
+                    return []
+                order_cols = [
+                    col for col in ("as_of_date", "factor_code") if col in cols
+                ]
+                order_sql = (
+                    " ORDER BY " + ", ".join(order_cols) if order_cols else ""
+                )
+                rows = conn.execute(
+                    f"SELECT * FROM fund_factor_exposures WHERE fund_code = ?{order_sql}",
+                    (fund_code,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []
+        return [dict(row) for row in rows]
+
     def list_reviews(self, run_id: str, fund_code: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             try:
@@ -200,6 +226,7 @@ class LabelRunReader:
             "calculation_count": len(payload["calculations"]),
             "classification_count": len(payload["classifications"]),
             "group_count": len(payload["groups"]),
+            "factor_exposure_count": len(payload["factor_exposures"]),
             "missing_field_count": len(missing_fields),
             "review_count": len(payload["reviews"]),
             "review_action": payload["review_action"],
@@ -651,6 +678,12 @@ class LabelRunReader:
                 ).fetchall()
             except sqlite3.OperationalError:
                 failures = []
+            try:
+                factor_exposures = conn.execute(
+                    "SELECT * FROM fund_factor_exposures ORDER BY fund_code, report_date, factor_code"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                factor_exposures = []
         return {
             "run_id": run_id,
             "run_at": run["run_at"],
@@ -663,6 +696,7 @@ class LabelRunReader:
             "classifications": [dict(r) for r in classifications],
             "groups": [dict(r) for r in groups],
             "coverage": [dict(r) for r in coverage],
+            "factor_exposures": [dict(r) for r in factor_exposures],
             "failures": [dict(r) for r in failures],
         }
 

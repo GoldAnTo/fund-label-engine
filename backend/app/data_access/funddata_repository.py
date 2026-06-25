@@ -215,6 +215,11 @@ class FundDataRepository:
             # 因子横截面通常比持仓报告期更新；用持仓日期会让全部因子查不到（一份基金
             # 季报通常 60~120 天前发布，因子已经更新）。
             stock_factors = load_stock_factors(conn, stock_codes, None)
+            factor_exposures = self._load_factor_exposures(
+                conn,
+                fund_code,
+                latest_holding_date,
+            )
 
         return FundInput(
             fund_code=profile["fund_code"],
@@ -224,6 +229,7 @@ class FundDataRepository:
             stock_holdings=stock_holdings,
             industry_allocations=industry_allocations,
             stock_factors=stock_factors,
+            factor_exposures=factor_exposures,
             benchmark_returns=benchmark_returns,
             manager_tenure_years=manager_tenure,
             management_fee=management_fee,
@@ -234,6 +240,43 @@ class FundDataRepository:
             holding_report_date=latest_holding_date,
             industry_report_date=latest_industry_date,
         )
+
+    @staticmethod
+    def _load_factor_exposures(
+        conn: sqlite3.Connection,
+        fund_code: str,
+        as_of: str | None,
+    ) -> list[dict[str, Any]]:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='fund_factor_exposures'"
+        ).fetchone()
+        if table is None:
+            return []
+
+        if as_of is None:
+            report_date = conn.execute(
+                "SELECT MAX(report_date) AS d FROM fund_factor_exposures "
+                "WHERE fund_code = ?",
+                (fund_code,),
+            ).fetchone()["d"]
+        else:
+            report_date = conn.execute(
+                "SELECT MAX(report_date) AS d FROM fund_factor_exposures "
+                "WHERE fund_code = ? AND report_date <= ?",
+                (fund_code, as_of),
+            ).fetchone()["d"]
+        if report_date is None:
+            return []
+
+        rows = conn.execute(
+            "SELECT fund_code, report_date, factor_code, exposure_value, "
+            "coverage_weight, holding_total_weight, stock_count, covered_stock_count, "
+            "source, as_of_date, computed_at "
+            "FROM fund_factor_exposures WHERE fund_code = ? AND report_date = ? "
+            "ORDER BY factor_code",
+            (fund_code, report_date),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     @staticmethod
     def _load_benchmark_returns(

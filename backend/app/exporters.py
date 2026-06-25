@@ -128,6 +128,23 @@ def export_run_results(run_payload: dict[str, Any], fmt: str) -> tuple[bytes, st
             ["fund_code", "feature_code", "value", "source"],
         ),
         (
+            "factor_exposures",
+            run_payload.get("factor_exposures", []),
+            [
+                "fund_code",
+                "report_date",
+                "factor_code",
+                "exposure_value",
+                "coverage_weight",
+                "holding_total_weight",
+                "stock_count",
+                "covered_stock_count",
+                "source",
+                "as_of_date",
+                "computed_at",
+            ],
+        ),
+        (
             "calculations",
             run_payload["calculations"],
             [
@@ -203,6 +220,7 @@ def export_fund_report(report: dict[str, Any], fmt: str) -> tuple[bytes, str, st
         ("labels", report.get("labels", []), None),
         ("evidence", report.get("evidence", []), None),
         ("features", report.get("features", []), None),
+        ("factor_exposures", report.get("factor_exposures", []), None),
         ("calculations", report.get("calculations", []), None),
         ("classifications", report.get("classifications", []), None),
         ("groups", report.get("groups", []), None),

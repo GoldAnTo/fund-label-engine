@@ -78,6 +78,20 @@ export interface FeatureValue {
   source: string;
 }
 
+export interface FactorExposure {
+  fund_code: string;
+  report_date: string;
+  factor_code: string;
+  exposure_value: number;
+  coverage_weight: number;
+  holding_total_weight: number;
+  stock_count: number;
+  covered_stock_count: number;
+  source: string;
+  as_of_date: string;
+  computed_at: string;
+}
+
 export interface Review {
   review_id: string;
   run_id: string;
@@ -97,10 +111,12 @@ export interface FundReport {
   labels: FundLabel[];
   evidence: Evidence[];
   features: FeatureValue[];
+  factor_exposures: FactorExposure[];
   reviews: Review[];
   summary: {
     label_count: number;
     feature_count: number;
+    factor_exposure_count: number;
     evidence_count: number;
     missing_field_count: number;
     review_count: number;

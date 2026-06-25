@@ -468,6 +468,7 @@ class FundInput:
     stock_holdings: list[dict[str, Any]] = field(default_factory=list)
     industry_allocations: list[dict[str, Any]] = field(default_factory=list)
     stock_factors: list[dict[str, Any]] = field(default_factory=list)
+    factor_exposures: list[dict[str, Any]] = field(default_factory=list)
     benchmark_returns: list[float] = field(default_factory=list)
     benchmark_name: str | None = None
     manager_tenure_years: float | None = None
@@ -1176,7 +1177,7 @@ class LabelEngine:
             if stock_detail and not stock_detail["ok"]:
                 return self._not_computed_from_gate("stock_holdings", stock_detail)
             if label_code in _STYLE_LABELS:
-                if not fund.stock_factors:
+                if not fund.factor_exposures and not fund.stock_factors:
                     return (
                         "not_computed",
                         "stock_factors_missing",
@@ -1185,22 +1186,25 @@ class LabelEngine:
                         "stock_factors",
                         "缺少股票因子，不能计算正式风格标签。",
                     )
+                source = "fund_factor_exposures" if fund.factor_exposures else "stock_factors"
                 return (
                     "not_triggered",
                     "threshold_not_met",
                     self._style_observed(label_code, feature_map),
                     threshold,
-                    "stock_factors",
-                    "股票因子存在，但风格暴露未达到标签阈值。",
+                    source,
+                    "风格暴露未达到标签阈值。",
                 )
             if label_code == "style_unlabeled_stock_factors_missing":
+                source = "fund_factor_exposures" if fund.factor_exposures else "stock_factors"
+                observed = len(fund.factor_exposures) if fund.factor_exposures else len(fund.stock_factors)
                 return (
                     "not_triggered",
                     "stock_factors_available",
-                    len(fund.stock_factors),
+                    observed,
                     "stock_factors_missing",
-                    "stock_factors",
-                    "股票因子已经存在，未触发缺少股票因子边界标签。",
+                    source,
+                    "股票因子或基金级因子暴露已经存在，未触发缺少股票因子边界标签。",
                 )
             if label_code == "style_pending_rule_definition":
                 return (
@@ -1418,6 +1422,17 @@ class LabelEngine:
         if fund.fund_size is not None:
             features.append(
                 FeatureValue("fund_size", round(float(fund.fund_size), 6), "fund_profiles")
+            )
+        for exposure in fund.factor_exposures:
+            factor_code = exposure.get("factor_code")
+            if not factor_code:
+                continue
+            features.append(
+                FeatureValue(
+                    str(factor_code),
+                    round(float(exposure.get("exposure_value") or 0.0), 6),
+                    "fund_factor_exposures",
+                )
             )
 
         return features
@@ -2346,7 +2361,7 @@ class LabelEngine:
     ) -> None:
         if not fund.stock_holdings:
             return
-        if not fund.stock_factors:
+        if not fund.factor_exposures and not fund.stock_factors:
             labels.append(
                 LabelResult(
                     label_code="style_unlabeled_stock_factors_missing",
@@ -2377,6 +2392,128 @@ class LabelEngine:
     ) -> dict[str, dict[str, Any]]:
         return {row["stock_code"]: row for row in stock_factors if row.get("stock_code")}
 
+    @staticmethod
+    def _factor_exposure_lookup(
+        factor_exposures: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        latest_by_code: dict[str, dict[str, Any]] = {}
+        for row in factor_exposures:
+            factor_code = row.get("factor_code")
+            if not factor_code:
+                continue
+            current = latest_by_code.get(str(factor_code))
+            if current is None or str(row.get("as_of_date") or "") >= str(
+                current.get("as_of_date") or ""
+            ):
+                latest_by_code[str(factor_code)] = row
+        return latest_by_code
+
+    def _add_style_labels_from_exposures(
+        self,
+        exposure_by_code: dict[str, dict[str, Any]],
+        labels: list[LabelResult],
+        evidence: list[EvidenceItem],
+    ) -> None:
+        cfg = self._rule_config
+        triggered: list[str] = []
+
+        def _value(code: str) -> float:
+            row = exposure_by_code.get(code) or {}
+            return float(row.get("exposure_value") or 0.0)
+
+        def _coverage(code: str) -> float:
+            row = exposure_by_code.get(code) or {}
+            return float(row.get("coverage_weight") or 0.0)
+
+        def _emit(
+            label_code: str,
+            label_name: str,
+            metric: str,
+            threshold: float,
+            message: str,
+        ) -> None:
+            value = _value(metric)
+            coverage = _coverage(metric)
+            labels.append(
+                LabelResult(
+                    label_code=label_code,
+                    label_name=label_name,
+                    category="holding_style",
+                    confidence=0.75,
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code=label_code,
+                    metric=metric,
+                    value=round(value, 4),
+                    threshold=threshold,
+                    source="fund_factor_exposures",
+                    message=f"{message} 因子覆盖权重 {coverage:.0%}。",
+                )
+            )
+            triggered.append(label_code)
+
+        deep_value_weight = _value("deep_value_weight")
+        quality_weight = _value("quality_growth_weight")
+        dividend_weight = _value("dividend_steady_weight")
+        coverage_weight = _value("factor_coverage_weight")
+
+        if deep_value_weight >= cfg.deep_value_weight_min:
+            _emit(
+                "deep_value",
+                "深度价值",
+                "deep_value_weight",
+                cfg.deep_value_weight_min,
+                (
+                    f"预聚合深度价值持仓权重 {deep_value_weight:.0%}，"
+                    f"达到 {cfg.deep_value_weight_min:.0%} 阈值。"
+                ),
+            )
+        if quality_weight >= cfg.quality_growth_weight_min:
+            _emit(
+                "quality_growth",
+                "质量成长",
+                "quality_growth_weight",
+                cfg.quality_growth_weight_min,
+                (
+                    f"预聚合质量成长持仓权重 {quality_weight:.0%}，"
+                    f"达到 {cfg.quality_growth_weight_min:.0%} 阈值。"
+                ),
+            )
+        if dividend_weight >= cfg.dividend_steady_weight_min:
+            _emit(
+                "dividend_steady",
+                "红利稳健",
+                "dividend_steady_weight",
+                cfg.dividend_steady_weight_min,
+                (
+                    f"预聚合红利稳健持仓权重 {dividend_weight:.0%}，"
+                    f"达到 {cfg.dividend_steady_weight_min:.0%} 阈值。"
+                ),
+            )
+
+        if not triggered:
+            labels.append(
+                LabelResult(
+                    label_code="style_pending_rule_definition",
+                    label_name="风格未达阈值",
+                    category="style_boundary",
+                    confidence=1.0,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="style_pending_rule_definition",
+                    metric="style_factor_coverage_weight",
+                    value=round(coverage_weight, 4),
+                    threshold="style_weights_below_threshold",
+                    source="fund_factor_exposures",
+                    message="已有基金级因子暴露，但深度价值、质量成长、红利稳健权重均未达阈值。",
+                )
+            )
+
     def _add_style_labels(
         self,
         fund: FundInput,
@@ -2384,6 +2521,15 @@ class LabelEngine:
         evidence: list[EvidenceItem],
     ) -> None:
         cfg = self._rule_config
+        exposure_by_code = self._factor_exposure_lookup(fund.factor_exposures)
+        if exposure_by_code:
+            self._add_style_labels_from_exposures(
+                exposure_by_code,
+                labels,
+                evidence,
+            )
+            return
+
         factor_by_stock = self._factor_lookup(fund.stock_factors)
 
         # 计算「满足条件持仓占比」：以基金持仓为分母，仅统计存在因子且字段非空的股票。
