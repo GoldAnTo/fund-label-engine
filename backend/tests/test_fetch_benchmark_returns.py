@@ -1,4 +1,4 @@
-from scripts.fetch_benchmark_returns import resolve_benchmark
+from scripts.fetch_benchmark_returns import parse_benchmark_components, resolve_benchmark
 
 
 def test_resolve_single_index_tracking_target():
@@ -64,4 +64,26 @@ def test_resolve_fixed_deposit_rate_plus_spread():
 
     assert mapping is not None
     assert mapping.mapping_reason == "composite_benchmark_supported_components"
-    assert mapping.components[0].benchmark_code == "BANK_1Y_PLUS"
+    assert mapping.components[0].benchmark_code == "BANK_FIXED_PLUS"
+
+
+def test_parse_components_records_unresolved_bond_component():
+    components, audits = parse_benchmark_components(
+        "沪深300指数收益率*80%+中债综合指数收益率*20%"
+    )
+
+    assert components is None
+    assert any(audit.component_name == "中债综合指数" for audit in audits)
+    assert any(audit.reason == "unsupported_component_or_missing_source" for audit in audits)
+
+
+def test_resolve_thematic_index_with_deposit_component():
+    mapping = resolve_benchmark(
+        "000005",
+        "指数型-股票",
+        "该基金无跟踪标的",
+        "95%×中证医药100指数收益率+5%×活期存款利率(税后)",
+    )
+
+    assert mapping is not None
+    assert mapping.benchmark_code == "000978:0.95+BANK_CURRENT:0.05"

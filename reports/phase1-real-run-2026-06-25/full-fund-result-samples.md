@@ -10,7 +10,7 @@
 | `000017` | 财通可持续混合 | 质量成长/行业集中/高收益池 | official | v1正式权益样本池；主动权益候选池；风格标签触发池；质量成长风格池；高收益高风险观察池；行业集中观察池 | 14 | 18 | 0 |
 | `000251` | 工银金融地产混合A | 深度价值/红利稳健风格池 | official | v1正式权益样本池；主动权益候选池；风格标签触发池；深度价值风格池；红利稳健风格池；行业集中观察池 | 10 | 22 | 0 |
 | `000273` | 华润元大安鑫灵活配置混合A | 高收益高回撤观察池 | official | 数据缺口/人工复核池；主动权益候选池；高收益高风险观察池；行业集中观察池；小规模观察池 | 11 | 15 | 6 |
-| `000373` | 华安中证细分医药ETF联接A | 被动指数工具池 | official | 数据缺口/人工复核池；被动指数工具池；行业集中观察池；小规模观察池 | 9 | 17 | 6 |
+| `000373` | 华安中证细分医药ETF联接A | 被动指数工具池 | official | v1正式权益样本池；被动指数工具池；行业集中观察池；小规模观察池 | 10 | 22 | 0 |
 | `000411` | 景顺长城优质成长股票A | 主动股票型/质量成长池 | official | 数据缺口/人工复核池；主动权益候选池；风格标签触发池；质量成长风格池；高收益高风险观察池；行业集中观察池 | 10 | 16 | 6 |
 | `000628` | 大成高鑫股票A | 主动股票型/低波动池 | official | 数据缺口/人工复核池；主动权益候选池 | 8 | 18 | 6 |
 | `100038` | 富国沪深300指数增强A | 被动指数增强/深度价值池 | official | v1正式权益样本池；被动指数工具池；风格标签触发池；深度价值风格池 | 11 | 21 | 0 |
@@ -39,8 +39,8 @@
 - `style_pending_rule_definition`（style_boundary，observe，confidence=1.0）
 
 **为什么打出来（证据摘要）**
-- `alpha_positive` / `alpha_1y`：value=0.477818，threshold=0.03；1Y Alpha 47.78%，达到相对基准阈值 3.00%。
-- `beta_low` / `beta_1y`：value=-0.023179，threshold=0.8；1Y Beta -2.32%，达到相对基准阈值 80.00%。
+- `alpha_positive` / `alpha_1y`：value=0.483003，threshold=0.03；1Y Alpha 48.30%，达到相对基准阈值 3.00%。
+- `beta_low` / `beta_1y`：value=-0.021693，threshold=0.8；1Y Beta -2.17%，达到相对基准阈值 80.00%。
 - `data_sufficient` / `required_fields_present`：value=yes，threshold=all_required_fields_present；基础净值、持仓、行业、经理、费率和规模数据均已提供。
 - `equity_position_high` / `equity_position`：value=0.8352，threshold=0.8；权益仓位 83.52%，达到 80.00% 权益仓位阈值。
 - `fund_size_moderate` / `fund_size`：value=13.37，threshold=5.00~100.00 亿元；基金规模 13.37 亿元，处于 5.00~100.00 亿元合理区间。
@@ -48,7 +48,7 @@
 - `manager_tenure_long` / `manager_tenure_years`：value=9.52，threshold=5.0；当前基金经理任期 9.5 年，达到 5.0 年稳定性阈值。
 - `sharpe_high` / `sharpe_ratio_1y`：value=2.991613，threshold=1.0；1Y 夏普 2.99，达到 1.00。
 - `style_pending_rule_definition` / `style_factor_coverage_weight`：value=0.8352，threshold=style_weights_below_threshold；已有基金级因子暴露，但深度价值、质量成长、红利稳健权重均未达阈值。
-- `tracking_error_high` / `tracking_error_1y`：value=0.227556，threshold=0.08；1Y 年化跟踪误差 22.76%，达到相对基准阈值 8.00%。
+- `tracking_error_high` / `tracking_error_1y`：value=0.227532，threshold=0.08；1Y 年化跟踪误差 22.75%，达到相对基准阈值 8.00%。
 
 **没打出来的标签（前 8 项）**
 - `data_insufficient`：coverage_passed，observed=all_required_fields_present，threshold=any_required_field_missing
@@ -91,14 +91,14 @@
 - `volatility_high`（return_risk，active，confidence=0.75）
 
 **为什么打出来（证据摘要）**
-- `alpha_positive` / `alpha_1y`：value=2.805527，threshold=0.03；1Y Alpha 280.55%，达到相对基准阈值 3.00%。
-- `beta_low` / `beta_1y`：value=-0.210248，threshold=0.8；1Y Beta -21.02%，达到相对基准阈值 80.00%。
+- `alpha_positive` / `alpha_1y`：value=2.888226，threshold=0.03；1Y Alpha 288.82%，达到相对基准阈值 3.00%。
+- `beta_low` / `beta_1y`：value=-0.199942，threshold=0.8；1Y Beta -19.99%，达到相对基准阈值 80.00%。
 - `data_sufficient` / `required_fields_present`：value=yes，threshold=all_required_fields_present；基础净值、持仓、行业、经理、费率和规模数据均已提供。
 - `equity_position_high` / `equity_position`：value=0.9465，threshold=0.8；权益仓位 94.65%，达到 80.00% 权益仓位阈值。
-- `excess_return_strong` / `annualized_excess_return_1y`：value=1.988427，threshold=0.05；1Y 年化超额收益 198.84%，达到相对基准阈值 5.00%。
+- `excess_return_strong` / `annualized_excess_return_1y`：value=2.087308，threshold=0.05；1Y 年化超额收益 208.73%，达到相对基准阈值 5.00%。
 - `holding_concentration_high` / `top_10_holding_weight`：value=0.6788，threshold=0.55；前十大持仓合计 67.88%，达到持仓集中度高阈值 55.00%。
 - `industry_concentration_high` / `industry_top1_weight`：value=0.7931，threshold=0.6；第一大行业占比 79.31%，达到 60.00% 行业高度集中阈值。
-- `information_ratio_high` / `information_ratio_1y`：value=4.580931，threshold=0.5；1Y 信息比率 458.09%，达到相对基准阈值 50.00%。
+- `information_ratio_high` / `information_ratio_1y`：value=4.810973，threshold=0.5；1Y 信息比率 481.10%，达到相对基准阈值 50.00%。
 - `long_term_return_strong` / `annualized_return_1y`：value=2.694468，threshold=0.15；1Y 年化收益率 269.45%，达到 15.00% 阈值。
 - `manager_tenure_long` / `manager_tenure_years`：value=10.06，threshold=5.0；当前基金经理任期 10.1 年，达到 5.0 年稳定性阈值。
 - `quality_growth` / `quality_growth_weight`：value=0.5542，threshold=0.4；预聚合质量成长持仓权重 55%，达到 40% 阈值。 因子覆盖权重 95%。
@@ -141,7 +141,7 @@
 - `tracking_error_high`（relative_benchmark，active，confidence=0.75）
 
 **为什么打出来（证据摘要）**
-- `beta_low` / `beta_1y`：value=0.027991，threshold=0.8；1Y Beta 2.80%，达到相对基准阈值 80.00%。
+- `beta_low` / `beta_1y`：value=0.022405，threshold=0.8；1Y Beta 2.24%，达到相对基准阈值 80.00%。
 - `data_sufficient` / `required_fields_present`：value=yes，threshold=all_required_fields_present；基础净值、持仓、行业、经理、费率和规模数据均已提供。
 - `deep_value` / `deep_value_weight`：value=0.8067，threshold=0.4；预聚合深度价值持仓权重 81%，达到 40% 阈值。 因子覆盖权重 88%。
 - `dividend_steady` / `dividend_steady_weight`：value=0.7401，threshold=0.5；预聚合红利稳健持仓权重 74%，达到 50% 阈值。 因子覆盖权重 88%。
@@ -150,7 +150,7 @@
 - `holding_concentration_high` / `top_10_holding_weight`：value=0.677，threshold=0.55；前十大持仓合计 67.70%，达到持仓集中度高阈值 55.00%。
 - `industry_concentration_high` / `industry_top1_weight`：value=0.8498，threshold=0.6；第一大行业占比 84.98%，达到 60.00% 行业高度集中阈值。
 - `manager_tenure_long` / `manager_tenure_years`：value=12.76，threshold=5.0；当前基金经理任期 12.8 年，达到 5.0 年稳定性阈值。
-- `tracking_error_high` / `tracking_error_1y`：value=0.188889，threshold=0.08；1Y 年化跟踪误差 18.89%，达到相对基准阈值 8.00%。
+- `tracking_error_high` / `tracking_error_1y`：value=0.189295，threshold=0.08；1Y 年化跟踪误差 18.93%，达到相对基准阈值 8.00%。
 
 **没打出来的标签（前 8 项）**
 - `data_insufficient`：coverage_passed，observed=all_required_fields_present，threshold=any_required_field_missing
@@ -160,7 +160,7 @@
 - `industry_concentration_observe`：threshold_not_met，observed=0.8498，threshold={'industry_top1_weight_min': 0.45, 'industry_top1_weight_max_exclusive': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.8498，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
 - `quality_growth`：threshold_not_met，observed=0.0485，threshold={'roe_weighted_min': 0.15, 'revenue_growth_weighted_min': 0.15, 'quality_growth_weight_min': 0.4, 'style_exposure_formal_coverage_min': 0.7}
-- `alpha_positive`：threshold_not_met，observed=-0.047398，threshold={'alpha_min': 0.03, 'window': '3y|1y'}
+- `alpha_positive`：threshold_not_met，observed=-0.055589，threshold={'alpha_min': 0.03, 'window': '3y|1y'}
 
 **因为数据不足/范围边界不能算**
 - 无
@@ -228,7 +228,7 @@
 
 - 分类：指数型-股票
 - 样本池：被动指数工具池
-- 进入分组：数据缺口/人工复核池；被动指数工具池；行业集中观察池；小规模观察池
+- 进入分组：v1正式权益样本池；被动指数工具池；行业集中观察池；小规模观察池
 - 最新持仓权重：93.79%（50 条，2024-12-31）
 
 **打出的标签**
@@ -238,12 +238,13 @@
 - `equity_position_high`（holding_structure，active，confidence=0.85）
 - `industry_concentration_high`（holding_structure，active，confidence=0.85）
 - `manager_tenure_long`（manager，active，confidence=0.9）
-- `benchmark_data_missing`（relative_benchmark，observe，confidence=1.0）
+- `beta_low`（relative_benchmark，active，confidence=0.75）
+- `tracking_error_high`（relative_benchmark，active，confidence=0.75）
 - `drawdown_high`（return_risk，active，confidence=0.75）
 - `style_pending_rule_definition`（style_boundary，observe，confidence=1.0）
 
 **为什么打出来（证据摘要）**
-- `benchmark_data_missing` / `benchmark_sample_count`：value=0，threshold=min(1y=180, 3y=500)；缺少可对齐的 1Y/3Y 基准收益序列，暂不输出正式相对基准标签。
+- `beta_low` / `beta_1y`：value=-0.081356，threshold=0.8；1Y Beta -8.14%，达到相对基准阈值 80.00%。
 - `data_sufficient` / `required_fields_present`：value=yes，threshold=all_required_fields_present；基础净值、持仓、行业、经理、费率和规模数据均已提供。
 - `drawdown_high` / `max_drawdown_3y`：value=-0.301225，threshold=-0.2；3Y 最大回撤 -30.12%，低于 -20.00%。
 - `equity_position_high` / `equity_position`：value=0.9379，threshold=0.8；权益仓位 93.79%，达到 80.00% 权益仓位阈值。
@@ -252,6 +253,7 @@
 - `industry_concentration_high` / `industry_top1_weight`：value=0.7253，threshold=0.6；第一大行业占比 72.53%，达到 60.00% 行业高度集中阈值。
 - `manager_tenure_long` / `manager_tenure_years`：value=9.45，threshold=5.0；当前基金经理任期 9.4 年，达到 5.0 年稳定性阈值。
 - `style_pending_rule_definition` / `style_factor_coverage_weight`：value=0.9379，threshold=style_weights_below_threshold；已有基金级因子暴露，但深度价值、质量成长、红利稳健权重均未达阈值。
+- `tracking_error_high` / `tracking_error_1y`：value=0.300477，threshold=0.08；1Y 年化跟踪误差 30.05%，达到相对基准阈值 8.00%。
 
 **没打出来的标签（前 8 项）**
 - `data_insufficient`：coverage_passed，observed=all_required_fields_present，threshold=any_required_field_missing
@@ -264,16 +266,11 @@
 - `dividend_steady`：threshold_not_met，observed=0.21698，threshold={'dividend_yield_min': 0.03, 'dividend_steady_weight_min': 0.5, 'style_exposure_formal_coverage_min': 0.7}
 
 **因为数据不足/范围边界不能算**
-- `alpha_positive`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
-- `beta_high`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
-- `beta_low`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
-- `excess_return_strong`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
-- `information_ratio_high`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
-- `tracking_error_high`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
+- 无
 
 **白话解释**
 
-华安中证细分医药ETF联接A 当前不适合直接下正式权益标签结论：基础类型是 指数型-股票，但持仓穿透或股票仓位不足，系统将它放入人工复核/范围边界池，避免把数据缺口误解释成基金特征。
+华安中证细分医药ETF联接A 更像指数/指数增强工具，重点应看跟踪标的、穿透持仓、费率和相对基准，而不是只按主动权益基金解释。行业暴露较集中，收益弹性和行业风险都更高。历史风险指标偏高，适合放在观察池而不是只看收益。费率不高，但 fee_low 标签本身仍需进一步校准。
 
 ### 000411 景顺长城优质成长股票A
 
@@ -398,14 +395,14 @@
 - `sharpe_high`（return_risk，active，confidence=0.75）
 
 **为什么打出来（证据摘要）**
-- `alpha_positive` / `alpha_1y`：value=0.051816，threshold=0.03；1Y Alpha 5.18%，达到相对基准阈值 3.00%。
+- `alpha_positive` / `alpha_1y`：value=0.052443，threshold=0.03；1Y Alpha 5.24%，达到相对基准阈值 3.00%。
 - `data_sufficient` / `required_fields_present`：value=yes，threshold=all_required_fields_present；基础净值、持仓、行业、经理、费率和规模数据均已提供。
 - `deep_value` / `deep_value_weight`：value=0.4106，threshold=0.4；预聚合深度价值持仓权重 41%，达到 40% 阈值。 因子覆盖权重 93%。
 - `equity_position_high` / `equity_position`：value=0.9371，threshold=0.8；权益仓位 93.71%，达到 80.00% 权益仓位阈值。
 - `fee_low` / `total_annual_fee`：value=0.0118，threshold=0.012；管理费、托管费和销售服务费合计 1.18%，不高于 1.20%。
 - `fund_size_moderate` / `fund_size`：value=46.17，threshold=5.00~100.00 亿元；基金规模 46.17 亿元，处于 5.00~100.00 亿元合理区间。
 - `industry_concentration_observe` / `industry_top1_weight`：value=0.4721，threshold=45.00%~60.00%；第一大行业占比 47.21%，进入 45.00%~60.00% 行业集中观察区间。
-- `information_ratio_high` / `information_ratio_1y`：value=0.959558，threshold=0.5；1Y 信息比率 95.96%，达到相对基准阈值 50.00%。
+- `information_ratio_high` / `information_ratio_1y`：value=1.004656，threshold=0.5；1Y 信息比率 100.47%，达到相对基准阈值 50.00%。
 - `long_term_return_strong` / `annualized_return_1y`：value=0.33274，threshold=0.15；1Y 年化收益率 33.27%，达到 15.00% 阈值。
 - `manager_tenure_long` / `manager_tenure_years`：value=16.44，threshold=5.0；当前基金经理任期 16.4 年，达到 5.0 年稳定性阈值。
 - `sharpe_high` / `sharpe_ratio_1y`：value=2.163291，threshold=1.0；1Y 夏普 2.16，达到 1.00。
