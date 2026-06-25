@@ -37,8 +37,21 @@ INDEX_MAP = {
     "细分医药": ("000814", "1.000814", "细分医药"),
     "中证内地消费主题指数": ("000942", "1.000942", "内地消费"),
     "中证内地消费": ("000942", "1.000942", "内地消费"),
-    "恒生指数": ("HSI", "100.HSI", "恒生指数"),
-    "恒生": ("HSI", "100.HSI", "恒生指数"),
+    "上证50指数": ("000016", "1.000016", "上证50"),
+    "上证50": ("000016", "1.000016", "上证50"),
+    "中证1000指数": ("000852", "1.000852", "中证1000"),
+    "中证1000": ("000852", "1.000852", "中证1000"),
+    "中证A100指数": ("000903", "1.000903", "中证A100"),
+    "中证A100": ("000903", "1.000903", "中证A100"),
+    "中证100指数": ("000903", "1.000903", "中证A100"),
+    "科创50指数": ("000688", "1.000688", "科创50"),
+    "科创50": ("000688", "1.000688", "科创50"),
+    "上证科创板50成份指数": ("000688", "1.000688", "科创50"),
+    "上证科创板50指数": ("000688", "1.000688", "科创50"),
+    "创业板指数": ("399006", "sina:sz399006", "创业板指"),
+    "创业板指": ("399006", "sina:sz399006", "创业板指"),
+    "北证50成份指数": ("899050", "1.899050", "北证50"),
+    "北证50": ("899050", "1.899050", "北证50"),
     "中证港股通大消费主题指数": ("931027", "2.931027", "港股通大消费"),
     "港股通大消费": ("931027", "2.931027", "港股通大消费"),
     "中证主要消费行业指数": ("000932", "sina:sh000932", "中证主要消费"),
@@ -91,19 +104,30 @@ _DEPOSIT_CURRENT_ANNUAL_RETURN = 0.0035
 _ONE_YEAR_DEPOSIT_ANNUAL_RETURN = 0.015
 _THREE_YEAR_DEPOSIT_ANNUAL_RETURN = 0.02
 
+_FETCH_RETRY_ATTEMPTS = 4
+_FETCH_RETRY_BACKOFF_SECONDS = 1.5
+
 _EAST_TO_SINA: dict[str, str] = {
     "1.000300": "sh000300",
+    "1.000016": "sh000016",
     "1.000905": "sh000905",
     "1.000906": "sh000906",
     "1.000907": "sh000907",
+    "1.000852": "sh000852",
+    "1.000903": "sh000903",
     "1.000998": "sh000998",
     "1.000922": "sh000922",
     "1.000827": "sh000827",
     "1.000814": "sh000814",
     "1.000942": "sh000942",
     "1.000978": "sh000978",
-    "1.000012": "sh000012",
+    "1.000933": "sh000933",
+    "1.000964": "sh000964",
+    "1.000931": "sh000931",
+    "1.000932": "sh000932",
+    "1.000688": "sh000688",
     "2.932000": "sh932000",
+    "1.000012": "sh000012",
 }
 
 
@@ -396,6 +420,21 @@ def resolve_benchmark(
     return None
 
 
+def _retrying_request(url: str, referer: str, timeout: int = 20) -> str:
+    last_error: Exception | None = None
+    for attempt in range(_FETCH_RETRY_ATTEMPTS):
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0", "Referer": referer},
+            )
+            return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8")
+        except Exception as exc:  # noqa: BLE001 - 指数源偶发断连，按指数维度重试
+            last_error = exc
+            time.sleep(_FETCH_RETRY_BACKOFF_SECONDS * (attempt + 1))
+    raise RuntimeError(f"failed to fetch {url}: {last_error}")
+
+
 def fetch_index_returns(secid: str, start_date: str, end_date: str) -> list[dict[str, str | float]]:
     params = urllib.parse.urlencode(
         {
@@ -408,20 +447,10 @@ def fetch_index_returns(secid: str, start_date: str, end_date: str) -> list[dict
             "end": end_date.replace("-", ""),
         }
     )
-    req = urllib.request.Request(
+    text = _retrying_request(
         f"{_KLINE_URL}?{params}",
-        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"},
+        "https://quote.eastmoney.com/",
     )
-    last_error: Exception | None = None
-    for attempt in range(6):
-        try:
-            text = urllib.request.urlopen(req, timeout=20).read().decode("utf-8")
-            break
-        except Exception as exc:  # noqa: BLE001 - 指数接口偶发断连，有限重试
-            last_error = exc
-            time.sleep(1.0 * (attempt + 1))
-    else:
-        raise RuntimeError(f"failed to fetch index returns for {secid}: {last_error}")
     payload = json.loads(text)
     data = payload.get("data")
     if not data or not data.get("klines"):
