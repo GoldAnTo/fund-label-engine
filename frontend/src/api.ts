@@ -133,8 +133,18 @@ export interface SearchResult {
 
 export interface SearchResponse {
   run_id: string;
-  filters: { fund_code: string | null; label_code: string | null; review_action: string | null };
+  filters: {
+    fund_code: string | null;
+    label_code: string | null;
+    review_action: string | null;
+    group_code: string | null;
+    group_type: string | null;
+    classification_code: string | null;
+  };
   available_labels: string[];
+  available_groups: string[];
+  available_group_types: string[];
+  available_classifications: string[];
   results: SearchResult[];
 }
 
@@ -153,12 +163,22 @@ export async function fetchFundReport(runId: string, fundCode: string): Promise<
 
 export async function searchFunds(
   runId: string,
-  params: { fund_code?: string; label_code?: string; review_action?: string }
+  params: {
+    fund_code?: string;
+    label_code?: string;
+    review_action?: string;
+    group_code?: string;
+    group_type?: string;
+    classification_code?: string;
+  }
 ): Promise<SearchResponse> {
   const qs = new URLSearchParams();
   if (params.fund_code) qs.set("fund_code", params.fund_code);
   if (params.label_code) qs.set("label_code", params.label_code);
   if (params.review_action) qs.set("review_action", params.review_action);
+  if (params.group_code) qs.set("group_code", params.group_code);
+  if (params.group_type) qs.set("group_type", params.group_type);
+  if (params.classification_code) qs.set("classification_code", params.classification_code);
   const q = qs.toString();
   return json(`/v1/runs/${runId}/search${q ? "?" + q : ""}`);
 }

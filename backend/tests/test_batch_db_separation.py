@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -125,3 +126,20 @@ def test_cli_requires_output_when_source_is_given(
 
     with pytest.raises(SystemExit):
         main(["--source-db", str(source_db)])
+
+
+def test_cli_accepts_rule_config_file(source_db: Path, tmp_path: Path) -> None:
+    from app.batch import main
+
+    config = tmp_path / "rules.json"
+    config.write_text('{"fee_low_threshold": 0.01}', encoding="utf-8")
+
+    exit_code = main(["--db", str(source_db), "--rule-config", str(config)])
+
+    assert exit_code == 0
+    with sqlite3.connect(source_db) as conn:
+        snapshot_raw = conn.execute(
+            "SELECT rule_snapshot_json FROM label_runs ORDER BY run_at DESC LIMIT 1"
+        ).fetchone()[0]
+    snapshot = json.loads(snapshot_raw)
+    assert snapshot["fee_low_threshold"] == 0.01

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, field, fields
 from math import sqrt
+from pathlib import Path
 from typing import Any
 
 
@@ -63,6 +65,9 @@ class RuleConfig:
     dividend_steady_weight_min: float = 0.5
     style_exposure_low_coverage_threshold: float = 0.5
     style_exposure_formal_coverage_threshold: float = 0.7
+    style_stability_min_periods: int = 2
+    style_drift_delta_threshold: float = 0.25
+    style_recent_shift_threshold: float = 0.20
     # ---- P0: 数据充足性 gate（独立可配，便于生产逐步收紧；
     #          默认保持「只校验是否存在」的旧行为，避免破坏已有用例） ----
     gate_min_nav_samples: int = 1
@@ -88,6 +93,17 @@ class RuleConfig:
     # 配置后，若 nav 样本不足以支撑该窗口，则 gate 失败，
     # 子原因码 return_window_insufficient。
     gate_min_return_window: str | None = None
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> "RuleConfig":
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("Rule config file must contain a JSON object.")
+        allowed = {item.name for item in fields(cls)}
+        unknown = sorted(set(payload) - allowed)
+        if unknown:
+            raise ValueError(f"Unknown rule config field(s): {', '.join(unknown)}")
+        return cls(**payload)
 
     def thresholds_for(self, label_code: str) -> dict[str, Any]:
         """返回某个标签的阈值集合（label_code -> {指标: 阈值}）。
@@ -215,6 +231,17 @@ class RuleConfig:
                 "coverage_weight_min": self.style_exposure_low_coverage_threshold,
                 "coverage_weight_max_exclusive": self.style_exposure_formal_coverage_threshold,
             },
+            "style_stable": {
+                "min_periods": self.style_stability_min_periods,
+                "dominant_style_delta_max": self.style_drift_delta_threshold,
+            },
+            "style_drift": {
+                "min_periods": self.style_stability_min_periods,
+                "dominant_style_delta_min": self.style_drift_delta_threshold,
+            },
+            "style_recent_shift": {
+                "latest_period_delta_min": self.style_recent_shift_threshold,
+            },
         }
         return mapping.get(label_code, {})
 
@@ -331,6 +358,27 @@ DEFAULT_LABEL_DEFINITIONS = (
         "category": "style_boundary",
         "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
         "description": "基金级因子覆盖权重一般，只输出观察结论，不触发正式风格标签。",
+    },
+    {
+        "label_code": "style_stable",
+        "label_name": "风格稳定",
+        "category": "style_stability",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "多期基金级风格暴露的主导风格保持一致，仅作为观察结论。",
+    },
+    {
+        "label_code": "style_drift",
+        "label_name": "风格漂移",
+        "category": "style_stability",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "多期基金级风格暴露的主导风格发生变化，仅作为观察结论。",
+    },
+    {
+        "label_code": "style_recent_shift",
+        "label_name": "近期风格切换",
+        "category": "style_stability",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "最近一期基金级风格暴露相对上一期变化较大，仅作为观察结论。",
     },
     {
         "label_code": "deep_value",
@@ -2425,6 +2473,7 @@ class LabelEngine:
 
         # 数据完整：把股票因子按持仓权重聚合并尝试触发深度价值/质量成长/红利稳健
         self._add_style_labels(fund, labels, evidence)
+        self._add_style_stability_labels(fund, labels, evidence)
 
     @staticmethod
     def _factor_lookup(
@@ -2628,11 +2677,10 @@ class LabelEngine:
 
         factor_by_stock = self._factor_lookup(fund.stock_factors)
 
-        # 计算「满足条件持仓占比」：以基金持仓为分母，仅统计存在因子且字段非空的股票。
         deep_value_weight = 0.0
         quality_weight = 0.0
         dividend_weight = 0.0
-        coverage_weight = 0.0  # 至少有一项因子的股票总权重，用作 evidence
+        coverage_weight = 0.0
         for holding in fund.stock_holdings:
             stock_code = holding.get("stock_code")
             weight = float(holding.get("weight") or 0.0)
@@ -2782,7 +2830,6 @@ class LabelEngine:
                 cfg.dividend_steady_weight_min,
             )
 
-        # 一个风格也没出 → 给观察标签解释为什么；否则三标签自身已说明
         if not triggered:
             labels.append(
                 LabelResult(
@@ -2809,6 +2856,166 @@ class LabelEngine:
                         f"deep_value={deep_value_weight:.0%}, "
                         f"quality_growth={quality_weight:.0%}, "
                         f"dividend_steady={dividend_weight:.0%}."
+                    ),
+                )
+            )
+
+    def _style_history_periods(self, fund: FundInput) -> list[dict[str, Any]]:
+        by_period: dict[str, dict[str, float]] = {}
+        for row in fund.factor_exposures:
+            period = str(row.get("report_date") or row.get("as_of_date") or "")
+            factor_code = str(row.get("factor_code") or "")
+            if not period or factor_code not in {
+                "deep_value_weight",
+                "quality_growth_weight",
+                "dividend_steady_weight",
+                "factor_coverage_weight",
+            }:
+                continue
+            by_period.setdefault(period, {})[factor_code] = float(
+                row.get("exposure_value") or 0.0
+            )
+
+        periods: list[dict[str, Any]] = []
+        for period, values in by_period.items():
+            coverage = values.get("factor_coverage_weight", 0.0)
+            if coverage < self._rule_config.style_exposure_formal_coverage_threshold:
+                continue
+            style_values = {
+                "deep_value": values.get("deep_value_weight", 0.0),
+                "quality_growth": values.get("quality_growth_weight", 0.0),
+                "dividend_steady": values.get("dividend_steady_weight", 0.0),
+            }
+            dominant_style, dominant_value = max(
+                style_values.items(),
+                key=lambda item: item[1],
+            )
+            periods.append(
+                {
+                    "period": period,
+                    "coverage": coverage,
+                    "dominant_style": dominant_style,
+                    "dominant_value": dominant_value,
+                    "style_values": style_values,
+                }
+            )
+        return sorted(periods, key=lambda item: item["period"])
+
+    def _add_style_stability_labels(
+        self,
+        fund: FundInput,
+        labels: list[LabelResult],
+        evidence: list[EvidenceItem],
+    ) -> None:
+        cfg = self._rule_config
+        periods = self._style_history_periods(fund)
+        if len(periods) < cfg.style_stability_min_periods:
+            return
+
+        latest = periods[-1]
+        previous = periods[-2]
+        latest_style = str(latest["dominant_style"])
+        previous_style = str(previous["dominant_style"])
+        latest_value = float(latest["dominant_value"])
+        previous_latest_style_value = float(previous["style_values"].get(latest_style, 0.0))
+        latest_delta = latest_value - previous_latest_style_value
+
+        if latest_style != previous_style:
+            labels.append(
+                LabelResult(
+                    label_code="style_drift",
+                    label_name="风格漂移",
+                    category="style_stability",
+                    confidence=0.7,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="style_drift",
+                    metric="dominant_style_change",
+                    value=f"{previous_style}->{latest_style}",
+                    threshold=cfg.style_drift_delta_threshold,
+                    source="fund_factor_exposures",
+                    message=(
+                        f"主导风格从 {previous_style} 切换为 {latest_style}；"
+                        f"最新权重 {latest_value:.0%}，上一期同风格权重 "
+                        f"{previous_latest_style_value:.0%}。"
+                    ),
+                )
+            )
+            labels.append(
+                LabelResult(
+                    label_code="style_recent_shift",
+                    label_name="近期风格切换",
+                    category="style_stability",
+                    confidence=0.7,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="style_recent_shift",
+                    metric="latest_dominant_style_delta",
+                    value=round(latest_delta, 4),
+                    threshold=cfg.style_recent_shift_threshold,
+                    source="fund_factor_exposures",
+                    message=(
+                        f"最新一期 {latest_style} 暴露较上一期增加 "
+                        f"{latest_delta:.0%}，达到近期切换观察阈值。"
+                    ),
+                )
+            )
+            return
+
+        dominant_values = [
+            float(period["style_values"].get(latest_style, 0.0))
+            for period in periods
+        ]
+        value_range = max(dominant_values) - min(dominant_values)
+        if value_range <= cfg.style_drift_delta_threshold:
+            labels.append(
+                LabelResult(
+                    label_code="style_stable",
+                    label_name="风格稳定",
+                    category="style_stability",
+                    confidence=0.7,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="style_stable",
+                    metric="dominant_style",
+                    value=latest_style,
+                    threshold=cfg.style_drift_delta_threshold,
+                    source="fund_factor_exposures",
+                    message=(
+                        f"近 {len(periods)} 期主导风格均为 {latest_style}，"
+                        f"主导风格权重波动 {value_range:.0%}，未超过漂移阈值。"
+                    ),
+                )
+            )
+        elif abs(latest_delta) >= cfg.style_recent_shift_threshold:
+            labels.append(
+                LabelResult(
+                    label_code="style_recent_shift",
+                    label_name="近期风格切换",
+                    category="style_stability",
+                    confidence=0.7,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="style_recent_shift",
+                    metric="latest_dominant_style_delta",
+                    value=round(latest_delta, 4),
+                    threshold=cfg.style_recent_shift_threshold,
+                    source="fund_factor_exposures",
+                    message=(
+                        f"主导风格仍为 {latest_style}，但最新一期暴露变化 "
+                        f"{latest_delta:.0%}，进入近期变化观察。"
                     ),
                 )
             )

@@ -1,4 +1,10 @@
-from scripts.fetch_benchmark_returns import parse_benchmark_components, resolve_benchmark
+import sqlite3
+
+from scripts.fetch_benchmark_returns import (
+    load_local_component_returns,
+    parse_benchmark_components,
+    resolve_benchmark,
+)
 
 
 def test_resolve_single_index_tracking_target():
@@ -39,7 +45,9 @@ def test_unresolved_when_composite_contains_unsupported_bond_index():
         "沪深300指数收益率*80%+中债综合指数收益率*20%",
     )
 
-    assert mapping is None
+    assert mapping is not None
+    assert mapping.mapping_reason == "composite_benchmark_supported_components"
+    assert mapping.benchmark_code == "000300:0.80+LOCAL_CBOND_COMPOSITE:0.20"
 
 
 def test_resolve_current_deposit_component():
@@ -72,9 +80,10 @@ def test_parse_components_records_unresolved_bond_component():
         "沪深300指数收益率*80%+中债综合指数收益率*20%"
     )
 
-    assert components is None
-    assert any(audit.component_name == "中债综合指数" for audit in audits)
-    assert any(audit.reason == "unsupported_component_or_missing_source" for audit in audits)
+    assert components is not None
+    assert any(component.benchmark_code == "LOCAL_CBOND_COMPOSITE" for component in components)
+    assert any(audit.component_name == "中债综合" for audit in audits)
+    assert all(audit.status == "resolved" for audit in audits)
 
 
 def test_resolve_thematic_index_with_deposit_component():
@@ -87,3 +96,44 @@ def test_resolve_thematic_index_with_deposit_component():
 
     assert mapping is not None
     assert mapping.benchmark_code == "000978:0.95+BANK_CURRENT:0.05"
+
+
+def test_load_local_component_returns_from_benchmark_component_returns_table(tmp_path):
+    db = tmp_path / "source.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE benchmark_component_returns ("
+            "component_code TEXT, trade_date TEXT, daily_return REAL, source TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO benchmark_component_returns VALUES "
+            "('LOCAL_CBOND_COMPOSITE', '2026-01-02', 0.0003, 'local_csi_bond')"
+        )
+        conn.execute(
+            "INSERT INTO benchmark_component_returns VALUES "
+            "('LOCAL_CBOND_COMPOSITE', '2026-01-03', 0.0004, 'local_csi_bond')"
+        )
+
+    rows = load_local_component_returns(db, "LOCAL_CBOND_COMPOSITE")
+
+    assert rows == [
+        {"trade_date": "2026-01-02", "daily_return": 0.0003},
+        {"trade_date": "2026-01-03", "daily_return": 0.0004},
+    ]
+
+
+def test_load_local_component_returns_accepts_plain_sqlite_connection(tmp_path):
+    db = tmp_path / "source.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE benchmark_component_returns ("
+            "component_code TEXT, trade_date TEXT, daily_return REAL, source TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO benchmark_component_returns VALUES "
+            "('LOCAL_CBOND_TOTAL', '2026-01-02', 0.0002, 'local_bond')"
+        )
+
+        rows = load_local_component_returns(conn, "LOCAL_CBOND_TOTAL")
+
+    assert rows == [{"trade_date": "2026-01-02", "daily_return": 0.0002}]

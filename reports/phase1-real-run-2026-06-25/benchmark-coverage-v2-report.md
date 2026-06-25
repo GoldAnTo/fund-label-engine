@@ -70,3 +70,10 @@
 - 实际 `benchmark_returns` 覆盖为 36 只，主要受上证国债、行业/主题指数、港股指数行情源断连或缺失影响。
 - 中债综合、中证全债、中国债券总指数、中证综合债等仍没有可靠日收益源，继续保留缺口，不做上证国债替代。
 - 下一步若要冲到 80-100 只，关键不是继续写解析规则，而是接入稳定债券指数和行业/主题指数日收益源。
+
+## 6. v3 实施入口
+
+- 已新增本地稳定组件收益源入口：`benchmark_component_returns(component_code, trade_date, daily_return, source)`。
+- `scripts/fetch_benchmark_returns.py` 会优先读取该表，再 fallback 到已有行情源或缓存。
+- 高频债券组件已映射为内部 component code，例如 `LOCAL_CBOND_COMPOSITE`、`LOCAL_CBOND_TOTAL`、`LOCAL_CHINA_BOND_TOTAL`。
+- 覆盖率提升仍依赖真实日收益源入库；没有可靠来源时继续保留 `benchmark_data_missing`，不使用不相干指数做代理。

@@ -62,6 +62,26 @@ INDEX_MAP = {
     "中证国债": ("H11006", "sina:shH11006", "中证国债"),
     "上证国债指数": ("000012", "1.000012", "上证国债"),
     "上证国债": ("000012", "1.000012", "上证国债"),
+    # v3: stable local-source placeholders. These are intentionally internal
+    # component codes rather than unverified official vendor codes.
+    "中债综合指数": ("LOCAL_CBOND_COMPOSITE", "local:LOCAL_CBOND_COMPOSITE", "中债综合"),
+    "中债-综合指数": ("LOCAL_CBOND_COMPOSITE", "local:LOCAL_CBOND_COMPOSITE", "中债综合"),
+    "中国债券综合指数": ("LOCAL_CBOND_COMPOSITE", "local:LOCAL_CBOND_COMPOSITE", "中债综合"),
+    "中债总指数": ("LOCAL_CBOND_TOTAL", "local:LOCAL_CBOND_TOTAL", "中债总"),
+    "中债-总指数": ("LOCAL_CBOND_TOTAL", "local:LOCAL_CBOND_TOTAL", "中债总"),
+    "中债国债总指数": ("LOCAL_CBOND_GOV_TOTAL", "local:LOCAL_CBOND_GOV_TOTAL", "中债国债总"),
+    "中债-国债总(1-3年)指数": (
+        "LOCAL_CBOND_GOV_1_3Y",
+        "local:LOCAL_CBOND_GOV_1_3Y",
+        "中债国债总1-3年",
+    ),
+    "中国债券总指数": ("LOCAL_CHINA_BOND_TOTAL", "local:LOCAL_CHINA_BOND_TOTAL", "中国债券总"),
+    "标普中国债券指数": ("LOCAL_SP_CHINA_BOND", "local:LOCAL_SP_CHINA_BOND", "标普中国债券"),
+    "新华富时中国国债指数": (
+        "LOCAL_XHFT_CHINA_GOV_BOND",
+        "local:LOCAL_XHFT_CHINA_GOV_BOND",
+        "新华富时中国国债",
+    ),
 }
 
 _KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
@@ -515,6 +535,63 @@ def ensure_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_benchmark_components_status ON benchmark_components(status, reason)"
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS benchmark_component_returns (
+            component_code TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            daily_return REAL NOT NULL,
+            source TEXT,
+            fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (component_code, trade_date)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_benchmark_component_returns_code "
+        "ON benchmark_component_returns(component_code, trade_date)"
+    )
+
+
+def load_local_component_returns(
+    db: sqlite3.Connection | str | Path,
+    component_code: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[dict[str, str | float]]:
+    close_after = not isinstance(db, sqlite3.Connection)
+    conn = db if isinstance(db, sqlite3.Connection) else sqlite3.connect(db)
+    if close_after:
+        conn.row_factory = sqlite3.Row
+    try:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='benchmark_component_returns'"
+        ).fetchone()
+        if table is None:
+            return []
+        clauses = ["component_code = ?"]
+        params: list[str] = [component_code]
+        if start_date:
+            clauses.append("trade_date >= ?")
+            params.append(start_date)
+        if end_date:
+            clauses.append("trade_date <= ?")
+            params.append(end_date)
+        rows = conn.execute(
+            "SELECT trade_date, daily_return FROM benchmark_component_returns "
+            f"WHERE {' AND '.join(clauses)} ORDER BY trade_date",
+            params,
+        ).fetchall()
+        result: list[dict[str, str | float]] = []
+        for row in rows:
+            trade_date = row["trade_date"] if isinstance(row, sqlite3.Row) else row[0]
+            daily_return = row["daily_return"] if isinstance(row, sqlite3.Row) else row[1]
+            result.append({"trade_date": trade_date, "daily_return": float(daily_return)})
+        return result
+    finally:
+        if close_after:
+            conn.close()
 
 
 def _load_existing_component_returns(
@@ -544,6 +621,16 @@ def _fetch_or_reuse_component_returns(
     start_date: str,
     end_date: str,
 ) -> list[dict[str, str | float]]:
+    local_rows = load_local_component_returns(
+        conn,
+        component.benchmark_code,
+        start_date,
+        end_date,
+    )
+    if local_rows:
+        return local_rows
+    if component.secid.startswith("local:"):
+        return _load_existing_component_returns(conn, component.benchmark_code)
     try:
         rows = fetch_component_returns(component.secid, start_date, end_date)
     except Exception as exc:  # noqa: BLE001 - 外部行情源失败时尝试复用本地缓存

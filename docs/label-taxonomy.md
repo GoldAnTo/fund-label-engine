@@ -63,18 +63,25 @@
 | 标签代码 | 标签名称 | 口径 |
 |---|---|---|
 | style_unlabeled_stock_factors_missing | 风格未标注：缺少股票因子 | 有持仓但缺少股票因子，不能输出正式风格标签 |
-| style_pending_rule_definition | 风格待计算：规则尚未启用 | 股票因子已经存在，但高级风格标签规则尚未启用 |
+| style_pending_rule_definition | 风格未达阈值 | 股票因子或基金级暴露存在，但三类正式风格权重未达阈值 |
+| style_exposure_low_coverage | 风格暴露覆盖不足 | 基金级因子覆盖权重低于 50%，不输出正式风格标签 |
+| style_exposure_observe | 风格暴露仅观察 | 基金级因子覆盖权重 50%~70%，只输出观察结论 |
 
-## 后续高级标签
+## 当前高级风格标签
 
-以下标签需要 `stock_factors` 或 `stock_labels`：
+以下标签需要 `stock_factors` 或 `fund_factor_exposures`：
 
 - deep_value，深度价值
 - quality_growth，质量成长
-- dividend_stable，红利稳健
+- dividend_steady，红利稳健
+- style_stable，风格稳定
+- style_drift，风格漂移
+- style_recent_shift，近期风格切换
+
+以下标签仍暂缓，需更多复核样本：
+
 - low_valuation_recovery，低估修复
 - high_valuation_high_volatility，高估高波动
-- style_drift，风格漂移
 - crowded_holding_high，抱团程度高
 
 ## 当前默认阈值
@@ -83,9 +90,10 @@
 |---|---|---|
 | holding_concentration_high | 前十大股票持仓合计 >= 55% | 后续应按基金类型和市场环境校准 |
 | manager_tenure_long | 当前经理任期 >= 5 年 | 仅使用当前经理任期，暂不处理多人经理贡献拆分 |
-| fee_low | 管理费 + 托管费 + 销售服务费 <= 1.5% | 当前按简单合计处理 |
+| fee_low | 管理费 + 托管费 + 销售服务费 <= 1.2% | 当前按简单合计处理 |
 | fee_high | 管理费 + 托管费 + 销售服务费 > 2.5% | 当前按简单合计处理 |
-| industry_concentration_high | 第一大行业占比 >= 35% | 使用最近一期行业配置 |
+| industry_concentration_high | 第一大行业占比 >= 60% | 使用最近一期行业配置 |
+| industry_concentration_observe | 第一大行业占比 45%~60% | 使用最近一期行业配置，只作观察 |
 | industry_diversified | 第一大行业 < 20% 且行业数 >= 5 | 使用最近一期行业配置 |
 | equity_position_high | 权益仓位 >= 80% | fundData 适配时暂用最近一期股票持仓合计 |
 | volatility_high | 年化波动 >= 30% | 当前按可用净值窗口计算 |
@@ -95,6 +103,8 @@
 | long_term_return_strong | 年化收益 >= 15% | 当前按可用净值窗口计算，长期校准前请视为观察 |
 | fund_size_small | 规模 < 1 亿 | 触发流动性、迷你基金风险关注 |
 | fund_size_moderate | 5 亿 <= 规模 <= 100 亿 | 合理区间，避免过小或过大 |
+| style_drift | 主导风格变化或权重变化 >= 25% | 观察标签，依赖多期基金级因子暴露 |
+| style_recent_shift | 最近一期主导风格权重变化 >= 20% | 观察标签，依赖多期基金级因子暴露 |
 
 ## 状态约定
 

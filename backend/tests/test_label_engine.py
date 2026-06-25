@@ -135,6 +135,19 @@ def test_thresholds_are_loaded_from_rule_config():
     assert evidence_for(result, "holding_concentration_high")[0].threshold == 0.45
 
 
+def test_rule_config_loads_from_json_file(tmp_path):
+    path = tmp_path / "rules.json"
+    path.write_text(
+        '{"fee_low_threshold": 0.01, "style_drift_delta_threshold": 0.3}',
+        encoding="utf-8",
+    )
+
+    cfg = RuleConfig.from_file(path)
+
+    assert cfg.fee_low_threshold == 0.01
+    assert cfg.style_drift_delta_threshold == 0.3
+
+
 def test_style_labels_are_not_emitted_without_stock_factors():
     fund = FundInput(
         fund_code="110022",
@@ -295,6 +308,61 @@ def test_deep_value_label_emits_from_precomputed_factor_exposures():
     assert "style_unlabeled_stock_factors_missing" not in codes
     ev = evidence_for(result, "deep_value")[0]
     assert ev.source == "fund_factor_exposures"
+
+
+def _style_history_fund(periods: list[tuple[str, float, float, float, float]]) -> FundInput:
+    exposures = []
+    for report_date, deep, quality, dividend, coverage in periods:
+        for factor_code, value in (
+            ("deep_value_weight", deep),
+            ("quality_growth_weight", quality),
+            ("dividend_steady_weight", dividend),
+            ("factor_coverage_weight", coverage),
+        ):
+            exposures.append(
+                {
+                    "report_date": report_date,
+                    "as_of_date": report_date,
+                    "factor_code": factor_code,
+                    "exposure_value": value,
+                    "coverage_weight": coverage,
+                }
+            )
+    fund = _style_fund(stock_factors=[])
+    return FundInput(**{**fund.__dict__, "factor_exposures": exposures})
+
+
+def test_style_drift_emits_observe_label_when_dominant_style_changes():
+    fund = _style_history_fund(
+        [
+            ("2025-03-31", 0.62, 0.10, 0.08, 0.85),
+            ("2025-06-30", 0.20, 0.58, 0.08, 0.86),
+        ]
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    by_code = {label.label_code: label for label in result.labels}
+    assert by_code["style_drift"].status == "observe"
+    assert by_code["style_recent_shift"].status == "observe"
+    assert "style_stable" not in by_code
+    assert evidence_for(result, "style_drift")[0].metric == "dominant_style_change"
+
+
+def test_style_stable_emits_observe_label_when_dominant_style_persists():
+    fund = _style_history_fund(
+        [
+            ("2025-03-31", 0.62, 0.10, 0.08, 0.85),
+            ("2025-06-30", 0.66, 0.12, 0.08, 0.86),
+        ]
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    by_code = {label.label_code: label for label in result.labels}
+    assert by_code["style_stable"].status == "observe"
+    assert "style_drift" not in by_code
+    assert evidence_for(result, "style_stable")[0].metric == "dominant_style"
 
 
 def test_deep_value_label_emits_when_pb_and_valuation_percentile_meet_threshold():

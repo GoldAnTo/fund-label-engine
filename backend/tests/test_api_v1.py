@@ -410,6 +410,40 @@ def test_search_run_funds_supports_filters(seeded_run) -> None:
     assert "holding_concentration_high" in payload["available_labels"]
 
 
+def test_search_run_funds_filters_by_group_code(seeded_run) -> None:
+    db, run_id = seeded_run
+    client = TestClient(create_app(db_path=db))
+
+    response = client.get(
+        f"/v1/runs/{run_id}/search",
+        params={"group_code": "data_gap_pool"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    fund_codes = [item["fund_code"] for item in payload["results"]]
+    assert payload["filters"]["group_code"] == "data_gap_pool"
+    assert fund_codes == ["000002"]
+    assert "data_gap_pool" in payload["available_groups"]
+
+
+def test_search_run_funds_filters_by_classification_code(seeded_run) -> None:
+    db, run_id = seeded_run
+    client = TestClient(create_app(db_path=db))
+
+    response = client.get(
+        f"/v1/runs/{run_id}/search",
+        params={"classification_code": "data_gap"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    fund_codes = [item["fund_code"] for item in payload["results"]]
+    assert payload["filters"]["classification_code"] == "data_gap"
+    assert fund_codes == ["000002"]
+    assert "data_gap" in payload["available_classifications"]
+
+
 def test_review_queue_lists_manual_review_funds(seeded_run) -> None:
     db, run_id = seeded_run
     client = TestClient(create_app(db_path=db))

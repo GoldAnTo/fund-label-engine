@@ -254,28 +254,23 @@ class FundDataRepository:
             return []
 
         if as_of is None:
-            report_date = conn.execute(
-                "SELECT MAX(report_date) AS d FROM fund_factor_exposures "
-                "WHERE fund_code = ?",
+            rows = conn.execute(
+                "SELECT fund_code, report_date, factor_code, exposure_value, "
+                "coverage_weight, holding_total_weight, stock_count, covered_stock_count, "
+                "source, as_of_date, computed_at "
+                "FROM fund_factor_exposures WHERE fund_code = ? "
+                "ORDER BY report_date, factor_code",
                 (fund_code,),
-            ).fetchone()["d"]
+            ).fetchall()
         else:
-            report_date = conn.execute(
-                "SELECT MAX(report_date) AS d FROM fund_factor_exposures "
-                "WHERE fund_code = ? AND report_date <= ?",
+            rows = conn.execute(
+                "SELECT fund_code, report_date, factor_code, exposure_value, "
+                "coverage_weight, holding_total_weight, stock_count, covered_stock_count, "
+                "source, as_of_date, computed_at "
+                "FROM fund_factor_exposures WHERE fund_code = ? AND report_date <= ? "
+                "ORDER BY report_date, factor_code",
                 (fund_code, as_of),
-            ).fetchone()["d"]
-        if report_date is None:
-            return []
-
-        rows = conn.execute(
-            "SELECT fund_code, report_date, factor_code, exposure_value, "
-            "coverage_weight, holding_total_weight, stock_count, covered_stock_count, "
-            "source, as_of_date, computed_at "
-            "FROM fund_factor_exposures WHERE fund_code = ? AND report_date = ? "
-            "ORDER BY factor_code",
-            (fund_code, report_date),
-        ).fetchall()
+            ).fetchall()
         return [dict(row) for row in rows]
 
     @staticmethod

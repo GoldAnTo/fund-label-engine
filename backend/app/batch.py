@@ -196,6 +196,11 @@ def main(argv: list[str] | None = None) -> int:
             "由 backend/scripts/fetch_stock_factors.py 生成。"
         ),
     )
+    parser.add_argument(
+        "--rule-config",
+        default=None,
+        help="可选 JSON 规则配置文件路径。命令行上的单项阈值覆盖优先级更高。",
+    )
     args = parser.parse_args(argv)
 
     if args.db and (args.source_db or args.output_db):
@@ -205,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.source_db and not args.output_db:
         parser.error("--source-db requires --output-db")
 
-    rule_config = None
+    rule_config = RuleConfig.from_file(args.rule_config) if args.rule_config else None
     rule_kwargs: dict[str, float | int] = {}
     if args.min_nav_samples is not None:
         rule_kwargs["gate_min_nav_samples"] = args.min_nav_samples
@@ -216,7 +221,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.quality_growth_weight_min is not None:
         rule_kwargs["quality_growth_weight_min"] = args.quality_growth_weight_min
     if rule_kwargs:
-        rule_config = RuleConfig(**rule_kwargs)
+        rule_config = (
+            replace(rule_config, **rule_kwargs)
+            if rule_config is not None
+            else RuleConfig(**rule_kwargs)
+        )
 
     run_id, processed = run_batch(
         db_path=args.db,

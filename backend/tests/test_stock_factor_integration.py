@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.batch import run_batch
+from app.data_access import FundRepository
 from app.data_access.stock_factors import load_stock_factors
 from app.persistence import LabelRunReader
 
@@ -144,6 +145,36 @@ def test_load_stock_factors_falls_back_to_wide_when_narrow_missing(
     by_code = {r["stock_code"]: r for r in rows}
     assert by_code["600519"]["pb"] == 1.0
     assert by_code["601398"]["pb"] == 0.8
+
+
+def test_repository_loads_multi_period_factor_exposures(tmp_path: Path) -> None:
+    db = tmp_path / "exposures.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE fund_factor_exposures (
+                fund_code TEXT,
+                report_date TEXT,
+                factor_code TEXT,
+                exposure_value REAL,
+                coverage_weight REAL,
+                holding_total_weight REAL,
+                stock_count INTEGER,
+                covered_stock_count INTEGER,
+                source TEXT,
+                as_of_date TEXT,
+                computed_at TEXT
+            );
+            INSERT INTO fund_factor_exposures VALUES
+                ('000001','2025-03-31','deep_value_weight',0.62,0.85,0.70,2,2,'test','2025-03-31','now'),
+                ('000001','2025-06-30','quality_growth_weight',0.58,0.86,0.70,2,2,'test','2025-06-30','now');
+            """
+        )
+
+        rows = FundRepository._load_factor_exposures(conn, "000001", None)
+
+    assert {row["report_date"] for row in rows} == {"2025-03-31", "2025-06-30"}
 
 
 def test_funddata_repository_emits_style_labels_when_narrow_factors_provided(

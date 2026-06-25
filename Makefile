@@ -10,6 +10,7 @@ PYTHON      ?= python3
 SOURCE_DB   ?= /tmp/fle-run/source.sqlite
 OUTPUT_DB   ?= /tmp/fle-run/output.sqlite
 FACTOR_DB   ?= data/stock_factors.sqlite
+RULE_CONFIG ?= config/rules.v1.json
 PHASE1_FILE ?= data/phase1_fund_codes_canonical.txt
 PHASE1_OFFICIAL_FILE ?= data/phase1_fund_codes_v1_official.txt
 FUND_DATA_CACHE ?= $(HOME)/.cache/fund-data/releases/2026-06-03T214600Z/fund_data_query.sqlite
@@ -32,6 +33,7 @@ help:
 	@echo "  make copy-source        把 fundData cache DB 拷贝到 $(SOURCE_DB)"
 	@echo "  make run-batch          运行 batch（依赖 copy-source；用 $(FACTOR_DB) 作为 factor cache）"
 	@echo "  make run-batch-v1       运行 v1 正式权益清单 batch（排除待复核/低权益仓位基金）"
+	@echo "  RULE_CONFIG=$(RULE_CONFIG)"
 	@echo "  make test               跑 pytest"
 
 refresh-factors:
@@ -59,6 +61,7 @@ run-batch: copy-source
 	    --source-db $(SOURCE_DB) \
 	    --output-db $(OUTPUT_DB) \
 	    --source funddata \
+	    --rule-config $(RULE_CONFIG) \
 	    --factor-db $(PWD)/$(FACTOR_DB) \
 	    --min-nav-samples 180 \
 	    --min-holding-total-weight 0.5 \
@@ -72,6 +75,7 @@ run-batch-v1: copy-source
 	    --source-db $(SOURCE_DB) \
 	    --output-db $(OUTPUT_DB) \
 	    --source funddata \
+	    --rule-config $(RULE_CONFIG) \
 	    --factor-db $(PWD)/$(FACTOR_DB) \
 	    --min-nav-samples 180 \
 	    --min-holding-total-weight 0.5 \

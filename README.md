@@ -40,9 +40,10 @@
 
 ```text
 backend/                  后端与标签引擎
+config/                   规则配置文件，例如 rules.v1.json
 docs/                     需求、边界、数据契约、标签体系
 examples/                 示例输入输出
-frontend/                 后续标签工作台
+frontend/                 标签工作台
 data/                     本地样例数据或缓存，不提交大数据文件
 ```
 
@@ -68,6 +69,10 @@ data/                     本地样例数据或缓存，不提交大数据文件
 - FastAPI 查询批次、基金标签、证据、覆盖率和人工复核记录。
 - FastAPI 查询单基金完整结果包：`/v1/runs/{run_id}/funds/{fund_code}/report`。
 - 支持通过 API 写入单个标签的人工复核结论。
+- 支持分类/分组落库，并在工作台按业务池、分组类型和分类筛选。
+- 支持基金级因子暴露聚合、风格 coverage gate、风格稳定/漂移观察标签。
+- 支持相对基准组件解析、`benchmark_components` 审计和本地稳定组件收益源。
+- 支持从 `config/rules.v1.json` 加载规则阈值，并把 rule snapshot 落库。
 
 详细目标见 [docs/project-goals.md](docs/project-goals.md)，后续待办见 [docs/todo.md](docs/todo.md)。
 真实数据接入见 [docs/funddata-integration.md](docs/funddata-integration.md)。
@@ -87,7 +92,7 @@ python -m pytest
 ```bash
 mkdir -p data
 python scripts/seed_sample_db.py data/sample_fund_data.sqlite
-python -m app.batch --db data/sample_fund_data.sqlite
+python -m app.batch --db data/sample_fund_data.sqlite --rule-config config/rules.v1.json
 FLE_DB_PATH=data/sample_fund_data.sqlite uvicorn app.main:app --reload
 ```
 
@@ -95,7 +100,7 @@ FLE_DB_PATH=data/sample_fund_data.sqlite uvicorn app.main:app --reload
 
 ```bash
 cp /Users/xiongjiali/Desktop/code/fundData/fund-data/data/fund_data.sqlite /tmp/fund_data_label.sqlite
-python -m app.batch --db /tmp/fund_data_label.sqlite --source funddata
+python -m app.batch --db /tmp/fund_data_label.sqlite --source funddata --rule-config config/rules.v1.json
 FLE_DB_PATH=/tmp/fund_data_label.sqlite uvicorn app.main:app --reload
 ```
 

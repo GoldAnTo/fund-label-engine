@@ -9,6 +9,9 @@ export default function SearchPage() {
   const [fundCode, setFundCode] = useState("");
   const [labelCode, setLabelCode] = useState("");
   const [reviewAction, setReviewAction] = useState("");
+  const [groupCode, setGroupCode] = useState("");
+  const [groupType, setGroupType] = useState("");
+  const [classificationCode, setClassificationCode] = useState("");
   const [data, setData] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,6 +32,9 @@ export default function SearchPage() {
         fund_code: fundCode || undefined,
         label_code: labelCode || undefined,
         review_action: reviewAction || undefined,
+        group_code: groupCode || undefined,
+        group_type: groupType || undefined,
+        classification_code: classificationCode || undefined,
       });
       setData(res);
     } catch (e: unknown) {
@@ -81,6 +87,36 @@ export default function SearchPage() {
             <option value="">(全部)</option>
             <option value="observe">observe</option>
             <option value="manual_review">manual_review</option>
+          </select>
+        </label>
+        <label>
+          业务池&nbsp;
+          <select value={groupCode} onChange={(e) => setGroupCode(e.target.value)}>
+            <option value="">(全部)</option>
+            {data?.available_groups.map((g) => (
+              <option key={g} value={g}>{g}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          分组类型&nbsp;
+          <select value={groupType} onChange={(e) => setGroupType(e.target.value)}>
+            <option value="">(全部)</option>
+            {data?.available_group_types.map((g) => (
+              <option key={g} value={g}>{g}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          分类&nbsp;
+          <select
+            value={classificationCode}
+            onChange={(e) => setClassificationCode(e.target.value)}
+          >
+            <option value="">(全部)</option>
+            {data?.available_classifications.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
           </select>
         </label>
         <button onClick={runSearch}>检索</button>

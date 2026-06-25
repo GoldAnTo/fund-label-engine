@@ -239,9 +239,12 @@ class LabelRunReader:
         fund_code: str | None = None,
         label_code: str | None = None,
         review_action: str | None = None,
+        group_code: str | None = None,
+        group_type: str | None = None,
+        classification_code: str | None = None,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
-        """按 fund_code/label_code/review_action 在一次 run 内做基金检索。
+        """按标签、复核动作、业务分组和分类在一次 run 内做基金检索。
 
         返回每只基金的代码、命中标签数、review_action、缺失字段数。
         """
@@ -264,6 +267,27 @@ class LabelRunReader:
                 "AND cov.review_action = ?)"
             )
             params.append(review_action)
+        if group_code:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM fund_group_results grp "
+                "WHERE grp.run_id = r.run_id AND grp.fund_code = r.fund_code "
+                "AND grp.group_code = ?)"
+            )
+            params.append(group_code)
+        if group_type:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM fund_group_results grp "
+                "WHERE grp.run_id = r.run_id AND grp.fund_code = r.fund_code "
+                "AND grp.group_type = ?)"
+            )
+            params.append(group_type)
+        if classification_code:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM fund_classification_results cls "
+                "WHERE cls.run_id = r.run_id AND cls.fund_code = r.fund_code "
+                "AND cls.classification_code = ?)"
+            )
+            params.append(classification_code)
 
         where = " AND ".join(clauses)
         sql = (
@@ -290,6 +314,33 @@ class LabelRunReader:
                 (run_id,),
             ).fetchall()
         return [row["label_code"] for row in rows]
+
+    def list_distinct_group_codes(self, run_id: str) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT group_code FROM fund_group_results "
+                "WHERE run_id = ? ORDER BY group_code",
+                (run_id,),
+            ).fetchall()
+        return [row["group_code"] for row in rows]
+
+    def list_distinct_group_types(self, run_id: str) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT group_type FROM fund_group_results "
+                "WHERE run_id = ? ORDER BY group_type",
+                (run_id,),
+            ).fetchall()
+        return [row["group_type"] for row in rows]
+
+    def list_distinct_classification_codes(self, run_id: str) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT classification_code FROM fund_classification_results "
+                "WHERE run_id = ? ORDER BY classification_code",
+                (run_id,),
+            ).fetchall()
+        return [row["classification_code"] for row in rows]
 
     def list_failures(self, run_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
