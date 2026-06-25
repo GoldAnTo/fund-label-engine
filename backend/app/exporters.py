@@ -143,6 +143,33 @@ def export_run_results(run_payload: dict[str, Any], fmt: str) -> tuple[bytes, st
                 "message",
             ],
         ),
+        (
+            "classifications",
+            run_payload["classifications"],
+            [
+                "fund_code",
+                "dimension",
+                "classification_code",
+                "classification_name",
+                "confidence",
+                "reason_code",
+                "evidence",
+                "source",
+            ],
+        ),
+        (
+            "groups",
+            run_payload["groups"],
+            [
+                "fund_code",
+                "group_code",
+                "group_name",
+                "group_type",
+                "reason_code",
+                "evidence",
+                "source",
+            ],
+        ),
     ]
     if fmt == "xlsx":
         data = sheets_to_xlsx_bytes(sheets_def)
@@ -177,6 +204,8 @@ def export_fund_report(report: dict[str, Any], fmt: str) -> tuple[bytes, str, st
         ("evidence", report.get("evidence", []), None),
         ("features", report.get("features", []), None),
         ("calculations", report.get("calculations", []), None),
+        ("classifications", report.get("classifications", []), None),
+        ("groups", report.get("groups", []), None),
         ("coverage", [report.get("coverage", {})] if report.get("coverage") else [], None),
         ("reviews", report.get("reviews", []), None),
     ]

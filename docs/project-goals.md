@@ -9,7 +9,7 @@
 第一阶段只做“规则优先”的标签闭环，不做基金推荐机器人。核心链路是：
 
 ```text
-本地基金数据 -> 数据覆盖率检查 -> 特征和标签计算 -> 证据落库 -> 人工复核 -> API 查询
+本地基金数据 -> 数据覆盖率检查 -> 特征和标签计算 -> 分类分组 -> 证据落库 -> API 查询
 ```
 
 ## 第一阶段必须做到
@@ -17,10 +17,11 @@
 - 能读取本地 SQLite 中的基金基础信息、净值、持仓、行业、经理、费率、仓位和可选股票因子。
 - 能批量处理支持范围内的基金类型。
 - 能落库保存 `label_runs`、`fund_label_results`、`fund_label_evidence`、`fund_run_coverage`、`label_definitions`。
+- 能落库保存 `label_calculation_states`、`fund_classification_results`、`fund_group_results`，说明标签为什么出/没出，以及基金进入哪个比较池。
 - 能在数据不完整时输出 `data_insufficient` 和 `manual_review_required`，但仍保留有证据支撑的可观察标签。
 - 能在缺少股票因子时明确阻断高级风格标签，只输出风格边界标签。
 - 能通过 API 查询批次、单只基金标签明细、最新成功批次标签。
-- 能通过 API 写入人工复核结论，并在标签明细中返回复核记录。
+- 能通过 API 查询单只基金的标签、证据、计算状态、分类和分组。
 
 ## 当前已经完成
 
@@ -33,7 +34,8 @@
 - 结果落库：标签、证据、特征、覆盖率、规则定义、复核记录。
 - 查询 API：`/v1/runs`、`/v1/runs/{run_id}`、`/v1/runs/{run_id}/funds/{fund_code}`、`/v1/funds/{fund_code}/labels`。
 - 完整结果 API：`/v1/runs/{run_id}/funds/{fund_code}/report`。
-- 人工复核 API：`POST /v1/runs/{run_id}/funds/{fund_code}/labels/{label_code}/reviews`。
+- 分类分组层：输出权益相关/主动或被动/标签可计算/风格清晰度等分类，并生成主动权益候选池、被动指数工具池、数据缺口池、风格因子缺失池等业务分组。
+- 结果导出：批次导出包含 labels、evidence、coverage、features、calculations、classifications、groups。
 
 ## 明确不做
 
@@ -47,8 +49,6 @@
 
 第二阶段重点不是扩很多标签，而是把真实数据接入和标签可信度打牢：
 
-- 按 1 年/3 年窗口补齐收益风险特征：年化收益、波动率、最大回撤、夏普。
-- 增加批次摘要和失败原因表。
 - 建立股票因子表的真实生产路径。
 - 给每个标签建立 rule version、启停状态、阈值说明和回测验证记录。
-- 做一个轻量标签工作台，用于查看证据和处理人工复核队列。
+- 做一个轻量标签工作台，用于查看证据、计算状态、分类分组和数据缺口。

@@ -139,6 +139,49 @@
 - `total_annual_fee`
 - `fund_size`
 
+### label_calculation_states
+
+| 字段 | 说明 |
+|---|---|
+| run_id | 计算批次 |
+| fund_code | 基金代码 |
+| label_code | 标签代码 |
+| label_name | 标签名称 |
+| category | 标签类别 |
+| state | `triggered` / `not_triggered` / `not_computed` |
+| reason_code | 机器可读原因码 |
+| observed | 实际观测值或缺失情况 |
+| threshold | 阈值或数据要求 |
+| source | 数据来源 |
+| message | 白话解释 |
+
+### fund_classification_results
+
+| 字段 | 说明 |
+|---|---|
+| run_id | 计算批次 |
+| fund_code | 基金代码 |
+| dimension | 分类维度，例如 `asset_class` |
+| classification_code | 分类代码，例如 `equity_related` |
+| classification_name | 分类名称 |
+| confidence | 置信度 |
+| reason_code | 分类原因码 |
+| evidence | 分类证据说明 |
+| source | 数据来源 |
+
+### fund_group_results
+
+| 字段 | 说明 |
+|---|---|
+| run_id | 计算批次 |
+| fund_code | 基金代码 |
+| group_code | 分组代码，例如 `active_equity_candidate_pool` |
+| group_name | 分组名称 |
+| group_type | 分组类型，例如 `business` / `style` / `risk_watch` |
+| reason_code | 分组原因码 |
+| evidence | 分组证据说明 |
+| source | 数据来源 |
+
 ### fund_label_results
 
 | 字段 | 说明 |

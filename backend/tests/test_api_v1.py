@@ -344,7 +344,7 @@ def test_label_definitions_endpoint_returns_thresholds(seeded_run) -> None:
     defs = {d["label_code"]: d for d in response.json()["definitions"]}
     fee_low = defs["fee_low"]
     assert fee_low["category"] == "fee_size"
-    assert fee_low["thresholds"]["total_annual_fee_max"] == 0.015
+    assert fee_low["thresholds"]["total_annual_fee_max"] == 0.012
     fund_size_moderate = defs["fund_size_moderate"]
     assert fund_size_moderate["thresholds"]["fund_size_min"] == 5.0
     assert fund_size_moderate["thresholds"]["fund_size_max"] == 100.0

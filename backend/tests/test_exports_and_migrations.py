@@ -49,6 +49,8 @@ def test_run_export_csv_returns_zip_with_expected_files(seeded_run) -> None:
         "failures.csv",
         "features.csv",
         "calculations.csv",
+        "classifications.csv",
+        "groups.csv",
     } <= names
     # labels.csv 应该至少有 fund_code + label_code 两列
     with zf.open("labels.csv") as f:
@@ -69,7 +71,16 @@ def test_run_export_xlsx_has_all_sheets(seeded_run) -> None:
     assert resp.status_code == 200
     assert "spreadsheetml" in resp.headers["content-type"]
     wb = load_workbook(io.BytesIO(resp.content))
-    assert {"labels", "evidence", "coverage", "failures", "features", "calculations"} <= set(wb.sheetnames)
+    assert {
+        "labels",
+        "evidence",
+        "coverage",
+        "failures",
+        "features",
+        "calculations",
+        "classifications",
+        "groups",
+    } <= set(wb.sheetnames)
     labels_sheet = wb["labels"]
     header = [c.value for c in labels_sheet[1]]
     assert "fund_code" in header and "label_code" in header
@@ -145,6 +156,8 @@ def test_migrations_create_phase5_tables(seeded_run) -> None:
     assert "stock_factor_values" in tables
     assert "stock_labels" in tables
     assert "label_calculation_states" in tables
+    assert "fund_classification_results" in tables
+    assert "fund_group_results" in tables
     assert "schema_migrations" in tables
 
 
@@ -159,6 +172,13 @@ def test_reader_fund_report_includes_label_calculation_states(seeded_run) -> Non
     assert calculations["fund_size_small"]["state"] == "not_triggered"
     assert calculations["long_term_return_strong"]["state"] == "not_computed"
     assert calculations["long_term_return_strong"]["reason_code"] == "return_window_insufficient"
+    classifications = {
+        item["dimension"]: item for item in report["classifications"]
+    }
+    assert classifications["asset_class"]["classification_code"] == "equity_related"
+    assert report["groups"]
+    assert report["summary"]["classification_count"] == len(report["classifications"])
+    assert report["summary"]["group_count"] == len(report["groups"])
 
 
 def test_reader_stock_factor_methods_return_empty_when_no_data(seeded_run) -> None:

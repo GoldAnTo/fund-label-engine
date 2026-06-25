@@ -96,6 +96,8 @@ class LabelRunReader:
             "evidence": [dict(row) for row in evidence_rows],
             "features": self.list_features(run_id, fund_code),
             "calculations": self.list_calculations(run_id, fund_code),
+            "classifications": self.list_classifications(run_id, fund_code),
+            "groups": self.list_groups(run_id, fund_code),
             "reviews": self.list_reviews(run_id, fund_code),
         }
 
@@ -137,6 +139,37 @@ class LabelRunReader:
                 return []
         return [dict(row) for row in rows]
 
+    def list_classifications(
+        self, run_id: str, fund_code: str
+    ) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT dimension, classification_code, classification_name, "
+                    "confidence, reason_code, evidence, source "
+                    "FROM fund_classification_results "
+                    "WHERE run_id = ? AND fund_code = ? "
+                    "ORDER BY dimension",
+                    (run_id, fund_code),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []
+        return [dict(row) for row in rows]
+
+    def list_groups(self, run_id: str, fund_code: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT group_code, group_name, group_type, reason_code, evidence, source "
+                    "FROM fund_group_results "
+                    "WHERE run_id = ? AND fund_code = ? "
+                    "ORDER BY group_type, group_code",
+                    (run_id, fund_code),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []
+        return [dict(row) for row in rows]
+
     def list_reviews(self, run_id: str, fund_code: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             try:
@@ -165,6 +198,8 @@ class LabelRunReader:
             "feature_count": len(payload["features"]),
             "evidence_count": len(payload["evidence"]),
             "calculation_count": len(payload["calculations"]),
+            "classification_count": len(payload["classifications"]),
+            "group_count": len(payload["groups"]),
             "missing_field_count": len(missing_fields),
             "review_count": len(payload["reviews"]),
             "review_action": payload["review_action"],
@@ -324,6 +359,26 @@ class LabelRunReader:
                 calculation_rows = []
                 not_computed_reason_rows = []
                 not_computed_count = 0
+            try:
+                classification_rows = conn.execute(
+                    "SELECT dimension, classification_code, classification_name, "
+                    "COUNT(DISTINCT fund_code) AS fund_count "
+                    "FROM fund_classification_results WHERE run_id = ? "
+                    "GROUP BY dimension, classification_code, classification_name "
+                    "ORDER BY dimension, fund_count DESC, classification_code",
+                    (run_id,),
+                ).fetchall()
+                group_rows = conn.execute(
+                    "SELECT group_type, group_code, group_name, "
+                    "COUNT(DISTINCT fund_code) AS fund_count "
+                    "FROM fund_group_results WHERE run_id = ? "
+                    "GROUP BY group_type, group_code, group_name "
+                    "ORDER BY group_type, fund_count DESC, group_code",
+                    (run_id,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                classification_rows = []
+                group_rows = []
 
         return {
             "run_id": run_id,
@@ -347,6 +402,10 @@ class LabelRunReader:
             "not_computed_reason_distribution": [
                 dict(row) for row in not_computed_reason_rows
             ],
+            "classification_distribution": [
+                dict(row) for row in classification_rows
+            ],
+            "group_distribution": [dict(row) for row in group_rows],
         }
 
     def get_coverage_report(self, run_id: str) -> dict[str, Any]:
@@ -553,6 +612,26 @@ class LabelRunReader:
             except sqlite3.OperationalError:
                 calculations = []
             try:
+                classifications = conn.execute(
+                    "SELECT fund_code, dimension, classification_code, "
+                    "classification_name, confidence, reason_code, evidence, source "
+                    "FROM fund_classification_results WHERE run_id = ? "
+                    "ORDER BY fund_code, dimension",
+                    (run_id,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                classifications = []
+            try:
+                groups = conn.execute(
+                    "SELECT fund_code, group_code, group_name, group_type, "
+                    "reason_code, evidence, source "
+                    "FROM fund_group_results WHERE run_id = ? "
+                    "ORDER BY fund_code, group_type, group_code",
+                    (run_id,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                groups = []
+            try:
                 coverage = conn.execute(
                     "SELECT fund_code, "
                     "GROUP_CONCAT(CASE WHEN present = 0 THEN field END) AS missing_fields, "
@@ -581,6 +660,8 @@ class LabelRunReader:
             "evidence": [dict(r) for r in evidence],
             "features": [dict(r) for r in features],
             "calculations": [dict(r) for r in calculations],
+            "classifications": [dict(r) for r in classifications],
+            "groups": [dict(r) for r in groups],
             "coverage": [dict(r) for r in coverage],
             "failures": [dict(r) for r in failures],
         }

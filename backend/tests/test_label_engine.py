@@ -13,6 +13,14 @@ def calculations_by_code(result):
     return {item.label_code: item for item in result.calculations}
 
 
+def classifications_by_dimension(result):
+    return {item.dimension: item for item in result.classifications}
+
+
+def group_codes(result):
+    return {item.group_code for item in result.groups}
+
+
 def test_missing_required_data_emits_insufficient_and_manual_review_labels():
     fund = FundInput(
         fund_code="000001",
@@ -36,7 +44,7 @@ def test_incomplete_data_still_emits_observable_labels_when_evidence_exists():
         fund_type="混合型-偏股",
         nav_returns=[0.01, -0.01],
         manager_tenure_years=6.2,
-        management_fee=0.012,
+        management_fee=0.010,
         custody_fee=0.002,
         fund_size=12.0,
     )
@@ -76,7 +84,7 @@ def test_concentrated_fund_emits_explainable_holding_manager_and_fee_labels():
             {"industry": "银行", "weight": 0.08},
         ],
         manager_tenure_years=6.2,
-        management_fee=0.012,
+        management_fee=0.010,
         custody_fee=0.002,
         fund_size=180.0,
         equity_position=0.89,
@@ -136,7 +144,7 @@ def test_style_labels_are_not_emitted_without_stock_factors():
         stock_holdings=[{"stock_code": "600519", "weight": 0.10}],
         industry_allocations=[{"industry": "食品饮料", "weight": 0.20}],
         manager_tenure_years=6.2,
-        management_fee=0.012,
+        management_fee=0.010,
         custody_fee=0.002,
         fund_size=180.0,
         equity_position=0.89,
@@ -161,7 +169,7 @@ def test_stock_factor_boundary_is_explained_when_factors_exist_but_style_rules_a
         industry_allocations=[{"industry": "食品饮料", "weight": 0.20}],
         stock_factors=[{"stock_code": "600519", "pb": 8.1, "roe": 0.24}],
         manager_tenure_years=6.2,
-        management_fee=0.012,
+        management_fee=0.010,
         custody_fee=0.002,
         fund_size=180.0,
         equity_position=0.89,
@@ -189,7 +197,7 @@ def _style_fund(stock_factors: list[dict]) -> FundInput:
         industry_allocations=[{"industry": "食品饮料", "weight": 0.20}],
         stock_factors=stock_factors,
         manager_tenure_years=6.2,
-        management_fee=0.012,
+        management_fee=0.010,
         custody_fee=0.002,
         fund_size=180.0,
         equity_position=0.89,
@@ -270,7 +278,7 @@ def _base_fund(**overrides) -> FundInput:
             {"industry": "汽车", "weight": 0.07},
         ],
         manager_tenure_years=2.0,
-        management_fee=0.012,
+        management_fee=0.010,
         custody_fee=0.002,
         sales_service_fee=0.0,
         fund_size=20.0,
@@ -307,6 +315,38 @@ def test_return_window_insufficient_for_short_nav_history():
     assert ev.source == "nav_history"
 
 
+def test_benchmark_data_missing_when_no_benchmark_returns():
+    fund = _base_fund(nav_returns=[0.001] * 252)
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "benchmark_data_missing" in codes
+    assert "excess_return_strong" not in codes
+    calculations = calculations_by_code(result)
+    assert calculations["excess_return_strong"].state == "not_computed"
+    assert calculations["excess_return_strong"].reason_code == "benchmark_data_missing"
+
+
+def test_relative_benchmark_labels_emit_when_metrics_meet_thresholds():
+    fund = _base_fund(
+        nav_returns=[0.0020, -0.0005, 0.0015, 0.0001] * 63,
+        benchmark_returns=[0.0005, -0.0015, 0.0008, -0.0012] * 63,
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "benchmark_data_missing" not in codes
+    assert "excess_return_strong" in codes
+    assert "information_ratio_high" in codes
+    assert "alpha_positive" in codes
+    feature_codes = {item.feature_code for item in result.features}
+    assert "annualized_excess_return_1y" in feature_codes
+    assert "tracking_error_1y" in feature_codes
+    assert "beta_1y" in feature_codes
+
+
 def test_industry_diversified_emitted_when_top1_low_and_count_enough():
     fund = _base_fund()
 
@@ -315,6 +355,51 @@ def test_industry_diversified_emitted_when_top1_low_and_count_enough():
     codes = label_codes(result)
     assert "industry_diversified" in codes
     assert "industry_concentration_high" not in codes
+    assert "industry_concentration_observe" not in codes
+
+
+def test_industry_concentration_observe_for_mid_top1_weight():
+    fund = _base_fund(
+        industry_allocations=[
+            {"industry": "电子", "weight": 0.50},
+            {"industry": "医药", "weight": 0.20},
+            {"industry": "银行", "weight": 0.10},
+        ]
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    by_code = {label.label_code: label for label in result.labels}
+    assert "industry_concentration_observe" in by_code
+    assert by_code["industry_concentration_observe"].status == "observe"
+    assert "industry_concentration_high" not in by_code
+
+
+def test_industry_concentration_high_requires_high_top1_weight():
+    fund = _base_fund(
+        industry_allocations=[
+            {"industry": "电子", "weight": 0.65},
+            {"industry": "医药", "weight": 0.20},
+            {"industry": "银行", "weight": 0.10},
+        ]
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "industry_concentration_high" in codes
+    assert "industry_concentration_observe" not in codes
+
+
+def test_default_fee_low_threshold_is_tighter_after_calibration():
+    borderline = _base_fund(management_fee=0.012, custody_fee=0.002)
+    low_fee = _base_fund(management_fee=0.010, custody_fee=0.002)
+
+    borderline_result = LabelEngine().evaluate(borderline)
+    low_fee_result = LabelEngine().evaluate(low_fee)
+
+    assert "fee_low" not in label_codes(borderline_result)
+    assert "fee_low" in label_codes(low_fee_result)
 
 
 def test_fund_size_small_label_for_tiny_fund():
@@ -487,3 +572,81 @@ def test_label_calculations_mark_not_computed_when_prerequisite_data_is_missing(
     assert calculations["manager_tenure_long"].reason_code == "manager_missing"
     assert calculations["fee_low"].state == "not_computed"
     assert calculations["fee_low"].reason_code == "fee_structure_missing"
+
+
+# ---------- 基金分类/分组 ----------
+
+
+def test_classifies_active_equity_fund_into_candidate_pool():
+    fund = _base_fund(
+        nav_returns=[0.0007] * 252,
+        manager_tenure_years=6.0,
+        fund_size=20.0,
+        stock_factors=[
+            {"stock_code": "600000", "pb": 4.0, "roe": 0.05, "dividend_yield": 0.01},
+        ],
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    classifications = classifications_by_dimension(result)
+    assert classifications["asset_class"].classification_code == "equity_related"
+    assert classifications["management_style"].classification_code == "active"
+    assert classifications["calculation_eligibility"].classification_code == "label_ready"
+    assert classifications["style_clarity"].classification_code == "style_pending"
+
+    groups = group_codes(result)
+    assert "phase1_active_equity_scope" in groups
+    assert "label_ready_pool" in groups
+    assert "active_equity_candidate_pool" in groups
+
+
+def test_classifies_index_fund_as_passive_tool_pool():
+    fund = _base_fund(
+        fund_name="沪深300ETF联接",
+        fund_type="指数型-股票",
+        manager_tenure_years=1.0,
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    classifications = classifications_by_dimension(result)
+    assert classifications["asset_class"].classification_code == "equity_related"
+    assert classifications["management_style"].classification_code == "passive_index"
+    groups = group_codes(result)
+    assert "passive_tool_pool" in groups
+    assert "active_equity_candidate_pool" not in groups
+
+
+def test_groups_data_gap_and_style_factor_missing():
+    fund = _base_fund(
+        stock_holdings=[],
+        stock_factors=[],
+        equity_position=None,
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    classifications = classifications_by_dimension(result)
+    assert classifications["calculation_eligibility"].classification_code == "data_gap"
+    assert classifications["style_clarity"].classification_code == "style_factor_missing"
+    groups = group_codes(result)
+    assert "data_gap_pool" in groups
+    assert "style_factor_missing_pool" in groups
+
+
+def test_style_labels_emit_style_groups():
+    fund = _style_fund(
+        stock_factors=[
+            {"stock_code": "600519", "pb": 1.0, "valuation_percentile": 0.10},
+            {"stock_code": "601398", "pb": 0.8, "valuation_percentile": 0.20},
+        ]
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    classifications = classifications_by_dimension(result)
+    assert classifications["style_clarity"].classification_code == "style_clear"
+    groups = group_codes(result)
+    assert "style_factor_ready_pool" in groups
+    assert "deep_value_group" in groups

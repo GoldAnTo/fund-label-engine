@@ -172,7 +172,7 @@ def seed(db_path: str | Path) -> None:
         conn.executemany(
             "INSERT INTO fee_structures VALUES (?, ?, ?, ?)",
             [
-                ("000001", 0.012, 0.002, None),
+                ("000001", 0.010, 0.002, None),
                 ("000002", 0.015, 0.0025, None),
             ],
         )

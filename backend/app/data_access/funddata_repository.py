@@ -121,6 +121,7 @@ class FundDataRepository:
                     (fund_code,),
                 ).fetchall()
             ]
+            benchmark_returns = self._load_benchmark_returns(conn, fund_code)
 
             latest_holding_date = conn.execute(
                 "SELECT MAX(report_period) AS d FROM stock_holdings "
@@ -223,6 +224,7 @@ class FundDataRepository:
             stock_holdings=stock_holdings,
             industry_allocations=industry_allocations,
             stock_factors=stock_factors,
+            benchmark_returns=benchmark_returns,
             manager_tenure_years=manager_tenure,
             management_fee=management_fee,
             custody_fee=custody_fee,
@@ -232,6 +234,23 @@ class FundDataRepository:
             holding_report_date=latest_holding_date,
             industry_report_date=latest_industry_date,
         )
+
+    @staticmethod
+    def _load_benchmark_returns(
+        conn: sqlite3.Connection,
+        fund_code: str,
+    ) -> list[float]:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='benchmark_returns'"
+        ).fetchone()
+        if table is None:
+            return []
+        rows = conn.execute(
+            "SELECT daily_return FROM benchmark_returns "
+            "WHERE fund_code = ? AND daily_return IS NOT NULL ORDER BY trade_date",
+            (fund_code,),
+        ).fetchall()
+        return [row["daily_return"] for row in rows]
 
     @staticmethod
     def _rows_to_dicts(

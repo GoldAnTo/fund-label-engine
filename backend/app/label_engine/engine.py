@@ -31,9 +31,10 @@ LABEL_RETURN_WINDOWS: tuple[str, ...] = ("1y", "3y")
 class RuleConfig:
     holding_concentration_threshold: float = 0.55
     manager_tenure_long_years: float = 5.0
-    fee_low_threshold: float = 0.015
+    fee_low_threshold: float = 0.012
     fee_high_threshold: float = 0.025
-    industry_concentration_threshold: float = 0.35
+    industry_concentration_threshold: float = 0.60
+    industry_concentration_observe_threshold: float = 0.45
     industry_diversified_top1_max: float = 0.20
     industry_diversified_min_count: int = 5
     equity_position_high_threshold: float = 0.8
@@ -42,6 +43,12 @@ class RuleConfig:
     drawdown_high_threshold: float = -0.2
     sharpe_high_threshold: float = 1.0
     long_term_return_threshold: float = 0.15
+    excess_return_strong_threshold: float = 0.05
+    information_ratio_high_threshold: float = 0.5
+    tracking_error_high_threshold: float = 0.08
+    alpha_positive_threshold: float = 0.03
+    beta_high_threshold: float = 1.2
+    beta_low_threshold: float = 0.8
     fund_size_small_threshold: float = 1.0
     fund_size_moderate_min: float = 5.0
     fund_size_moderate_max: float = 100.0
@@ -98,6 +105,10 @@ class RuleConfig:
             "industry_concentration_high": {
                 "industry_top1_weight_min": self.industry_concentration_threshold,
             },
+            "industry_concentration_observe": {
+                "industry_top1_weight_min": self.industry_concentration_observe_threshold,
+                "industry_top1_weight_max_exclusive": self.industry_concentration_threshold,
+            },
             "industry_diversified": {
                 "industry_top1_weight_max": self.industry_diversified_top1_max,
                 "industry_count_min": self.industry_diversified_min_count,
@@ -124,6 +135,28 @@ class RuleConfig:
             "long_term_return_strong": {
                 "annualized_return_min": self.long_term_return_threshold,
                 "window": "3y|1y",
+            },
+            "excess_return_strong": {
+                "annualized_excess_return_min": self.excess_return_strong_threshold,
+                "window": "3y|1y",
+            },
+            "information_ratio_high": {
+                "information_ratio_min": self.information_ratio_high_threshold,
+                "window": "3y|1y",
+            },
+            "tracking_error_high": {
+                "tracking_error_min": self.tracking_error_high_threshold,
+                "window": "3y|1y",
+            },
+            "alpha_positive": {
+                "alpha_min": self.alpha_positive_threshold,
+                "window": "3y|1y",
+            },
+            "beta_high": {"beta_min": self.beta_high_threshold, "window": "3y|1y"},
+            "beta_low": {"beta_max": self.beta_low_threshold, "window": "3y|1y"},
+            "benchmark_data_missing": {
+                "min_samples_1y": RETURN_WINDOWS[2][2],
+                "min_samples_3y": RETURN_WINDOWS[3][2],
             },
             "fund_size_small": {"fund_size_max": self.fund_size_small_threshold},
             "fund_size_moderate": {
@@ -219,10 +252,17 @@ DEFAULT_LABEL_DEFINITIONS = (
     },
     {
         "label_code": "industry_concentration_high",
-        "label_name": "行业集中度高",
+        "label_name": "行业高度集中",
         "category": "holding_structure",
         "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
-        "description": "最近一期第一大行业配置比例超过规则阈值。",
+        "description": "最近一期第一大行业配置比例达到正式高集中阈值。",
+    },
+    {
+        "label_code": "industry_concentration_observe",
+        "label_name": "行业集中观察",
+        "category": "holding_structure",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "最近一期第一大行业配置比例进入观察区间，但未达到正式高集中阈值。",
     },
     {
         "label_code": "equity_position_high",
@@ -295,6 +335,55 @@ DEFAULT_LABEL_DEFINITIONS = (
         "description": "区间年化收益达到规则阈值。",
     },
     {
+        "label_code": "excess_return_strong",
+        "label_name": "超额收益较强",
+        "category": "relative_benchmark",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "相对基准的区间年化超额收益达到规则阈值。",
+    },
+    {
+        "label_code": "information_ratio_high",
+        "label_name": "信息比率较高",
+        "category": "relative_benchmark",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "相对基准的信息比率达到规则阈值。",
+    },
+    {
+        "label_code": "tracking_error_high",
+        "label_name": "跟踪误差较高",
+        "category": "relative_benchmark",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "相对基准的年化跟踪误差超过规则阈值。",
+    },
+    {
+        "label_code": "alpha_positive",
+        "label_name": "Alpha 为正",
+        "category": "relative_benchmark",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "按零无风险利率近似计算的 Alpha 达到规则阈值。",
+    },
+    {
+        "label_code": "beta_high",
+        "label_name": "Beta 较高",
+        "category": "relative_benchmark",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "相对基准 Beta 高于规则阈值。",
+    },
+    {
+        "label_code": "beta_low",
+        "label_name": "Beta 较低",
+        "category": "relative_benchmark",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "相对基准 Beta 低于规则阈值。",
+    },
+    {
+        "label_code": "benchmark_data_missing",
+        "label_name": "基准数据缺失",
+        "category": "relative_benchmark",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "缺少可对齐的基准收益序列，不能输出正式相对基准标签。",
+    },
+    {
         "label_code": "return_window_insufficient",
         "label_name": "收益风险样本不足",
         "category": "return_risk",
@@ -354,7 +443,20 @@ _RISK_LABEL_FEATURES = {
     "sharpe_high": "sharpe_ratio",
     "long_term_return_strong": "annualized_return",
 }
+_RELATIVE_LABEL_FEATURES = {
+    "excess_return_strong": "annualized_excess_return",
+    "information_ratio_high": "information_ratio",
+    "tracking_error_high": "tracking_error",
+    "alpha_positive": "alpha",
+    "beta_high": "beta",
+    "beta_low": "beta",
+}
 _STYLE_LABELS = {"deep_value", "quality_growth", "dividend_steady"}
+_STYLE_GROUP_BY_LABEL = {
+    "deep_value": ("deep_value_group", "深度价值组"),
+    "quality_growth": ("quality_growth_group", "质量成长组"),
+    "dividend_steady": ("dividend_steady_group", "红利稳健组"),
+}
 
 
 @dataclass(frozen=True)
@@ -366,6 +468,8 @@ class FundInput:
     stock_holdings: list[dict[str, Any]] = field(default_factory=list)
     industry_allocations: list[dict[str, Any]] = field(default_factory=list)
     stock_factors: list[dict[str, Any]] = field(default_factory=list)
+    benchmark_returns: list[float] = field(default_factory=list)
+    benchmark_name: str | None = None
     manager_tenure_years: float | None = None
     management_fee: float | None = None
     custody_fee: float | None = None
@@ -416,6 +520,27 @@ class LabelCalculation:
 
 
 @dataclass(frozen=True)
+class FundClassification:
+    dimension: str
+    classification_code: str
+    classification_name: str
+    confidence: float
+    reason_code: str
+    evidence: str
+    source: str
+
+
+@dataclass(frozen=True)
+class FundGroup:
+    group_code: str
+    group_name: str
+    group_type: str
+    reason_code: str
+    evidence: str
+    source: str
+
+
+@dataclass(frozen=True)
 class EngineResult:
     fund_code: str
     labels: list[LabelResult]
@@ -424,6 +549,8 @@ class EngineResult:
     coverage: dict[str, bool]
     features: list[FeatureValue]
     calculations: list[LabelCalculation]
+    classifications: list[FundClassification]
+    groups: list[FundGroup]
     fund_type: str = ""
 
 
@@ -511,6 +638,7 @@ class LabelEngine:
         self._add_industry_labels(fund, labels, evidence)
         self._add_equity_position_labels(fund, labels, evidence)
         self._add_risk_labels(features, labels, evidence)
+        self._add_relative_benchmark_labels(features, labels, evidence)
         self._add_manager_labels(fund, labels, evidence)
         self._add_fee_labels(fund, labels, evidence)
         self._add_fund_size_labels(fund, labels, evidence)
@@ -533,6 +661,25 @@ class LabelEngine:
                 for label in labels
             ]
 
+        calculations = self._calculate_label_states(
+            fund=fund,
+            labels=labels,
+            evidence=evidence,
+            features=features,
+            coverage_details=coverage_details,
+        )
+        classifications = self._classify_fund(
+            fund=fund,
+            labels=labels,
+            calculations=calculations,
+            coverage_ok=coverage_ok,
+        )
+        groups = self._group_fund(
+            labels=labels,
+            classifications=classifications,
+            coverage_ok=coverage_ok,
+        )
+
         return EngineResult(
             fund_code=fund.fund_code,
             labels=labels,
@@ -540,15 +687,314 @@ class LabelEngine:
             review_action="observe" if coverage_ok else "manual_review",
             coverage=coverage,
             features=features,
-            calculations=self._calculate_label_states(
-                fund=fund,
-                labels=labels,
-                evidence=evidence,
-                features=features,
-                coverage_details=coverage_details,
-            ),
+            calculations=calculations,
+            classifications=classifications,
+            groups=groups,
             fund_type=fund.fund_type,
         )
+
+    def _classify_fund(
+        self,
+        *,
+        fund: FundInput,
+        labels: list[LabelResult],
+        calculations: list[LabelCalculation],
+        coverage_ok: bool,
+    ) -> list[FundClassification]:
+        label_codes = {label.label_code for label in labels}
+        calc_by_code = {item.label_code: item for item in calculations}
+        classifications: list[FundClassification] = []
+
+        def add(
+            dimension: str,
+            code: str,
+            name: str,
+            confidence: float,
+            reason: str,
+            evidence: str,
+            source: str,
+        ) -> None:
+            classifications.append(
+                FundClassification(
+                    dimension=dimension,
+                    classification_code=code,
+                    classification_name=name,
+                    confidence=confidence,
+                    reason_code=reason,
+                    evidence=evidence,
+                    source=source,
+                )
+            )
+
+        if fund.fund_type in SUPPORTED_ACTIVE_EQUITY_TYPES:
+            add(
+                "asset_class",
+                "equity_related",
+                "权益相关基金",
+                0.95,
+                "fund_type_supported",
+                f"基金类型为 {fund.fund_type}，属于第一版权益相关范围。",
+                "fund_profiles",
+            )
+        else:
+            add(
+                "asset_class",
+                "unsupported_or_unknown",
+                "暂未纳入第一版范围",
+                0.9,
+                "fund_type_unsupported",
+                f"基金类型为 {fund.fund_type}，未纳入第一版标签范围。",
+                "fund_profiles",
+            )
+
+        if self._is_passive_index_fund(fund):
+            add(
+                "management_style",
+                "passive_index",
+                "被动指数工具",
+                0.9,
+                "index_keyword_or_type",
+                "基金类型或名称包含指数/ETF/联接等被动工具特征。",
+                "fund_profiles",
+            )
+        else:
+            add(
+                "management_style",
+                "active",
+                "主动管理",
+                0.75,
+                "no_index_keyword_or_type",
+                "基金类型和名称未命中指数/ETF/联接特征，按主动管理候选处理。",
+                "fund_profiles",
+            )
+
+        if coverage_ok and "data_sufficient" in label_codes:
+            add(
+                "calculation_eligibility",
+                "label_ready",
+                "标签计算可用",
+                0.95,
+                "coverage_passed",
+                "基础数据 gate 已通过，可以输出正式基础标签。",
+                "coverage_check",
+            )
+        else:
+            data_gap = calc_by_code.get("data_sufficient")
+            add(
+                "calculation_eligibility",
+                "data_gap",
+                "数据缺口",
+                0.95,
+                data_gap.reason_code if data_gap else "coverage_failed",
+                data_gap.message if data_gap else "基础数据 gate 未通过。",
+                data_gap.source if data_gap else "coverage_check",
+            )
+
+        style_codes = label_codes & _STYLE_LABELS
+        if style_codes:
+            add(
+                "style_clarity",
+                "style_clear",
+                "风格已识别",
+                0.8,
+                "style_label_triggered",
+                "已触发正式持仓风格标签：" + ",".join(sorted(style_codes)),
+                "stock_factors",
+            )
+        elif (
+            "style_pending_rule_definition" in label_codes
+            or (
+                calc_by_code.get("style_pending_rule_definition") is not None
+                and calc_by_code["style_pending_rule_definition"].state == "triggered"
+            )
+        ):
+            add(
+                "style_clarity",
+                "style_pending",
+                "风格待确认",
+                0.75,
+                "style_threshold_not_met",
+                "股票因子已接入，但尚未触发正式风格标签。",
+                "stock_factors",
+            )
+        elif (
+            "style_unlabeled_stock_factors_missing" in label_codes
+            or not fund.stock_factors
+        ):
+            add(
+                "style_clarity",
+                "style_factor_missing",
+                "缺少风格因子",
+                0.95,
+                "stock_factors_missing",
+                "缺少股票因子，不能输出正式风格分组。",
+                "stock_factors",
+            )
+        else:
+            add(
+                "style_clarity",
+                "style_unknown",
+                "风格未知",
+                0.6,
+                "style_not_resolved",
+                "当前数据未形成明确风格结论。",
+                "label_engine",
+            )
+
+        return classifications
+
+    def _group_fund(
+        self,
+        *,
+        labels: list[LabelResult],
+        classifications: list[FundClassification],
+        coverage_ok: bool,
+    ) -> list[FundGroup]:
+        label_codes = {label.label_code for label in labels}
+        class_by_dim = {item.dimension: item for item in classifications}
+        asset_class = class_by_dim.get("asset_class")
+        management_style = class_by_dim.get("management_style")
+        style_clarity = class_by_dim.get("style_clarity")
+        groups: list[FundGroup] = []
+
+        def add(
+            code: str,
+            name: str,
+            group_type: str,
+            reason: str,
+            evidence: str,
+            source: str,
+        ) -> None:
+            groups.append(
+                FundGroup(
+                    group_code=code,
+                    group_name=name,
+                    group_type=group_type,
+                    reason_code=reason,
+                    evidence=evidence,
+                    source=source,
+                )
+            )
+
+        if asset_class and asset_class.classification_code == "equity_related":
+            add(
+                "phase1_active_equity_scope",
+                "第一版权益相关范围",
+                "scope",
+                asset_class.reason_code,
+                asset_class.evidence,
+                asset_class.source,
+            )
+
+        if coverage_ok:
+            add(
+                "label_ready_pool",
+                "标签可计算池",
+                "data_quality",
+                "coverage_passed",
+                "基础数据 gate 通过。",
+                "coverage_check",
+            )
+        else:
+            add(
+                "data_gap_pool",
+                "数据缺口池",
+                "data_quality",
+                "coverage_failed",
+                "基础数据 gate 未通过，进入数据缺口池。",
+                "coverage_check",
+            )
+
+        if management_style and management_style.classification_code == "passive_index":
+            add(
+                "passive_tool_pool",
+                "被动指数工具池",
+                "business",
+                management_style.reason_code,
+                management_style.evidence,
+                management_style.source,
+            )
+        elif (
+            management_style
+            and management_style.classification_code == "active"
+            and coverage_ok
+            and "manager_tenure_long" in label_codes
+            and "fund_size_small" not in label_codes
+        ):
+            add(
+                "active_equity_candidate_pool",
+                "主动权益候选池",
+                "business",
+                "active_equity_basic_gate_passed",
+                "主动管理、数据充足、基金经理任期达标，且未触发规模偏小。",
+                "label_engine",
+            )
+
+        if style_clarity:
+            if style_clarity.classification_code in {"style_clear", "style_pending"}:
+                add(
+                    "style_factor_ready_pool",
+                    "风格因子可用池",
+                    "style",
+                    style_clarity.reason_code,
+                    style_clarity.evidence,
+                    style_clarity.source,
+                )
+            elif style_clarity.classification_code == "style_factor_missing":
+                add(
+                    "style_factor_missing_pool",
+                    "风格因子缺失池",
+                    "style",
+                    style_clarity.reason_code,
+                    style_clarity.evidence,
+                    style_clarity.source,
+                )
+
+        for label_code in sorted(label_codes & _STYLE_LABELS):
+            group_code, group_name = _STYLE_GROUP_BY_LABEL[label_code]
+            add(
+                group_code,
+                group_name,
+                "style",
+                "style_label_triggered",
+                f"触发 {label_code} 标签，进入对应风格分组。",
+                "stock_factors",
+            )
+
+        if {"long_term_return_strong", "drawdown_high"} <= label_codes:
+            add(
+                "high_return_high_drawdown_watch",
+                "高收益高回撤观察池",
+                "risk_watch",
+                "return_and_drawdown_both_triggered",
+                "同时触发长期收益优秀和回撤较大，需要和同类池比较风险收益。",
+                "label_engine",
+            )
+        if "industry_concentration_high" in label_codes:
+            add(
+                "industry_concentration_watch",
+                "行业集中观察池",
+                "risk_watch",
+                "industry_concentration_high",
+                "触发行业高度集中，需要观察行业暴露风险。",
+                "fund_industry_allocations",
+            )
+        elif "industry_concentration_observe" in label_codes:
+            add(
+                "industry_concentration_watch",
+                "行业集中观察池",
+                "risk_watch",
+                "industry_concentration_observe",
+                "第一大行业进入集中观察区间，需要持续跟踪行业暴露。",
+                "fund_industry_allocations",
+            )
+
+        return groups
+
+    @staticmethod
+    def _is_passive_index_fund(fund: FundInput) -> bool:
+        text = f"{fund.fund_type} {fund.fund_name}".upper()
+        return any(keyword in text for keyword in ("指数", "ETF", "联接", "INDEX"))
 
     def _calculate_label_states(
         self,
@@ -688,6 +1134,39 @@ class LabelEngine:
                 "收益风险指标未达到标签阈值。",
             )
 
+        if label_code in _RELATIVE_LABEL_FEATURES:
+            chosen_window = self._chosen_relative_window(feature_map)
+            if chosen_window is None:
+                sample = feature_map.get("benchmark_sample_count_full")
+                return (
+                    "not_computed",
+                    "benchmark_data_missing",
+                    sample.value if sample else "0",
+                    f"min(1y={RETURN_WINDOWS[2][2]}, 3y={RETURN_WINDOWS[3][2]})",
+                    "benchmark_returns",
+                    "缺少可对齐的基准收益序列，不能计算正式相对基准标签。",
+                )
+            feature_code = f"{_RELATIVE_LABEL_FEATURES[label_code]}_{chosen_window}"
+            feature = feature_map.get(feature_code)
+            return self._not_triggered_from_feature(
+                label_code,
+                feature,
+                threshold,
+                "相对基准指标未达到标签阈值。",
+            )
+
+        if label_code == "benchmark_data_missing":
+            chosen_window = self._chosen_relative_window(feature_map)
+            if chosen_window is not None:
+                return (
+                    "not_triggered",
+                    "benchmark_window_available",
+                    chosen_window,
+                    "1y_or_3y_relative_window_required",
+                    "benchmark_returns",
+                    "已有 1Y 或 3Y 相对基准窗口，未触发基准数据缺失。",
+                )
+
         if label_code in {
             "holding_concentration_high",
             "style_unlabeled_stock_factors_missing",
@@ -738,6 +1217,7 @@ class LabelEngine:
             "fee_low": "fee_structure",
             "fee_high": "fee_structure",
             "industry_concentration_high": "industry_allocations",
+            "industry_concentration_observe": "industry_allocations",
             "industry_diversified": "industry_allocations",
             "equity_position_high": "equity_position",
             "fund_size_small": "fund_size",
@@ -748,6 +1228,7 @@ class LabelEngine:
             "fee_low": "total_annual_fee",
             "fee_high": "total_annual_fee",
             "industry_concentration_high": "industry_top1_weight",
+            "industry_concentration_observe": "industry_top1_weight",
             "industry_diversified": "industry_top1_weight",
             "equity_position_high": "equity_position",
             "fund_size_small": "fund_size",
@@ -772,6 +1253,13 @@ class LabelEngine:
     def _chosen_return_window(feature_map: dict[str, FeatureValue]) -> str | None:
         for window in ("3y", "1y"):
             if f"annualized_return_{window}" in feature_map:
+                return window
+        return None
+
+    @staticmethod
+    def _chosen_relative_window(feature_map: dict[str, FeatureValue]) -> str | None:
+        for window in ("3y", "1y"):
+            if f"annualized_excess_return_{window}" in feature_map:
                 return window
         return None
 
@@ -828,6 +1316,31 @@ class LabelEngine:
                 self._append_window_features(features, window_name, window_returns)
             # 全窗口（用所有可用样本），便于排查；不参与正式标签判定
             self._append_window_features(features, "full", returns)
+
+        benchmark_returns = [
+            float(item) for item in fund.benchmark_returns if item is not None
+        ]
+        if returns and benchmark_returns:
+            aligned_count = min(len(returns), len(benchmark_returns))
+            aligned_returns = returns[-aligned_count:]
+            aligned_benchmark = benchmark_returns[-aligned_count:]
+            for window_name, window_size, min_samples in RETURN_WINDOWS:
+                window_returns = aligned_returns[-window_size:]
+                window_benchmark = aligned_benchmark[-window_size:]
+                if len(window_returns) < min_samples or len(window_benchmark) < min_samples:
+                    continue
+                self._append_relative_benchmark_features(
+                    features,
+                    window_name,
+                    window_returns,
+                    window_benchmark,
+                )
+            self._append_relative_benchmark_features(
+                features,
+                "full",
+                aligned_returns,
+                aligned_benchmark,
+            )
 
         top_10_weight = round(
             sum(float(item.get("weight", 0.0)) for item in fund.stock_holdings[:10]),
@@ -908,6 +1421,86 @@ class LabelEngine:
             )
 
         return features
+
+    @staticmethod
+    def _append_relative_benchmark_features(
+        features: list[FeatureValue],
+        window: str,
+        fund_returns: list[float],
+        benchmark_returns: list[float],
+    ) -> None:
+        n = min(len(fund_returns), len(benchmark_returns))
+        if n == 0:
+            return
+        fund_window = fund_returns[-n:]
+        benchmark_window = benchmark_returns[-n:]
+        active_returns = [f - b for f, b in zip(fund_window, benchmark_window)]
+        active_cumulative = 1.0
+        fund_cumulative = 1.0
+        benchmark_cumulative = 1.0
+        for fund_return, benchmark_return, active_return in zip(
+            fund_window,
+            benchmark_window,
+            active_returns,
+        ):
+            fund_cumulative *= 1 + fund_return
+            benchmark_cumulative *= 1 + benchmark_return
+            active_cumulative *= 1 + active_return
+        annualized_excess = (
+            active_cumulative ** (ANNUALIZATION_FACTOR / n) - 1
+            if active_cumulative > 0
+            else -1.0
+        )
+        annualized_benchmark = (
+            benchmark_cumulative ** (ANNUALIZATION_FACTOR / n) - 1
+            if benchmark_cumulative > 0
+            else -1.0
+        )
+        annualized_fund = (
+            fund_cumulative ** (ANNUALIZATION_FACTOR / n) - 1
+            if fund_cumulative > 0
+            else -1.0
+        )
+        active_mean = sum(active_returns) / n
+        tracking_variance = (
+            sum((r - active_mean) ** 2 for r in active_returns) / (n - 1)
+            if n > 1
+            else 0.0
+        )
+        tracking_error = sqrt(tracking_variance) * sqrt(ANNUALIZATION_FACTOR)
+        information_ratio = annualized_excess / tracking_error if tracking_error > 0 else 0.0
+
+        fund_mean = sum(fund_window) / n
+        benchmark_mean = sum(benchmark_window) / n
+        benchmark_variance = (
+            sum((r - benchmark_mean) ** 2 for r in benchmark_window) / (n - 1)
+            if n > 1
+            else 0.0
+        )
+        covariance = (
+            sum(
+                (fund_return - fund_mean) * (benchmark_return - benchmark_mean)
+                for fund_return, benchmark_return in zip(fund_window, benchmark_window)
+            )
+            / (n - 1)
+            if n > 1
+            else 0.0
+        )
+        beta = covariance / benchmark_variance if benchmark_variance > 0 else 0.0
+        alpha = annualized_fund - beta * annualized_benchmark
+
+        for code, value in (
+            ("benchmark_sample_count", n),
+            ("annualized_benchmark_return", annualized_benchmark),
+            ("annualized_excess_return", annualized_excess),
+            ("tracking_error", tracking_error),
+            ("information_ratio", information_ratio),
+            ("beta", beta),
+            ("alpha", alpha),
+        ):
+            features.append(
+                FeatureValue(f"{code}_{window}", round(value, 6), "benchmark_returns")
+            )
 
     @staticmethod
     def _max_drawdown(returns: list[float]) -> float:
@@ -1229,12 +1822,13 @@ class LabelEngine:
             return
         weights = [float(item.get("weight", 0.0)) for item in fund.industry_allocations]
         top1 = round(max(weights), 4)
-        threshold = self._rule_config.industry_concentration_threshold
-        if top1 >= threshold:
+        high_threshold = self._rule_config.industry_concentration_threshold
+        observe_threshold = self._rule_config.industry_concentration_observe_threshold
+        if top1 >= high_threshold:
             labels.append(
                 LabelResult(
                     label_code="industry_concentration_high",
-                    label_name="行业集中度高",
+                    label_name="行业高度集中",
                     category="holding_structure",
                     confidence=0.85,
                 )
@@ -1244,9 +1838,32 @@ class LabelEngine:
                     label_code="industry_concentration_high",
                     metric="industry_top1_weight",
                     value=top1,
-                    threshold=threshold,
+                    threshold=high_threshold,
                     source="fund_industry_allocations",
-                    message=f"第一大行业占比 {top1:.2%}，达到 {threshold:.2%} 行业集中阈值。",
+                    message=f"第一大行业占比 {top1:.2%}，达到 {high_threshold:.2%} 行业高度集中阈值。",
+                )
+            )
+        elif top1 >= observe_threshold:
+            labels.append(
+                LabelResult(
+                    label_code="industry_concentration_observe",
+                    label_name="行业集中观察",
+                    category="holding_structure",
+                    confidence=0.75,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="industry_concentration_observe",
+                    metric="industry_top1_weight",
+                    value=top1,
+                    threshold=f"{observe_threshold:.2%}~{high_threshold:.2%}",
+                    source="fund_industry_allocations",
+                    message=(
+                        f"第一大行业占比 {top1:.2%}，进入 {observe_threshold:.2%}~"
+                        f"{high_threshold:.2%} 行业集中观察区间。"
+                    ),
                 )
             )
 
@@ -1472,6 +2089,116 @@ class LabelEngine:
                     message=(
                         f"{chosen_window.upper()} 年化波动率 {float(volatility.value):.2%}，"
                         f"不高于 {self._rule_config.volatility_low_threshold:.2%}。"
+                    ),
+                )
+            )
+
+    def _add_relative_benchmark_labels(
+        self,
+        features: list[FeatureValue],
+        labels: list[LabelResult],
+        evidence: list[EvidenceItem],
+    ) -> None:
+        feature_map = {item.feature_code: item for item in features}
+        chosen_window = self._chosen_relative_window(feature_map)
+        if chosen_window is None:
+            sample = feature_map.get("benchmark_sample_count_full")
+            labels.append(
+                LabelResult(
+                    label_code="benchmark_data_missing",
+                    label_name="基准数据缺失",
+                    category="relative_benchmark",
+                    confidence=1.0,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="benchmark_data_missing",
+                    metric="benchmark_sample_count",
+                    value=sample.value if sample else 0,
+                    threshold=f"min(1y={RETURN_WINDOWS[2][2]}, 3y={RETURN_WINDOWS[3][2]})",
+                    source="benchmark_returns",
+                    message="缺少可对齐的 1Y/3Y 基准收益序列，暂不输出正式相对基准标签。",
+                )
+            )
+            return
+
+        checks = (
+            (
+                "excess_return_strong",
+                "超额收益较强",
+                "annualized_excess_return",
+                self._rule_config.excess_return_strong_threshold,
+                lambda value, threshold: value >= threshold,
+                "年化超额收益",
+            ),
+            (
+                "information_ratio_high",
+                "信息比率较高",
+                "information_ratio",
+                self._rule_config.information_ratio_high_threshold,
+                lambda value, threshold: value >= threshold,
+                "信息比率",
+            ),
+            (
+                "tracking_error_high",
+                "跟踪误差较高",
+                "tracking_error",
+                self._rule_config.tracking_error_high_threshold,
+                lambda value, threshold: value >= threshold,
+                "年化跟踪误差",
+            ),
+            (
+                "alpha_positive",
+                "Alpha 为正",
+                "alpha",
+                self._rule_config.alpha_positive_threshold,
+                lambda value, threshold: value >= threshold,
+                "Alpha",
+            ),
+            (
+                "beta_high",
+                "Beta 较高",
+                "beta",
+                self._rule_config.beta_high_threshold,
+                lambda value, threshold: value >= threshold,
+                "Beta",
+            ),
+            (
+                "beta_low",
+                "Beta 较低",
+                "beta",
+                self._rule_config.beta_low_threshold,
+                lambda value, threshold: value <= threshold,
+                "Beta",
+            ),
+        )
+        for label_code, label_name, metric_prefix, threshold, predicate, display_name in checks:
+            feature = feature_map.get(f"{metric_prefix}_{chosen_window}")
+            if feature is None:
+                continue
+            value = float(feature.value)
+            if not predicate(value, threshold):
+                continue
+            labels.append(
+                LabelResult(
+                    label_code=label_code,
+                    label_name=label_name,
+                    category="relative_benchmark",
+                    confidence=0.75,
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code=label_code,
+                    metric=f"{metric_prefix}_{chosen_window}",
+                    value=feature.value,
+                    threshold=threshold,
+                    source="benchmark_returns",
+                    message=(
+                        f"{chosen_window.upper()} {display_name} {value:.2%}，"
+                        f"达到相对基准阈值 {threshold:.2%}。"
                     ),
                 )
             )

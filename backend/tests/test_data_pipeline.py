@@ -208,7 +208,7 @@ def test_repository_loads_fund_input_with_holdings_and_fees(seeded_db: Path) -> 
     assert len(fund.stock_holdings) == 10
     assert fund.stock_holdings[0]["weight"] == 0.11
     assert fund.manager_tenure_years == 6.2
-    assert fund.management_fee == 0.012
+    assert fund.management_fee == 0.010
     assert fund.custody_fee == 0.002
     assert fund.equity_position == 0.89
     assert fund.stock_factors == []  # 表存在但没有数据
@@ -413,7 +413,7 @@ def test_batch_accepts_funddata_source_and_persists_full_feature_set(
     label_codes = {item["label_code"] for item in payload["labels"]}
     assert "data_sufficient" in label_codes
     assert "holding_concentration_high" in label_codes
-    assert "industry_concentration_high" in label_codes
+    assert "industry_concentration_high" not in label_codes
     assert "style_unlabeled_stock_factors_missing" in label_codes
     assert payload["missing_fields"] == []
     assert payload["summary"]["feature_count"] >= 10

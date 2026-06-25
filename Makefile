@@ -10,7 +10,8 @@ PYTHON      ?= python3
 SOURCE_DB   ?= /tmp/fle-run/source.sqlite
 OUTPUT_DB   ?= /tmp/fle-run/output.sqlite
 FACTOR_DB   ?= data/stock_factors.sqlite
-PHASE1_FILE ?= data/phase1_fund_codes.txt
+PHASE1_FILE ?= data/phase1_fund_codes_canonical.txt
+PHASE1_OFFICIAL_FILE ?= data/phase1_fund_codes_v1_official.txt
 FUND_DATA_CACHE ?= $(HOME)/.cache/fund-data/releases/2026-06-03T214600Z/fund_data_query.sqlite
 
 # 因子横截面用的"今天"。建议每次跑前手动改成最近交易日。
@@ -22,7 +23,7 @@ REPORT_DATE ?= 2025-09-30
 NAV_START   ?= 2025-06-01
 NAV_END     ?= 2026-06-23
 
-.PHONY: help refresh-factors refresh-nav copy-source run-batch test
+.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 test
 
 help:
 	@echo "Available targets:"
@@ -30,6 +31,7 @@ help:
 	@echo "  make refresh-nav        把 phase1 ($(PHASE1_FILE)) 的 NAV 拉到 $(FUND_DATA_CACHE)，区间 $(NAV_START)~$(NAV_END)"
 	@echo "  make copy-source        把 fundData cache DB 拷贝到 $(SOURCE_DB)"
 	@echo "  make run-batch          运行 batch（依赖 copy-source；用 $(FACTOR_DB) 作为 factor cache）"
+	@echo "  make run-batch-v1       运行 v1 正式权益清单 batch（排除待复核/低权益仓位基金）"
 	@echo "  make test               跑 pytest"
 
 refresh-factors:
@@ -59,6 +61,20 @@ run-batch: copy-source
 	    --source funddata \
 	    --factor-db $(PWD)/$(FACTOR_DB) \
 	    --min-nav-samples 180 \
+	    --min-holding-total-weight 0.5 \
+	    --deep-value-weight-min 0.4 \
+	    --quality-growth-weight-min 0.4
+
+run-batch-v1: copy-source
+	@rm -f $(OUTPUT_DB)
+	cd backend && FLE_PHASE1_CODES_FILE=$(PWD)/$(PHASE1_OFFICIAL_FILE) \
+	  $(PYTHON) -m app.batch \
+	    --source-db $(SOURCE_DB) \
+	    --output-db $(OUTPUT_DB) \
+	    --source funddata \
+	    --factor-db $(PWD)/$(FACTOR_DB) \
+	    --min-nav-samples 180 \
+	    --min-holding-total-weight 0.5 \
 	    --deep-value-weight-min 0.4 \
 	    --quality-growth-weight-min 0.4
 

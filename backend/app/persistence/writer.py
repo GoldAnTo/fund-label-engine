@@ -118,6 +118,33 @@ SCHEMA_STATEMENTS = (
         PRIMARY KEY (run_id, fund_code, label_code)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS fund_classification_results (
+        run_id TEXT NOT NULL,
+        fund_code TEXT NOT NULL,
+        dimension TEXT NOT NULL,
+        classification_code TEXT NOT NULL,
+        classification_name TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        reason_code TEXT NOT NULL,
+        evidence TEXT NOT NULL,
+        source TEXT NOT NULL,
+        PRIMARY KEY (run_id, fund_code, dimension)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS fund_group_results (
+        run_id TEXT NOT NULL,
+        fund_code TEXT NOT NULL,
+        group_code TEXT NOT NULL,
+        group_name TEXT NOT NULL,
+        group_type TEXT NOT NULL,
+        reason_code TEXT NOT NULL,
+        evidence TEXT NOT NULL,
+        source TEXT NOT NULL,
+        PRIMARY KEY (run_id, fund_code, group_code)
+    )
+    """,
 )
 
 
@@ -278,6 +305,41 @@ class LabelRunWriter:
                         str(item.threshold),
                         item.source,
                         item.message,
+                    ),
+                )
+            for item in result.classifications:
+                conn.execute(
+                    "INSERT OR REPLACE INTO fund_classification_results "
+                    "(run_id, fund_code, dimension, classification_code, "
+                    " classification_name, confidence, reason_code, evidence, source) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        run_id,
+                        result.fund_code,
+                        item.dimension,
+                        item.classification_code,
+                        item.classification_name,
+                        item.confidence,
+                        item.reason_code,
+                        item.evidence,
+                        item.source,
+                    ),
+                )
+            for item in result.groups:
+                conn.execute(
+                    "INSERT OR REPLACE INTO fund_group_results "
+                    "(run_id, fund_code, group_code, group_name, group_type, "
+                    " reason_code, evidence, source) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        run_id,
+                        result.fund_code,
+                        item.group_code,
+                        item.group_name,
+                        item.group_type,
+                        item.reason_code,
+                        item.evidence,
+                        item.source,
                     ),
                 )
             conn.commit()

@@ -123,3 +123,14 @@
 - `message`：给前端和汇报使用的白话解释。
 
 当前阶段先处理自动计算闭环，不把人工复核作为标签计算的必要步骤。
+
+## 分类和分组约定
+
+标签是原子结论，分类和分组是把原子结论整理成可比较的业务池。
+
+- 分类写入 `fund_classification_results`，按 `dimension` 表达基金身份，例如 `asset_class`、`management_style`、`calculation_eligibility`、`style_clarity`。
+- 分组写入 `fund_group_results`，按 `group_code` 表达业务池或观察池，例如 `active_equity_candidate_pool`、`passive_tool_pool`、`data_gap_pool`、`style_factor_missing_pool`。
+- 分类和分组都必须保存 `reason_code`、`evidence`、`source`。
+- 分组不等于推荐或最终准入，只说明“应该放在哪里比较”和“为什么放进去”。
+
+详细规则见 `docs/fund-classification-and-grouping.md`。
