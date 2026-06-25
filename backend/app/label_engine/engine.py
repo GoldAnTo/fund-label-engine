@@ -61,6 +61,8 @@ class RuleConfig:
     quality_growth_weight_min: float = 0.5
     dividend_steady_yield_min: float = 0.03
     dividend_steady_weight_min: float = 0.5
+    style_exposure_low_coverage_threshold: float = 0.5
+    style_exposure_formal_coverage_threshold: float = 0.7
     # ---- P0: 数据充足性 gate（独立可配，便于生产逐步收紧；
     #          默认保持「只校验是否存在」的旧行为，避免破坏已有用例） ----
     gate_min_nav_samples: int = 1
@@ -193,15 +195,25 @@ class RuleConfig:
                 "pb_weighted_max": self.deep_value_pb_max,
                 "valuation_pct_weighted_max": self.deep_value_valuation_pct_max,
                 "deep_value_weight_min": self.deep_value_weight_min,
+                "style_exposure_formal_coverage_min": self.style_exposure_formal_coverage_threshold,
             },
             "quality_growth": {
                 "roe_weighted_min": self.quality_growth_roe_min,
                 "revenue_growth_weighted_min": self.quality_growth_revenue_growth_min,
                 "quality_growth_weight_min": self.quality_growth_weight_min,
+                "style_exposure_formal_coverage_min": self.style_exposure_formal_coverage_threshold,
             },
             "dividend_steady": {
                 "dividend_yield_min": self.dividend_steady_yield_min,
                 "dividend_steady_weight_min": self.dividend_steady_weight_min,
+                "style_exposure_formal_coverage_min": self.style_exposure_formal_coverage_threshold,
+            },
+            "style_exposure_low_coverage": {
+                "coverage_weight_max_exclusive": self.style_exposure_low_coverage_threshold,
+            },
+            "style_exposure_observe": {
+                "coverage_weight_min": self.style_exposure_low_coverage_threshold,
+                "coverage_weight_max_exclusive": self.style_exposure_formal_coverage_threshold,
             },
         }
         return mapping.get(label_code, {})
@@ -301,10 +313,24 @@ DEFAULT_LABEL_DEFINITIONS = (
     },
     {
         "label_code": "style_pending_rule_definition",
-        "label_name": "风格待计算：规则尚未启用",
+        "label_name": "风格未达阈值",
         "category": "style_boundary",
         "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
-        "description": "股票因子已经存在，但高级风格标签规则尚未启用。",
+        "description": "股票因子或基金级暴露存在，但高级风格标签未达阈值。",
+    },
+    {
+        "label_code": "style_exposure_low_coverage",
+        "label_name": "风格暴露覆盖不足",
+        "category": "style_boundary",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "基金级因子覆盖权重低于最低阈值，不能正式判断风格。",
+    },
+    {
+        "label_code": "style_exposure_observe",
+        "label_name": "风格暴露仅观察",
+        "category": "style_boundary",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "基金级因子覆盖权重一般，只输出观察结论，不触发正式风格标签。",
     },
     {
         "label_code": "deep_value",
@@ -804,6 +830,8 @@ class LabelEngine:
             )
         elif (
             "style_pending_rule_definition" in label_codes
+            or "style_exposure_low_coverage" in label_codes
+            or "style_exposure_observe" in label_codes
             or (
                 calc_by_code.get("style_pending_rule_definition") is not None
                 and calc_by_code["style_pending_rule_definition"].state == "triggered"
@@ -814,9 +842,9 @@ class LabelEngine:
                 "style_pending",
                 "风格待确认",
                 0.75,
-                "style_threshold_not_met",
-                "股票因子已接入，但尚未触发正式风格标签。",
-                "stock_factors",
+                "style_threshold_or_coverage_not_met",
+                "股票因子已接入，但风格权重或因子覆盖尚不足以输出正式风格标签。",
+                "fund_factor_exposures" if fund.factor_exposures else "stock_factors",
             )
         elif (
             "style_unlabeled_stock_factors_missing" in label_codes
@@ -1172,6 +1200,8 @@ class LabelEngine:
             "holding_concentration_high",
             "style_unlabeled_stock_factors_missing",
             "style_pending_rule_definition",
+            "style_exposure_low_coverage",
+            "style_exposure_observe",
         } | _STYLE_LABELS:
             stock_detail = coverage_details.get("stock_holdings")
             if stock_detail and not stock_detail["ok"]:
@@ -1205,6 +1235,16 @@ class LabelEngine:
                     "stock_factors_missing",
                     source,
                     "股票因子或基金级因子暴露已经存在，未触发缺少股票因子边界标签。",
+                )
+            if label_code in {"style_exposure_low_coverage", "style_exposure_observe"}:
+                coverage = self._style_observed("factor_coverage", feature_map)
+                return (
+                    "not_triggered",
+                    "coverage_not_in_bucket",
+                    coverage,
+                    threshold,
+                    "fund_factor_exposures",
+                    "基金级因子覆盖权重不在该观察标签区间内。",
                 )
             if label_code == "style_pending_rule_definition":
                 return (
@@ -2459,6 +2499,62 @@ class LabelEngine:
         dividend_weight = _value("dividend_steady_weight")
         coverage_weight = _value("factor_coverage_weight")
 
+        if coverage_weight < cfg.style_exposure_low_coverage_threshold:
+            labels.append(
+                LabelResult(
+                    label_code="style_exposure_low_coverage",
+                    label_name="风格暴露覆盖不足",
+                    category="style_boundary",
+                    confidence=1.0,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="style_exposure_low_coverage",
+                    metric="factor_coverage_weight",
+                    value=round(coverage_weight, 4),
+                    threshold=cfg.style_exposure_low_coverage_threshold,
+                    source="fund_factor_exposures",
+                    message=(
+                        f"基金级因子覆盖权重 {coverage_weight:.0%}，低于 "
+                        f"{cfg.style_exposure_low_coverage_threshold:.0%} 最低阈值，"
+                        "即使风格权重达标也不输出正式风格标签。"
+                    ),
+                )
+            )
+            return
+
+        if coverage_weight < cfg.style_exposure_formal_coverage_threshold:
+            labels.append(
+                LabelResult(
+                    label_code="style_exposure_observe",
+                    label_name="风格暴露仅观察",
+                    category="style_boundary",
+                    confidence=1.0,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="style_exposure_observe",
+                    metric="factor_coverage_weight",
+                    value=round(coverage_weight, 4),
+                    threshold=(
+                        f"{cfg.style_exposure_low_coverage_threshold:.0%}~"
+                        f"{cfg.style_exposure_formal_coverage_threshold:.0%}"
+                    ),
+                    source="fund_factor_exposures",
+                    message=(
+                        f"基金级因子覆盖权重 {coverage_weight:.0%}，处于观察区间 "
+                        f"{cfg.style_exposure_low_coverage_threshold:.0%}~"
+                        f"{cfg.style_exposure_formal_coverage_threshold:.0%}，"
+                        "不输出正式风格标签。"
+                    ),
+                )
+            )
+            return
+
         if deep_value_weight >= cfg.deep_value_weight_min:
             _emit(
                 "deep_value",
@@ -2572,6 +2668,62 @@ class LabelEngine:
                 dividend_weight += weight
 
         triggered: list[str] = []
+
+        if coverage_weight < cfg.style_exposure_low_coverage_threshold:
+            labels.append(
+                LabelResult(
+                    label_code="style_exposure_low_coverage",
+                    label_name="风格暴露覆盖不足",
+                    category="style_boundary",
+                    confidence=1.0,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="style_exposure_low_coverage",
+                    metric="factor_coverage_weight",
+                    value=round(coverage_weight, 4),
+                    threshold=cfg.style_exposure_low_coverage_threshold,
+                    source="stock_factors",
+                    message=(
+                        f"股票因子覆盖持仓权重 {coverage_weight:.0%}，低于 "
+                        f"{cfg.style_exposure_low_coverage_threshold:.0%} 最低阈值，"
+                        "不输出正式风格标签。"
+                    ),
+                )
+            )
+            return
+
+        if coverage_weight < cfg.style_exposure_formal_coverage_threshold:
+            labels.append(
+                LabelResult(
+                    label_code="style_exposure_observe",
+                    label_name="风格暴露仅观察",
+                    category="style_boundary",
+                    confidence=1.0,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="style_exposure_observe",
+                    metric="factor_coverage_weight",
+                    value=round(coverage_weight, 4),
+                    threshold=(
+                        f"{cfg.style_exposure_low_coverage_threshold:.0%}~"
+                        f"{cfg.style_exposure_formal_coverage_threshold:.0%}"
+                    ),
+                    source="stock_factors",
+                    message=(
+                        f"股票因子覆盖持仓权重 {coverage_weight:.0%}，处于观察区间 "
+                        f"{cfg.style_exposure_low_coverage_threshold:.0%}~"
+                        f"{cfg.style_exposure_formal_coverage_threshold:.0%}，"
+                        "不输出正式风格标签。"
+                    ),
+                )
+            )
+            return
 
         def _emit(label_code: str, label_name: str, msg: str, ratio: float, threshold: float) -> None:
             labels.append(

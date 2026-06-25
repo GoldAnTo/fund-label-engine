@@ -17,6 +17,10 @@ export default function FundReportPage() {
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const factorCoverage = data?.factor_exposures.find(
+    (f) => f.factor_code === "factor_coverage_weight"
+  );
+  const factorCoverageValue = factorCoverage ? Number(factorCoverage.exposure_value) : null;
 
   const submit = async () => {
     if (!activeLabel) return;
@@ -75,6 +79,12 @@ export default function FundReportPage() {
               <dt>标签数</dt><dd>{data.summary.label_count}</dd>
               <dt>特征数</dt><dd>{data.summary.feature_count}</dd>
               <dt>因子暴露</dt><dd>{data.summary.factor_exposure_count ?? data.factor_exposures.length}</dd>
+              <dt>因子覆盖</dt>
+              <dd>
+                {factorCoverageValue === null
+                  ? "未计算"
+                  : `${(factorCoverageValue * 100).toFixed(1)}%`}
+              </dd>
               <dt>证据条数</dt><dd>{data.summary.evidence_count}</dd>
               <dt>缺失字段数</dt><dd>{data.summary.missing_field_count}</dd>
               <dt>已有复核</dt><dd>{data.summary.review_count}</dd>

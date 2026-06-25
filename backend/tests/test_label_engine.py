@@ -178,10 +178,11 @@ def test_stock_factor_boundary_is_explained_when_factors_exist_but_style_rules_a
     result = LabelEngine().evaluate(fund)
 
     codes = label_codes(result)
-    assert "style_pending_rule_definition" in codes
+    assert "style_exposure_low_coverage" in codes
     assert "deep_value" not in codes
     assert "quality_growth" not in codes
-    assert evidence_for(result, "style_pending_rule_definition")
+    ev = evidence_for(result, "style_exposure_low_coverage")[0]
+    assert ev.metric == "factor_coverage_weight"
 
 
 def _style_fund(stock_factors: list[dict]) -> FundInput:
@@ -202,6 +203,67 @@ def _style_fund(stock_factors: list[dict]) -> FundInput:
         fund_size=180.0,
         equity_position=0.89,
     )
+
+
+def test_style_exposure_low_coverage_blocks_formal_style_label():
+    fund = _style_fund(stock_factors=[])
+    fund = FundInput(
+        **{
+            **fund.__dict__,
+            "factor_exposures": [
+                {
+                    "factor_code": "deep_value_weight",
+                    "exposure_value": 0.80,
+                    "coverage_weight": 0.40,
+                    "as_of_date": "2026-06-01",
+                },
+                {
+                    "factor_code": "factor_coverage_weight",
+                    "exposure_value": 0.40,
+                    "coverage_weight": 0.40,
+                    "as_of_date": "2026-06-01",
+                },
+            ],
+        }
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "style_exposure_low_coverage" in codes
+    assert "deep_value" not in codes
+    ev = evidence_for(result, "style_exposure_low_coverage")[0]
+    assert ev.metric == "factor_coverage_weight"
+    assert ev.source == "fund_factor_exposures"
+
+
+def test_style_exposure_observe_blocks_formal_style_label():
+    fund = _style_fund(stock_factors=[])
+    fund = FundInput(
+        **{
+            **fund.__dict__,
+            "factor_exposures": [
+                {
+                    "factor_code": "quality_growth_weight",
+                    "exposure_value": 0.60,
+                    "coverage_weight": 0.60,
+                    "as_of_date": "2026-06-01",
+                },
+                {
+                    "factor_code": "factor_coverage_weight",
+                    "exposure_value": 0.60,
+                    "coverage_weight": 0.60,
+                    "as_of_date": "2026-06-01",
+                },
+            ],
+        }
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "style_exposure_observe" in codes
+    assert "quality_growth" not in codes
 
 
 def test_deep_value_label_emits_from_precomputed_factor_exposures():

@@ -6,14 +6,14 @@
 
 | fund_code | fund_name | 样本池 | 结果来源 | 分组 | triggered | not_triggered | not_computed |
 |---|---|---|---|---|---:|---:|---:|
-| `000006` | 西部利得量化成长混合A | 主动权益候选池 | official | v1正式权益样本池；主动权益候选池 | 10 | 20 | 0 |
-| `000017` | 财通可持续混合 | 质量成长/行业集中/高收益池 | official | v1正式权益样本池；主动权益候选池；风格标签触发池；质量成长风格池；高收益高风险观察池；行业集中观察池 | 14 | 16 | 0 |
-| `000251` | 工银金融地产混合A | 深度价值/红利稳健风格池 | official | v1正式权益样本池；主动权益候选池；风格标签触发池；深度价值风格池；红利稳健风格池；行业集中观察池 | 10 | 20 | 0 |
-| `000273` | 华润元大安鑫灵活配置混合A | 高收益高回撤观察池 | official | 数据缺口/人工复核池；主动权益候选池；高收益高风险观察池；行业集中观察池；小规模观察池 | 11 | 13 | 6 |
-| `000373` | 华安中证细分医药ETF联接A | 被动指数工具池 | official | 数据缺口/人工复核池；被动指数工具池；行业集中观察池；小规模观察池 | 9 | 15 | 6 |
-| `000411` | 景顺长城优质成长股票A | 主动股票型/质量成长池 | official | 数据缺口/人工复核池；主动权益候选池；风格标签触发池；质量成长风格池；高收益高风险观察池；行业集中观察池 | 10 | 14 | 6 |
-| `000628` | 大成高鑫股票A | 主动股票型/低波动池 | official | 数据缺口/人工复核池；主动权益候选池 | 8 | 16 | 6 |
-| `100038` | 富国沪深300指数增强A | 被动指数增强/深度价值池 | official | v1正式权益样本池；被动指数工具池；风格标签触发池；深度价值风格池 | 11 | 19 | 0 |
+| `000006` | 西部利得量化成长混合A | 主动权益候选池 | official | v1正式权益样本池；主动权益候选池 | 10 | 22 | 0 |
+| `000017` | 财通可持续混合 | 质量成长/行业集中/高收益池 | official | v1正式权益样本池；主动权益候选池；风格标签触发池；质量成长风格池；高收益高风险观察池；行业集中观察池 | 14 | 18 | 0 |
+| `000251` | 工银金融地产混合A | 深度价值/红利稳健风格池 | official | v1正式权益样本池；主动权益候选池；风格标签触发池；深度价值风格池；红利稳健风格池；行业集中观察池 | 10 | 22 | 0 |
+| `000273` | 华润元大安鑫灵活配置混合A | 高收益高回撤观察池 | official | 数据缺口/人工复核池；主动权益候选池；高收益高风险观察池；行业集中观察池；小规模观察池 | 11 | 15 | 6 |
+| `000373` | 华安中证细分医药ETF联接A | 被动指数工具池 | official | 数据缺口/人工复核池；被动指数工具池；行业集中观察池；小规模观察池 | 9 | 17 | 6 |
+| `000411` | 景顺长城优质成长股票A | 主动股票型/质量成长池 | official | 数据缺口/人工复核池；主动权益候选池；风格标签触发池；质量成长风格池；高收益高风险观察池；行业集中观察池 | 10 | 16 | 6 |
+| `000628` | 大成高鑫股票A | 主动股票型/低波动池 | official | 数据缺口/人工复核池；主动权益候选池 | 8 | 18 | 6 |
+| `100038` | 富国沪深300指数增强A | 被动指数增强/深度价值池 | official | v1正式权益样本池；被动指数工具池；风格标签触发池；深度价值风格池 | 11 | 21 | 0 |
 | `000051` | 华夏沪深300ETF联接A | 数据缺口/穿透不足池 | canonical | 数据缺口/人工复核池；被动指数工具池 | 8 | 10 | 5 |
 | `000058` | 国联安安泰灵活配置混合A | 范围边界/低权益仓位池 | canonical | 数据缺口/人工复核池 | 7 | 11 | 5 |
 
@@ -112,7 +112,7 @@
 - `fund_size_small`：threshold_not_met，observed=1.52，threshold={'fund_size_max': 1.0}
 - `industry_concentration_observe`：threshold_not_met，observed=0.7931，threshold={'industry_top1_weight_min': 0.45, 'industry_top1_weight_max_exclusive': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.7931，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `deep_value`：threshold_not_met，observed=0.001，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
+- `deep_value`：threshold_not_met，observed=0.001，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4, 'style_exposure_formal_coverage_min': 0.7}
 
 **因为数据不足/范围边界不能算**
 - 无
@@ -159,7 +159,7 @@
 - `fund_size_small`：threshold_not_met，observed=10.77，threshold={'fund_size_max': 1.0}
 - `industry_concentration_observe`：threshold_not_met，observed=0.8498，threshold={'industry_top1_weight_min': 0.45, 'industry_top1_weight_max_exclusive': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.8498，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `quality_growth`：threshold_not_met，observed=0.0485，threshold={'roe_weighted_min': 0.15, 'revenue_growth_weighted_min': 0.15, 'quality_growth_weight_min': 0.4}
+- `quality_growth`：threshold_not_met，observed=0.0485，threshold={'roe_weighted_min': 0.15, 'revenue_growth_weighted_min': 0.15, 'quality_growth_weight_min': 0.4, 'style_exposure_formal_coverage_min': 0.7}
 - `alpha_positive`：threshold_not_met，observed=-0.047398，threshold={'alpha_min': 0.03, 'window': '3y|1y'}
 
 **因为数据不足/范围边界不能算**
@@ -210,7 +210,7 @@
 - `holding_concentration_high`：threshold_not_met，observed=0.4468，threshold={'top_10_holding_weight_min': 0.55}
 - `industry_concentration_observe`：threshold_not_met，observed=0.8133，threshold={'industry_top1_weight_min': 0.45, 'industry_top1_weight_max_exclusive': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.8133，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `deep_value`：threshold_not_met，observed=0.0，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
+- `deep_value`：threshold_not_met，observed=0.0，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4, 'style_exposure_formal_coverage_min': 0.7}
 
 **因为数据不足/范围边界不能算**
 - `alpha_positive`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
@@ -260,8 +260,8 @@
 - `holding_concentration_high`：threshold_not_met，observed=0.46816，threshold={'top_10_holding_weight_min': 0.55}
 - `industry_concentration_observe`：threshold_not_met，observed=0.725325，threshold={'industry_top1_weight_min': 0.45, 'industry_top1_weight_max_exclusive': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.725325，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `deep_value`：threshold_not_met，observed=0.1691，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
-- `dividend_steady`：threshold_not_met，observed=0.21698，threshold={'dividend_yield_min': 0.03, 'dividend_steady_weight_min': 0.5}
+- `deep_value`：threshold_not_met，observed=0.1691，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4, 'style_exposure_formal_coverage_min': 0.7}
+- `dividend_steady`：threshold_not_met，observed=0.21698，threshold={'dividend_yield_min': 0.03, 'dividend_steady_weight_min': 0.5, 'style_exposure_formal_coverage_min': 0.7}
 
 **因为数据不足/范围边界不能算**
 - `alpha_positive`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
@@ -314,7 +314,7 @@
 - `holding_concentration_high`：threshold_not_met，observed=0.5368，threshold={'top_10_holding_weight_min': 0.55}
 - `industry_concentration_observe`：threshold_not_met，observed=0.8093，threshold={'industry_top1_weight_min': 0.45, 'industry_top1_weight_max_exclusive': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.8093，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `deep_value`：threshold_not_met，observed=0.0，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
+- `deep_value`：threshold_not_met，observed=0.0，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4, 'style_exposure_formal_coverage_min': 0.7}
 
 **因为数据不足/范围边界不能算**
 - `alpha_positive`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
@@ -363,7 +363,7 @@
 - `fund_size_small`：threshold_not_met，observed=109.88，threshold={'fund_size_max': 1.0}
 - `industry_concentration_high`：threshold_not_met，observed=0.5398，threshold={'industry_top1_weight_min': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.5398，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `deep_value`：threshold_not_met，observed=0.2452，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4}
+- `deep_value`：threshold_not_met，observed=0.2452，threshold={'pb_weighted_max': 1.5, 'valuation_pct_weighted_max': 0.3, 'deep_value_weight_min': 0.4, 'style_exposure_formal_coverage_min': 0.7}
 
 **因为数据不足/范围边界不能算**
 - `alpha_positive`：benchmark_data_missing，observed=0，threshold=min(1y=180, 3y=500)
@@ -417,8 +417,8 @@
 - `holding_concentration_high`：threshold_not_met，observed=0.1706，threshold={'top_10_holding_weight_min': 0.55}
 - `industry_concentration_high`：threshold_not_met，observed=0.4721，threshold={'industry_top1_weight_min': 0.6}
 - `industry_diversified`：threshold_not_met，observed=0.4721，threshold={'industry_top1_weight_max': 0.2, 'industry_count_min': 5}
-- `dividend_steady`：threshold_not_met，observed=0.4488，threshold={'dividend_yield_min': 0.03, 'dividend_steady_weight_min': 0.5}
-- `quality_growth`：threshold_not_met，observed=0.0721，threshold={'roe_weighted_min': 0.15, 'revenue_growth_weighted_min': 0.15, 'quality_growth_weight_min': 0.4}
+- `dividend_steady`：threshold_not_met，observed=0.4488，threshold={'dividend_yield_min': 0.03, 'dividend_steady_weight_min': 0.5, 'style_exposure_formal_coverage_min': 0.7}
+- `quality_growth`：threshold_not_met，observed=0.0721，threshold={'roe_weighted_min': 0.15, 'revenue_growth_weighted_min': 0.15, 'quality_growth_weight_min': 0.4, 'style_exposure_formal_coverage_min': 0.7}
 
 **因为数据不足/范围边界不能算**
 - 无
