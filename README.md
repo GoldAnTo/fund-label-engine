@@ -60,6 +60,18 @@ data/                     本地样例数据或缓存，不提交大数据文件
 - 每个标签的证据
 - 观察池/人工复核建议
 
+## 当前可运行能力
+
+- `scripts/seed_sample_db.py` 生成本地样例 SQLite。
+- `python -m app.batch --db <sqlite>` 执行一次批量标签计算。
+- `python -m app.batch --db <fundData.sqlite> --source funddata` 读取真实 fundData schema。
+- FastAPI 查询批次、基金标签、证据、覆盖率和人工复核记录。
+- FastAPI 查询单基金完整结果包：`/v1/runs/{run_id}/funds/{fund_code}/report`。
+- 支持通过 API 写入单个标签的人工复核结论。
+
+详细目标见 [docs/project-goals.md](docs/project-goals.md)，后续待办见 [docs/todo.md](docs/todo.md)。
+真实数据接入见 [docs/funddata-integration.md](docs/funddata-integration.md)。
+
 ## 开发命令
 
 ```bash
@@ -70,3 +82,32 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
+## 本地试跑
+
+```bash
+mkdir -p data
+python scripts/seed_sample_db.py data/sample_fund_data.sqlite
+python -m app.batch --db data/sample_fund_data.sqlite
+FLE_DB_PATH=data/sample_fund_data.sqlite uvicorn app.main:app --reload
+```
+
+## fundData 试跑
+
+```bash
+cp /Users/xiongjiali/Desktop/code/fundData/fund-data/data/fund_data.sqlite /tmp/fund_data_label.sqlite
+python -m app.batch --db /tmp/fund_data_label.sqlite --source funddata
+FLE_DB_PATH=/tmp/fund_data_label.sqlite uvicorn app.main:app --reload
+```
+
+## Phase1 批量跑批（推荐工作流）
+
+冷启动跑通 168 只 phase1 基金的完整流程：
+
+```bash
+make refresh-nav        # 拉 1Y NAV 到 fundData cache
+make refresh-factors    # 拉 PE/PB/ROE/股息率到 data/stock_factors.sqlite
+make run-batch          # 跑批 + 自动外挂 factor DB（约 30 秒）
+```
+
+工作流细节、可调阈值、因子来源对照表见
+[docs/runbook-batch-workflow.md](docs/runbook-batch-workflow.md)。

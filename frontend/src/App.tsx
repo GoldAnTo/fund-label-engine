@@ -1,0 +1,37 @@
+import { NavLink, Route, Routes, Navigate } from "react-router-dom";
+import RunsPage from "./pages/RunsPage";
+import RunDetailPage from "./pages/RunDetailPage";
+import RunDiffPage from "./pages/RunDiffPage";
+import FundReportPage from "./pages/FundReportPage";
+import SearchPage from "./pages/SearchPage";
+import ReviewQueuePage from "./pages/ReviewQueuePage";
+
+export default function App() {
+  return (
+    <div className="layout">
+      <aside className="sidebar">
+        <h1>Fund Label Workbench</h1>
+        <nav>
+          <NavLink to="/runs">批次 Runs</NavLink>
+          <NavLink to="/diff">批次对比</NavLink>
+          <NavLink to="/search">基金检索</NavLink>
+          <NavLink to="/review-queue">复核队列</NavLink>
+        </nav>
+      </aside>
+      <main className="main">
+        <Routes>
+          <Route path="/" element={<Navigate to="/runs" replace />} />
+          <Route path="/runs" element={<RunsPage />} />
+          <Route path="/runs/:runId" element={<RunDetailPage />} />
+          <Route
+            path="/runs/:runId/funds/:fundCode"
+            element={<FundReportPage />}
+          />
+          <Route path="/diff" element={<RunDiffPage />} />
+          <Route path="/search" element={<SearchPage />} />
+          <Route path="/review-queue" element={<ReviewQueuePage />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}

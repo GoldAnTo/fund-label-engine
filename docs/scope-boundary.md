@@ -57,5 +57,16 @@
 
 - `style_unlabeled_stock_factors_missing`
 - `manual_review_required`
-- `observe_only`
+- `status=observe` 的观察型结果
 
+当股票因子已经存在，但基金层高级风格规则尚未启用时，只能输出：
+
+- `style_pending_rule_definition`
+
+## 数据不足处理
+
+数据不足不等于整只基金完全不可计算。当前规则是：
+
+- 必要字段不齐时，输出 `data_insufficient` 和 `manual_review_required`。
+- 已有证据能支撑的基础标签可以继续输出，但状态或批次动作应提示复核。
+- 高级风格标签必须等股票因子、聚合口径和规则验证齐备后再启用。

@@ -2,6 +2,8 @@
 
 ## 核心输入表
 
+本项目内部标准 schema 使用下面这些表。读取现有 `fundData` 数据库时，不要求原库改名，而是通过 `FundDataRepository` 做字段适配；映射关系见 `docs/funddata-integration.md`。
+
 ### fund_profiles
 
 | 字段 | 说明 |
@@ -62,6 +64,14 @@
 | custody_fee | 托管费率 |
 | sales_service_fee | 销售服务费率 |
 
+### fund_positions
+
+| 字段 | 说明 |
+|---|---|
+| fund_code | 基金代码 |
+| report_date | 报告期 |
+| equity_position | 权益仓位 |
+
 ### stock_factors
 
 | 字段 | 说明 |
@@ -77,6 +87,8 @@
 | valuation_percentile | 估值分位 |
 | style | 股票风格标签 |
 
+读取规则：股票因子必须按基金持仓报告期做 as-of 对齐，取不晚于 `fund_stock_holdings.report_date` 的最新 `factor_date`。
+
 ## 标签结果表
 
 ### label_definitions
@@ -89,6 +101,7 @@
 | fund_types | 适用基金类型 |
 | rule_version | 规则版本 |
 | enabled | 是否启用 |
+| description | 标签口径说明 |
 
 ### label_runs
 
@@ -110,6 +123,22 @@
 | value | 特征值 |
 | source | 来源 |
 
+当前基础特征包括：
+
+- `period_return`
+- `annualized_return`
+- `annualized_volatility`
+- `max_drawdown`
+- `sharpe_ratio`
+- `top_10_holding_weight`
+- `stock_holding_count`
+- `industry_top1_weight`
+- `industry_top3_weight`
+- `equity_position`
+- `manager_tenure_years`
+- `total_annual_fee`
+- `fund_size`
+
 ### fund_label_results
 
 | 字段 | 说明 |
@@ -117,6 +146,8 @@
 | run_id | 计算批次 |
 | fund_code | 基金代码 |
 | label_code | 标签代码 |
+| label_name | 标签名称 |
+| category | 标签类别 |
 | confidence | 置信度 |
 | status | active/observe/rejected |
 
@@ -144,4 +175,4 @@
 | decision | confirm/reject/observe |
 | reviewer | 复核人 |
 | comment | 复核备注 |
-
+| reviewed_at | 复核时间 |
