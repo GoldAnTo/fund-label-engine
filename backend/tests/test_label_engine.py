@@ -178,7 +178,10 @@ def test_stock_factor_boundary_is_explained_when_factors_exist_but_style_rules_a
         fund_name="易方达消费行业股票",
         fund_type="股票型",
         nav_returns=[0.01, 0.02, -0.01],
-        stock_holdings=[{"stock_code": "600519", "weight": 0.10}],
+        stock_holdings=[
+            {"stock_code": "600519", "weight": 0.49},
+            {"stock_code": "600000", "weight": 0.21},
+        ],
         industry_allocations=[{"industry": "食品饮料", "weight": 0.20}],
         stock_factors=[{"stock_code": "600519", "pb": 8.1, "roe": 0.24}],
         manager_tenure_years=6.2,
@@ -234,6 +237,7 @@ def test_style_exposure_low_coverage_blocks_formal_style_label():
                     "factor_code": "factor_coverage_weight",
                     "exposure_value": 0.40,
                     "coverage_weight": 0.40,
+                    "holding_total_weight": 0.70,
                     "as_of_date": "2026-06-01",
                 },
             ],
@@ -321,6 +325,57 @@ def test_factor_exposure_lookup_uses_latest_report_date_when_as_of_ties():
 
     codes = label_codes(result)
     assert "deep_value" in codes
+    assert "style_exposure_low_coverage" not in codes
+
+
+def test_low_stock_position_emits_scope_not_applicable_not_low_coverage():
+    fund = _style_fund(stock_factors=[])
+    fund = FundInput(
+        **{
+            **fund.__dict__,
+            "factor_exposures": [
+                {
+                    "factor_code": "factor_coverage_weight",
+                    "exposure_value": 0.30,
+                    "coverage_weight": 0.30,
+                    "holding_total_weight": 0.30,
+                    "as_of_date": "2026-06-23",
+                },
+            ],
+        }
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "style_exposure_scope_not_applicable" in codes
+    assert "style_exposure_low_coverage" not in codes
+    ev = evidence_for(result, "style_exposure_scope_not_applicable")[0]
+    assert ev.metric == "stock_holding_total_weight"
+
+
+def test_raw_low_stock_position_emits_scope_not_applicable():
+    fund = FundInput(
+        fund_code="110022",
+        fund_name="低仓位混合",
+        fund_type="混合型-灵活",
+        nav_returns=[0.001] * 30,
+        stock_holdings=[
+            {"stock_code": "600519", "weight": 0.30},
+        ],
+        industry_allocations=[{"industry": "食品饮料", "weight": 0.20}],
+        stock_factors=[{"stock_code": "600519", "pb": 8.1, "roe": 0.24}],
+        manager_tenure_years=6.2,
+        management_fee=0.010,
+        custody_fee=0.002,
+        fund_size=180.0,
+        equity_position=0.30,
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "style_exposure_scope_not_applicable" in codes
     assert "style_exposure_low_coverage" not in codes
 
 
@@ -475,7 +530,7 @@ def _base_fund(**overrides) -> FundInput:
         fund_name="测试基金",
         fund_type="股票型",
         nav_returns=[0.001] * 60,
-        stock_holdings=[{"stock_code": "600000", "weight": 0.02}] * 10,
+        stock_holdings=[{"stock_code": "600000", "weight": 0.08}] * 10,
         industry_allocations=[
             {"industry": "电子", "weight": 0.15},
             {"industry": "医药", "weight": 0.12},

@@ -87,3 +87,61 @@
 2. **非 A 股/海外持仓口径**：对 `00MSFT`、`00AAPL`、`0GOOGL` 等海外代码，以及港股左补 0 的代码，新增市场识别与 `style_exposure_scope_not_applicable` 类标签，避免继续把“风格体系不适用”误报为“因子库缺失”。
 
 优先级建议：先做第 2 类口径治理，再补真实 A 股因子。因为当前因子库对合法 A 股的覆盖已达 88.9%，而低覆盖余量里仍混有较多海外/历史代码噪声。
+
+## 6. v3：低股票仓位口径治理（新增 `style_exposure_scope_not_applicable`）
+
+对 v2 剩余 1358 只 `style_exposure_low_coverage` 进一步归因发现，最大一类是**股票持仓总权重本身低于 50%**，而非因子库缺失：
+
+| 桶 | fund_count | 说明 |
+|---|---:|---|
+| `stock_position_below_50` | 1069 | 股票持仓总权重 <50%，A 股风格暴露适用范围不足 |
+| `factor_match_ratio_low` | 256 | 股票仓位高，但因子匹配率低（多为沪港深基金，A 股因子不覆盖港股） |
+| `covered_weight_low_but_ratio_ok` | 33 | 股票仓位 50%~65%，A 股因子匹配率尚可，但覆盖权重仍略低于阈值 |
+
+典型样本：ETF 联接基金（`000008 嘉实中证500ETF联接A` 股票仓位 0.13%）、低权益仓位灵活配置混合（`000058 国联安安泰灵活配置混合A` 31.99%）。这些基金的股票风格暴露本就不足以判定，把它归入“因子覆盖不足”会误导数据缺口归因。
+
+### 6.1 实现
+
+新增 `style_exposure_scope_not_applicable`（`风格暴露适用范围不足`，`style_boundary` / `observe`）：
+
+- 当 `factor_coverage_weight < low_threshold(50%)` **且** `holding_total_weight < low_threshold(50%)` 时，改发 `style_exposure_scope_not_applicable` 而非 `style_exposure_low_coverage`。
+- 证据 metric 用 `stock_holding_total_weight`，threshold 用 `style_exposure_low_coverage_threshold`。
+- 覆盖预聚合 exposure 路径与原始 stock_factors fallback 路径两条逻辑。
+
+代码：[backend/app/label_engine/engine.py](file:///Users/xiongjiali/Desktop/code/fund-label-engine/backend/app/label_engine/engine.py) `_add_style_labels_from_exposures` / `_add_style_labels`。
+
+### 6.2 v3 标签变化
+
+输出库：`/tmp/fle-run/output-v3-style-scope.sqlite`
+
+| label_code | v1 | v2(lookup fix) | v3(scope) | Δ(v1→v3) |
+|---|---:|---:|---:|---:|
+| `style_exposure_low_coverage` | 6932 | 1358 | **289** | **-6643** |
+| `style_exposure_scope_not_applicable` | 0 | 0 | 1069 | +1069 |
+| `style_exposure_observe` | 2383 | 1172 | 1172 | -1211 |
+| `style_pending_rule_definition` | 664 | 6768 | 6768 | +6104 |
+| `deep_value` | 58 | 320 | 320 | +262 |
+| `quality_growth` | 3 | 19 | 19 | +16 |
+| `dividend_steady` | 131 | 718 | 718 | +587 |
+| `style_stable` | 5065 | 5065 | 5065 | 0 |
+| `style_drift` | 1542 | 1542 | 1542 | 0 |
+| `style_recent_shift` | 1659 | 1659 | 1659 | 0 |
+
+- 1069 只低股票仓位基金从“覆盖不足”改为“适用范围不足”，语义更准确。
+- 稳定性三类标签与正式风格标签与 v2 完全一致，说明 scope 治理只重新分类 boundary，不影响风格判定本体。
+- 剩余 289 只 `style_exposure_low_coverage` 是真正的“A 股股票仓位充足但因子缺失”基金，是下一轮扩充因子库的精准目标。
+
+### 6.3 测试
+
+新增 [backend/tests/test_label_engine.py](file:///Users/xiongjiali/Desktop/code/fund-label-engine/backend/tests/test_label_engine.py)：
+
+- `test_low_stock_position_emits_scope_not_applicable_not_low_coverage`：预聚合 exposure 路径，holding_total_weight=0.30 → scope。
+- `test_raw_low_stock_position_emits_scope_not_applicable`：原始 stock_factors 路径，单股票 0.30 权重 → scope。
+
+`backend/tests/test_label_engine.py` **43 passed**；`test_exposure_aggregator.py` + `test_stock_factor_integration.py` + `test_data_pipeline.py` 共 22 passed，无回归。
+
+## 7. 下一步
+
+- `style_exposure_low_coverage` 已从 6932 收敛到 **289**，且语义干净。
+- 289 只是“股票仓位≥50% 但 A 股因子覆盖<50%”的精准缺口，下一步可定向补 `stock_factors.sqlite`。
+- 256 只 `factor_match_ratio_low` 多为沪港深基金，待港股因子或港股市场识别接入后单独处理。

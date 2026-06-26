@@ -2526,6 +2526,35 @@ class LabelEngine:
             row = exposure_by_code.get(code) or {}
             return float(row.get("coverage_weight") or 0.0)
 
+        def _holding_total_weight() -> float:
+            row = exposure_by_code.get("factor_coverage_weight") or {}
+            return float(row.get("holding_total_weight") or 0.0)
+
+        def _emit_scope_not_applicable(holding_total_weight: float) -> None:
+            labels.append(
+                LabelResult(
+                    label_code="style_exposure_scope_not_applicable",
+                    label_name="风格暴露适用范围不足",
+                    category="style_boundary",
+                    confidence=1.0,
+                    status="observe",
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="style_exposure_scope_not_applicable",
+                    metric="stock_holding_total_weight",
+                    value=round(holding_total_weight, 4),
+                    threshold=cfg.style_exposure_low_coverage_threshold,
+                    source="fund_factor_exposures",
+                    message=(
+                        f"股票持仓总权重 {holding_total_weight:.0%}，低于 "
+                        f"{cfg.style_exposure_low_coverage_threshold:.0%} 最低阈值，"
+                        "A股风格暴露适用范围不足，不输出正式风格标签。"
+                    ),
+                )
+            )
+
         def _emit(
             label_code: str,
             label_name: str,
@@ -2561,6 +2590,10 @@ class LabelEngine:
         coverage_weight = _value("factor_coverage_weight")
 
         if coverage_weight < cfg.style_exposure_low_coverage_threshold:
+            holding_total_weight = _holding_total_weight()
+            if holding_total_weight < cfg.style_exposure_low_coverage_threshold:
+                _emit_scope_not_applicable(holding_total_weight)
+                return
             labels.append(
                 LabelResult(
                     label_code="style_exposure_low_coverage",
@@ -2693,11 +2726,13 @@ class LabelEngine:
         quality_weight = 0.0
         dividend_weight = 0.0
         coverage_weight = 0.0
+        holding_total_weight = 0.0
         for holding in fund.stock_holdings:
             stock_code = holding.get("stock_code")
             weight = float(holding.get("weight") or 0.0)
             if not stock_code or weight <= 0:
                 continue
+            holding_total_weight += weight
             factors = factor_by_stock.get(stock_code)
             if not factors:
                 continue
@@ -2730,6 +2765,31 @@ class LabelEngine:
         triggered: list[str] = []
 
         if coverage_weight < cfg.style_exposure_low_coverage_threshold:
+            if holding_total_weight < cfg.style_exposure_low_coverage_threshold:
+                labels.append(
+                    LabelResult(
+                        label_code="style_exposure_scope_not_applicable",
+                        label_name="风格暴露适用范围不足",
+                        category="style_boundary",
+                        confidence=1.0,
+                        status="observe",
+                    )
+                )
+                evidence.append(
+                    EvidenceItem(
+                        label_code="style_exposure_scope_not_applicable",
+                        metric="stock_holding_total_weight",
+                        value=round(holding_total_weight, 4),
+                        threshold=cfg.style_exposure_low_coverage_threshold,
+                        source="stock_factors",
+                        message=(
+                            f"股票持仓总权重 {holding_total_weight:.0%}，低于 "
+                            f"{cfg.style_exposure_low_coverage_threshold:.0%} 最低阈值，"
+                            "A股风格暴露适用范围不足，不输出正式风格标签。"
+                        ),
+                    )
+                )
+                return
             labels.append(
                 LabelResult(
                     label_code="style_exposure_low_coverage",
