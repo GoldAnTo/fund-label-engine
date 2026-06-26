@@ -63,6 +63,9 @@ class RuleConfig:
     quality_growth_weight_min: float = 0.5
     dividend_steady_yield_min: float = 0.03
     dividend_steady_weight_min: float = 0.5
+    high_dividend_sector_ratio_min: float = 0.6
+    consumer_dominant_ratio_min: float = 0.6
+    sector_coverage_min: float = 0.7
     style_exposure_low_coverage_threshold: float = 0.5
     style_exposure_formal_coverage_threshold: float = 0.7
     style_stability_min_periods: int = 2
@@ -235,6 +238,19 @@ class RuleConfig:
                 "dividend_yield_min": self.dividend_steady_yield_min,
                 "dividend_steady_weight_min": self.dividend_steady_weight_min,
                 "style_exposure_formal_coverage_min": self.style_exposure_formal_coverage_threshold,
+            },
+            "high_dividend_financial": {
+                "dividend_steady_weight_min": self.dividend_steady_weight_min,
+                "high_dividend_sector_ratio_min": self.high_dividend_sector_ratio_min,
+                "sector_coverage_min": self.sector_coverage_min,
+            },
+            "consumer_quality": {
+                "dividend_steady_weight_min": self.dividend_steady_weight_min,
+                "consumer_dominant_ratio_min": self.consumer_dominant_ratio_min,
+                "sector_coverage_min": self.sector_coverage_min,
+            },
+            "sector_mapping_insufficient": {
+                "sector_coverage_min": self.sector_coverage_min,
             },
             "style_exposure_low_coverage": {
                 "coverage_weight_max_exclusive": self.style_exposure_low_coverage_threshold,
@@ -421,6 +437,27 @@ DEFAULT_LABEL_DEFINITIONS = (
         "description": "高股息率股票的持仓权重占比超阈值。",
     },
     {
+        "label_code": "high_dividend_financial",
+        "label_name": "金融高股息",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "红利贡献主要来自金融、能源、公用事业、交通运输等传统高股息行业。",
+    },
+    {
+        "label_code": "consumer_quality",
+        "label_name": "消费质量",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "红利底层命中但消费行业贡献主导，归为消费质量而非红利稳健。",
+    },
+    {
+        "label_code": "sector_mapping_insufficient",
+        "label_name": "行业映射覆盖不足",
+        "category": "style_boundary",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "红利贡献股票行业映射覆盖率不足，暂不做金融/消费/红利分流。",
+    },
+    {
         "label_code": "long_term_return_strong",
         "label_name": "长期收益优秀",
         "category": "return_risk",
@@ -544,11 +581,19 @@ _RELATIVE_LABEL_FEATURES = {
     "beta_high": "beta",
     "beta_low": "beta",
 }
-_STYLE_LABELS = {"deep_value", "quality_growth", "dividend_steady"}
+_STYLE_LABELS = {
+    "deep_value",
+    "quality_growth",
+    "dividend_steady",
+    "high_dividend_financial",
+    "consumer_quality",
+}
 _STYLE_GROUP_BY_LABEL = {
     "deep_value": ("deep_value_group", "深度价值组"),
     "quality_growth": ("quality_growth_group", "质量成长组"),
     "dividend_steady": ("dividend_steady_group", "红利稳健组"),
+    "high_dividend_financial": ("high_dividend_financial_group", "金融高股息组"),
+    "consumer_quality": ("consumer_quality_group", "消费质量组"),
 }
 
 

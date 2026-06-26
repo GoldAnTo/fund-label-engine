@@ -1,3 +1,5 @@
+import json
+
 from app.label_engine.engine import FundInput, LabelEngine, RuleConfig
 
 
@@ -138,7 +140,15 @@ def test_thresholds_are_loaded_from_rule_config():
 def test_rule_config_loads_from_json_file(tmp_path):
     path = tmp_path / "rules.json"
     path.write_text(
-        '{"fee_low_threshold": 0.01, "style_drift_delta_threshold": 0.3}',
+        json.dumps(
+            {
+                "fee_low_threshold": 0.01,
+                "style_drift_delta_threshold": 0.3,
+                "high_dividend_sector_ratio_min": 0.65,
+                "consumer_dominant_ratio_min": 0.55,
+                "sector_coverage_min": 0.8,
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -146,6 +156,9 @@ def test_rule_config_loads_from_json_file(tmp_path):
 
     assert cfg.fee_low_threshold == 0.01
     assert cfg.style_drift_delta_threshold == 0.3
+    assert cfg.high_dividend_sector_ratio_min == 0.65
+    assert cfg.consumer_dominant_ratio_min == 0.55
+    assert cfg.sector_coverage_min == 0.8
 
 
 def test_style_labels_are_not_emitted_without_stock_factors():

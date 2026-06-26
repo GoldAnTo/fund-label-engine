@@ -161,6 +161,43 @@ def test_migrations_create_phase5_tables(seeded_run) -> None:
     assert "schema_migrations" in tables
 
 
+def test_migrations_create_stock_industry_map_table(tmp_path: Path) -> None:
+    db = tmp_path / "industry-map.sqlite"
+    # migration 0002/0004 会 ALTER 基线表，需先建 label_runs / label_definitions
+    sqlite3.connect(db).executescript(
+        """
+        CREATE TABLE label_runs (run_id TEXT PRIMARY KEY);
+        CREATE TABLE label_definitions (
+            label_code TEXT, rule_version TEXT,
+            PRIMARY KEY (label_code, rule_version)
+        );
+        """
+    )
+    run_migrations(str(db))
+
+    with sqlite3.connect(db) as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(stock_industry_map)").fetchall()
+        }
+
+    assert "stock_industry_map" in tables
+    assert {
+        "stock_code",
+        "industry_code",
+        "industry_name",
+        "sector_group",
+        "source",
+        "as_of_date",
+    }.issubset(cols)
+
+
 def test_migrations_create_equity_style_contributions_table(seeded_run) -> None:
     db, _ = seeded_run
     with sqlite3.connect(db) as conn:
