@@ -18,12 +18,87 @@ import sys
 from dataclasses import asdict, replace
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from app.data_access import create_repository
 from app.factors.exposure_aggregator import aggregate_factor_exposures
 from app.label_engine import LabelEngine
-from app.label_engine.engine import RuleConfig
+from app.label_engine.engine import FundInput, RuleConfig
 from app.persistence import LabelRunWriter
+
+
+def _compute_exposures(
+    repo: Any,
+    fund: FundInput,
+    rule_config: RuleConfig,
+    style_history_periods: int,
+) -> list[Any]:
+    """计算基金级因子暴露，支持单期或多期（用于风格稳定性分析）。
+
+    - ``style_history_periods <= 1``：仅计算最新一期持仓的暴露（历史行为）。
+    - ``style_history_periods >= 2``：计算最近 N 个有持仓的报告期，每期独立
+      聚合；最新一期复用已加载的 ``fund.stock_holdings`` / ``fund.stock_factors``，
+      历史期通过 repo 重新加载持仓与因子快照。所有期次的暴露拼成同一份列表，
+      交给引擎的 ``_style_history_periods`` 识别多期主导风格变化。
+
+    风格稳定性需要 ≥2 个覆盖率达标的期次才会触发标签；这里多算期次只是提供
+    原料，是否打标由引擎按 ``style_stability_min_periods`` 与覆盖率阈值决定。
+    """
+    if style_history_periods <= 1 or not hasattr(repo, "list_recent_holding_periods"):
+        return aggregate_factor_exposures(
+            fund_code=fund.fund_code,
+            report_date=fund.holding_report_date,
+            holdings=fund.stock_holdings,
+            stock_factors=fund.stock_factors,
+            rule_config=rule_config,
+        )
+
+    periods = repo.list_recent_holding_periods(fund.fund_code, style_history_periods)
+    if not periods:
+        return aggregate_factor_exposures(
+            fund_code=fund.fund_code,
+            report_date=fund.holding_report_date,
+            holdings=fund.stock_holdings,
+            stock_factors=fund.stock_factors,
+            rule_config=rule_config,
+        )
+
+    # periods 为降序；最新一期直接复用 fund 上已加载的持仓与因子，避免重复拉取。
+    # 历史期复用同一份最新因子快照（设计文档约定），因此把所有历史期持仓涉及的
+    # 股票代码合并后只查一次因子库，再按期切分——避免每期都 ATTACH+查一遍因子库。
+    latest_period = fund.holding_report_date
+    historical_periods = [p for p in periods if p != latest_period]
+    historical_holdings: dict[str, list[dict[str, Any]]] = {}
+    historical_stock_codes: set[str] = set()
+    for period in historical_periods:
+        holdings = repo.load_holdings_for_period(fund.fund_code, period)
+        historical_holdings[period] = holdings
+        historical_stock_codes.update(
+            h["stock_code"] for h in holdings if h.get("stock_code")
+        )
+    historical_factors = (
+        repo.load_stock_factors(sorted(historical_stock_codes))
+        if historical_stock_codes
+        else []
+    )
+
+    all_exposures: list[Any] = []
+    for period in periods:
+        if period == latest_period:
+            holdings = fund.stock_holdings
+            stock_factors = fund.stock_factors
+        else:
+            holdings = historical_holdings.get(period, [])
+            stock_factors = historical_factors
+        exposures = aggregate_factor_exposures(
+            fund_code=fund.fund_code,
+            report_date=period,
+            holdings=holdings,
+            stock_factors=stock_factors,
+            rule_config=rule_config,
+        )
+        all_exposures.extend(exposures)
+    return all_exposures
 
 
 def run_batch(
@@ -35,6 +110,7 @@ def run_batch(
     output_db: str | Path | None = None,
     rule_config: RuleConfig | None = None,
     factor_db: str | Path | None = None,
+    style_history_periods: int = 1,
 ) -> tuple[str, int]:
     """对支持的基金类型执行一次全量标签计算并落库。
 
@@ -92,12 +168,11 @@ def run_batch(
                 continue
             if not fund.factor_exposures and fund.stock_holdings and fund.stock_factors:
                 try:
-                    exposures = aggregate_factor_exposures(
-                        fund_code=fund.fund_code,
-                        report_date=fund.holding_report_date,
-                        holdings=fund.stock_holdings,
-                        stock_factors=fund.stock_factors,
+                    exposures = _compute_exposures(
+                        repo=repo,
+                        fund=fund,
                         rule_config=rule_config,
+                        style_history_periods=style_history_periods,
                     )
                     writer.write_factor_exposures(exposures)
                     if exposures:
@@ -201,6 +276,16 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="可选 JSON 规则配置文件路径。命令行上的单项阈值覆盖优先级更高。",
     )
+    parser.add_argument(
+        "--style-history-periods",
+        type=int,
+        default=1,
+        help=(
+            "风格稳定性分析使用的最近报告期数。默认 1（仅算最新一期，不触发风格稳定性"
+            "标签）。设为 ≥2 时，会为每只基金计算最近 N 个有持仓的报告期的因子暴露，"
+            "供引擎识别多期主导风格变化（style_stable / style_drift / style_recent_shift）。"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.db and (args.source_db or args.output_db):
@@ -235,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
         source=args.source,
         rule_config=rule_config,
         factor_db=args.factor_db,
+        style_history_periods=args.style_history_periods,
     )
     print(f"run_id={run_id} processed={processed}")
     return 0

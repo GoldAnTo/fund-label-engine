@@ -241,6 +241,54 @@ class FundDataRepository:
             industry_report_date=latest_industry_date,
         )
 
+    def list_recent_holding_periods(
+        self, fund_code: str, limit: int
+    ) -> list[str]:
+        """返回该基金最近 ``limit`` 个有持仓披露的 report_period（降序）。
+
+        用于多期风格稳定性分析：风格漂移需要同一只基金在多个报告期的
+        基金级因子暴露序列。这里只返回有 stock_holdings 数据的期次。
+        """
+        if limit <= 0:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT report_period FROM stock_holdings "
+                "WHERE fund_code = ? AND report_period IS NOT NULL "
+                "ORDER BY report_period DESC LIMIT ?",
+                (fund_code, limit),
+            ).fetchall()
+        return [row["report_period"] for row in rows]
+
+    def load_holdings_for_period(
+        self, fund_code: str, report_period: str
+    ) -> list[dict[str, Any]]:
+        """加载某只基金指定 report_period 的股票持仓（与 load_fund_input 同口径）。"""
+        with self._connect() as conn:
+            return self._rows_to_dicts(
+                conn,
+                "SELECT stock_code, stock_name, net_value_ratio AS weight, 'A' AS market "
+                "FROM stock_holdings "
+                "WHERE fund_code = ? AND report_period = ? "
+                "AND net_value_ratio IS NOT NULL "
+                "ORDER BY net_value_ratio DESC",
+                (fund_code, report_period),
+            )
+
+    def load_stock_factors(self, stock_codes: list[str]) -> list[dict[str, Any]]:
+        """加载一批股票的最新因子快照（透明走外挂 factor DB 或主库）。
+
+        多期风格稳定性分析复用同一份最新因子快照作为稳定“透镜”，衡量各报告期
+        持仓组合的因子暴露漂移；这与设计文档「loader 只有单一快照日期时对所有
+        exposure 行使用该快照日期」的约定一致。
+        """
+        if not stock_codes:
+            return []
+        from app.data_access.stock_factors import load_stock_factors
+
+        with self._connect() as conn:
+            return load_stock_factors(conn, stock_codes, None)
+
     @staticmethod
     def _load_factor_exposures(
         conn: sqlite3.Connection,

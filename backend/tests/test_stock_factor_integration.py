@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.batch import run_batch
-from app.data_access import FundRepository
+from app.data_access import FundDataRepository, FundRepository
 from app.data_access.stock_factors import load_stock_factors
 from app.persistence import LabelRunReader
 
@@ -195,3 +195,120 @@ def test_funddata_repository_emits_style_labels_when_narrow_factors_provided(
     assert "quality_growth" in label_codes
     assert "dividend_steady" in label_codes
     assert "style_unlabeled_stock_factors_missing" not in label_codes
+
+
+def _make_multi_period_db(tmp_path: Path) -> Path:
+    """两只基金股票 V(纯价值) / G(纯成长)，两期持仓权重反转 → 主导风格漂移。
+
+    - 2025-06-30: V 权重 0.70, G 权重 0.10 → 主导 deep_value
+    - 2025-12-31: V 权重 0.10, G 权重 0.70 → 主导 quality_growth
+    两期 coverage_weight 均为 0.80（≥ formal 阈值 0.70），可进入稳定性评估。
+    """
+    db = tmp_path / "style-history.sqlite"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE fund_profiles (fund_code TEXT PRIMARY KEY, fund_name TEXT, fund_type TEXT, asset_size REAL);
+        CREATE TABLE nav_history (fund_code TEXT, nav_date TEXT, daily_growth_rate REAL,
+            PRIMARY KEY (fund_code, nav_date));
+        CREATE TABLE stock_holdings (fund_code TEXT, stock_code TEXT, stock_name TEXT,
+            report_period TEXT, net_value_ratio REAL);
+        CREATE TABLE industry_allocations (fund_code TEXT, industry_name TEXT,
+            report_period TEXT, net_value_ratio REAL);
+        CREATE TABLE fund_manager_links (fund_code TEXT, manager_id TEXT, tenure_days INTEGER);
+        CREATE TABLE fee_structures (fund_code TEXT, fee_type TEXT, condition_name TEXT, fee REAL);
+        CREATE TABLE stock_factor_values (stock_code TEXT, factor_code TEXT, factor_value REAL,
+            as_of_date TEXT, source TEXT, PRIMARY KEY (stock_code, factor_code, as_of_date));
+        INSERT INTO fund_profiles VALUES ('000001','风格漂移样例','股票型',12.0);
+        INSERT INTO stock_holdings VALUES
+            ('000001','600001','纯价值','2025-06-30',0.70),
+            ('000001','600002','纯成长','2025-06-30',0.10),
+            ('000001','600001','纯价值','2025-12-31',0.10),
+            ('000001','600002','纯成长','2025-12-31',0.70);
+        INSERT INTO industry_allocations VALUES ('000001','综合','2025-12-31',0.80);
+        INSERT INTO fund_manager_links VALUES ('000001','M1', 2200);
+        INSERT INTO fee_structures VALUES
+            ('000001','运作费用','管理费率',0.012),
+            ('000001','运作费用','托管费率',0.002),
+            ('000001','运作费用','销售服务费率',0.0);
+        -- 纯价值股：低 pb / 低估值分位 / 低 roe / 低成长 / 高股息
+        INSERT INTO stock_factor_values VALUES
+            ('600001','pb',0.8,'2025-12-31','fundamentals'),
+            ('600001','valuation_percentile',0.10,'2025-12-31','fundamentals'),
+            ('600001','roe',0.05,'2025-12-31','fundamentals'),
+            ('600001','revenue_growth',0.02,'2025-12-31','fundamentals'),
+            ('600001','dividend_yield',0.06,'2025-12-31','fundamentals'),
+            ('600002','pb',5.0,'2025-12-31','fundamentals'),
+            ('600002','valuation_percentile',0.90,'2025-12-31','fundamentals'),
+            ('600002','roe',0.25,'2025-12-31','fundamentals'),
+            ('600002','revenue_growth',0.30,'2025-12-31','fundamentals'),
+            ('600002','dividend_yield',0.005,'2025-12-31','fundamentals');
+        """
+    )
+    for i in range(30):
+        conn.execute(
+            "INSERT INTO nav_history VALUES (?,?,?)",
+            ("000001", f"2025-12-{i+1:02d}", 0.0005),
+        )
+    conn.commit()
+    conn.close()
+    return db
+
+
+def test_list_recent_holding_periods_returns_descending(tmp_path: Path) -> None:
+    db = _make_multi_period_db(tmp_path)
+    repo = FundDataRepository(db)
+    assert repo.list_recent_holding_periods("000001", 5) == ["2025-12-31", "2025-06-30"]
+    assert repo.list_recent_holding_periods("000001", 1) == ["2025-12-31"]
+    assert repo.list_recent_holding_periods("000001", 0) == []
+
+
+def test_load_holdings_for_period_returns_period_specific_weights(tmp_path: Path) -> None:
+    db = _make_multi_period_db(tmp_path)
+    repo = FundDataRepository(db)
+    by_code = {h["stock_code"]: h["weight"] for h in repo.load_holdings_for_period("000001", "2025-06-30")}
+    assert by_code == {"600001": 0.70, "600002": 0.10}
+    by_code = {h["stock_code"]: h["weight"] for h in repo.load_holdings_for_period("000001", "2025-12-31")}
+    assert by_code == {"600001": 0.10, "600002": 0.70}
+
+
+def test_run_batch_style_history_periods_persists_multi_period_exposures(
+    tmp_path: Path,
+) -> None:
+    db = _make_multi_period_db(tmp_path)
+    run_id, processed = run_batch(db, source="funddata", style_history_periods=2)
+    assert processed == 1
+
+    with sqlite3.connect(db) as conn:
+        periods = {
+            row[0]
+            for row in conn.execute(
+                "SELECT DISTINCT report_date FROM fund_factor_exposures WHERE fund_code='000001'"
+            )
+        }
+    assert periods == {"2025-06-30", "2025-12-31"}
+
+
+def test_run_batch_style_history_periods_emits_style_drift(tmp_path: Path) -> None:
+    """两期主导风格 deep_value → quality_growth，应触发 style_drift（observe）。"""
+    db = _make_multi_period_db(tmp_path)
+    run_id, _ = run_batch(db, source="funddata", style_history_periods=2)
+
+    report = LabelRunReader(db).get_fund_report(run_id, "000001")
+    assert report is not None
+    label_codes = {item["label_code"] for item in report["labels"]}
+    assert "style_drift" in label_codes
+    assert "style_stable" not in label_codes
+
+
+def test_run_batch_single_period_does_not_emit_style_stability(tmp_path: Path) -> None:
+    """默认 style_history_periods=1：只算一期，风格稳定性标签不应触发。"""
+    db = _make_multi_period_db(tmp_path)
+    run_id, _ = run_batch(db, source="funddata")
+
+    report = LabelRunReader(db).get_fund_report(run_id, "000001")
+    assert report is not None
+    label_codes = {item["label_code"] for item in report["labels"]}
+    assert "style_drift" not in label_codes
+    assert "style_stable" not in label_codes
+    assert "style_recent_shift" not in label_codes
