@@ -449,6 +449,29 @@ def test_style_drift_emits_observe_label_when_dominant_style_changes():
     assert evidence_for(result, "style_drift")[0].metric == "dominant_style_change"
 
 
+def test_default_label_definitions_include_style_scope_boundary_label():
+    from app.label_engine.engine import DEFAULT_LABEL_DEFINITIONS
+
+    assert "style_exposure_scope_not_applicable" in {
+        item["label_code"] for item in DEFAULT_LABEL_DEFINITIONS
+    }
+
+
+def test_recent_shift_requires_delta_threshold_when_dominant_style_changes():
+    fund = _style_history_fund(
+        [
+            ("2025-03-31", 0.26, 0.10, 0.08, 0.85),
+            ("2025-06-30", 0.24, 0.25, 0.08, 0.86),
+        ]
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "style_drift" in codes
+    assert "style_recent_shift" not in codes
+
+
 def test_style_stable_emits_observe_label_when_dominant_style_persists():
     fund = _style_history_fund(
         [

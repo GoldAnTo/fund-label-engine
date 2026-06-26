@@ -80,6 +80,19 @@ def test_get_run_fund_report_returns_complete_payload(seeded_run) -> None:
     assert "total_annual_fee" in feature_codes
 
 
+def test_fund_report_includes_equity_style_contributions(seeded_run) -> None:
+    db, run_id = seeded_run
+    client = TestClient(create_app(db_path=db))
+
+    response = client.get(f"/v1/runs/{run_id}/funds/000001/report")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "equity_style_contributions" in payload
+    assert isinstance(payload["equity_style_contributions"], list)
+    assert "equity_style_contribution_count" in payload["summary"]
+
+
 def test_get_run_fund_404_for_unknown_fund(seeded_run) -> None:
     db, run_id = seeded_run
     client = TestClient(create_app(db_path=db))

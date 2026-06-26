@@ -10,6 +10,7 @@ from typing import Any
 
 from app.label_engine.engine import DEFAULT_LABEL_DEFINITIONS, EngineResult, RuleConfig
 from app.factors.exposure_aggregator import FundFactorExposure
+from app.factors.equity_contributions import EquityStyleContribution
 
 
 SCHEMA_STATEMENTS = (
@@ -376,6 +377,40 @@ class LabelRunWriter:
                         item.covered_stock_count,
                         item.source,
                         item.as_of_date,
+                        item.computed_at,
+                    ),
+                )
+            conn.commit()
+
+    def write_equity_style_contributions(
+        self,
+        contributions: list[EquityStyleContribution],
+    ) -> None:
+        if not contributions:
+            return
+        with self._connect() as conn:
+            for item in contributions:
+                conn.execute(
+                    "INSERT OR REPLACE INTO fund_equity_style_contributions "
+                    "(fund_code, report_date, stock_code, stock_name, weight, "
+                    " style_code, style_name, matched, contribution_weight, "
+                    " factor_values_json, rule_snapshot_json, factor_as_of_date, "
+                    " source, computed_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        item.fund_code,
+                        item.report_date,
+                        item.stock_code,
+                        item.stock_name,
+                        item.weight,
+                        item.style_code,
+                        item.style_name,
+                        item.matched,
+                        item.contribution_weight,
+                        item.factor_values_json,
+                        item.rule_snapshot_json,
+                        item.factor_as_of_date,
+                        item.source,
                         item.computed_at,
                     ),
                 )

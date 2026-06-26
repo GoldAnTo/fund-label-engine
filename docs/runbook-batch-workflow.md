@@ -72,6 +72,16 @@ make run-batch
 `ATTACH DATABASE` 把它挂上，并通过 TEMP VIEW 让 `load_stock_factors` 透明指向
 外挂表。读取层（`data_access/stock_factors.py`）感受不到差异。
 
+真实双库跑批现在会自动校验权益因子链路：
+
+- 跑前要求 source DB 或 `--factor-db` 中存在非空 `stock_factor_values` / `stock_factors`。
+- 跑后要求输出库写出 `fund_factor_exposures`。
+- 跑后要求至少有基金进入 `style_factor_ready_pool`。
+- 跑后要求 `deep_value` / `quality_growth` / `dividend_steady` 至少被正式评估过。
+
+如果只是构造一个没有股票因子的小样本 smoke，可以显式传
+`--skip-equity-factor-check`，但真实 fundData 跑批不要跳过这个校验。
+
 ## 三、Phase1 范围控制
 
 环境变量 `FLE_PHASE1_CODES_FILE` 指向一份 fund_code 清单时，
@@ -223,7 +233,10 @@ ETF 联接结构性无持仓），属于饱和状态。
 ### 2. 风格规则一只都没触发
 
 - 检查 `data/stock_factors.sqlite` 是否存在且非空
-- 检查 `make run-batch` 里 `--factor-db` 路径是否生效
+- 检查 `make run-batch` 或手工命令里 `--factor-db` 路径是否指向
+  `data/stock_factors.sqlite`，不要误指到 source DB
+- 如果 CLI 报 `equity factor validation failed`，先按错误信息检查
+  `fund_factor_exposures` 和 `style_factor_ready_pool`
 - 看具体一只基金的因子覆盖：
   ```python
   from app.data_access.funddata_repository import FundDataRepository

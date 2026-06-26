@@ -145,6 +145,26 @@ def export_run_results(run_payload: dict[str, Any], fmt: str) -> tuple[bytes, st
             ],
         ),
         (
+            "equity_style_contributions",
+            run_payload.get("equity_style_contributions", []),
+            [
+                "fund_code",
+                "report_date",
+                "stock_code",
+                "stock_name",
+                "weight",
+                "style_code",
+                "style_name",
+                "matched",
+                "contribution_weight",
+                "factor_values_json",
+                "rule_snapshot_json",
+                "factor_as_of_date",
+                "source",
+                "computed_at",
+            ],
+        ),
+        (
             "calculations",
             run_payload["calculations"],
             [
@@ -221,6 +241,11 @@ def export_fund_report(report: dict[str, Any], fmt: str) -> tuple[bytes, str, st
         ("evidence", report.get("evidence", []), None),
         ("features", report.get("features", []), None),
         ("factor_exposures", report.get("factor_exposures", []), None),
+        (
+            "equity_style_contributions",
+            report.get("equity_style_contributions", []),
+            None,
+        ),
         ("calculations", report.get("calculations", []), None),
         ("classifications", report.get("classifications", []), None),
         ("groups", report.get("groups", []), None),

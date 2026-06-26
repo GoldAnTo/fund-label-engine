@@ -161,6 +161,18 @@ def test_migrations_create_phase5_tables(seeded_run) -> None:
     assert "schema_migrations" in tables
 
 
+def test_migrations_create_equity_style_contributions_table(seeded_run) -> None:
+    db, _ = seeded_run
+    with sqlite3.connect(db) as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert "fund_equity_style_contributions" in tables
+
+
 def test_reader_fund_report_includes_label_calculation_states(seeded_run) -> None:
     db, run_id = seeded_run
 

@@ -197,6 +197,30 @@ def test_funddata_repository_emits_style_labels_when_narrow_factors_provided(
     assert "style_unlabeled_stock_factors_missing" not in label_codes
 
 
+def test_run_batch_persists_equity_style_contributions(tmp_path: Path) -> None:
+    """端到端：跑标签时同步写入股票级风格贡献明细。"""
+    db = _make_db_with_holdings(tmp_path)
+    _add_narrow_factors(db)
+
+    run_id, processed = run_batch(db, source="funddata")
+    assert processed == 1
+
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT stock_code, style_code, contribution_weight "
+            "FROM fund_equity_style_contributions "
+            "WHERE fund_code='000001' AND matched=1 "
+            "ORDER BY stock_code, style_code"
+        ).fetchall()
+
+    pairs = {(r["stock_code"], r["style_code"]) for r in rows}
+    # 600519 命中三类，601398 命中三类（按测试因子数据）
+    assert ("600519", "deep_value") in pairs
+    assert ("601398", "dividend_steady") in pairs
+    assert all(r["contribution_weight"] > 0 for r in rows)
+
+
 def _make_multi_period_db(tmp_path: Path) -> Path:
     """两只基金股票 V(纯价值) / G(纯成长)，两期持仓权重反转 → 主导风格漂移。
 

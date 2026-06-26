@@ -385,6 +385,56 @@ def test_funddata_repository_maps_real_schema_to_engine_input(
     assert fund.stock_factors == []
 
 
+def test_funddata_repository_treats_no_fee_placeholder_as_missing_fee_data(
+    funddata_style_db: Path,
+) -> None:
+    with sqlite3.connect(funddata_style_db) as conn:
+        conn.execute("DELETE FROM fee_structures WHERE fund_code = '000001'")
+        conn.execute(
+            "INSERT INTO fee_structures VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "000001",
+                "运作费用",
+                "场内ETF-无费率信息",
+                None,
+                "fundData",
+                "now",
+                None,
+                None,
+                None,
+            ),
+        )
+        conn.commit()
+
+    fund = FundDataRepository(funddata_style_db).load_fund_input("000001")
+
+    assert fund is not None
+    assert fund.management_fee is None
+    assert fund.custody_fee is None
+    assert fund.sales_service_fee is None
+
+    run_id, _ = run_batch(funddata_style_db, source="funddata")
+    with sqlite3.connect(funddata_style_db) as conn:
+        conn.row_factory = sqlite3.Row
+        labels = {
+            row["label_code"]
+            for row in conn.execute(
+                "SELECT label_code FROM fund_label_results "
+                "WHERE run_id = ? AND fund_code = '000001'",
+                (run_id,),
+            ).fetchall()
+        }
+        fee_low_state = conn.execute(
+            "SELECT state, reason_code FROM label_calculation_states "
+            "WHERE run_id = ? AND fund_code = '000001' AND label_code = 'fee_low'",
+            (run_id,),
+        ).fetchone()
+
+    assert "fee_low" not in labels
+    assert fee_low_state["state"] == "not_computed"
+    assert fee_low_state["reason_code"] == "fee_structure_missing"
+
+
 def test_batch_accepts_funddata_source_and_persists_full_feature_set(
     funddata_style_db: Path,
 ) -> None:

@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.batch import run_batch
+from app.batch import (
+    run_batch,
+    validate_equity_factor_inputs,
+    validate_equity_factor_outputs,
+)
 from app.main import create_app
 from scripts.seed_sample_db import seed
 
@@ -143,3 +147,160 @@ def test_cli_accepts_rule_config_file(source_db: Path, tmp_path: Path) -> None:
         ).fetchone()[0]
     snapshot = json.loads(snapshot_raw)
     assert snapshot["fee_low_threshold"] == 0.01
+
+
+def test_equity_factor_preflight_rejects_empty_factor_db(
+    source_db: Path,
+    tmp_path: Path,
+) -> None:
+    factor_db = tmp_path / "empty_factors.sqlite"
+    with sqlite3.connect(factor_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE stock_factor_values (
+                stock_code TEXT,
+                factor_code TEXT,
+                factor_value REAL,
+                as_of_date TEXT,
+                source TEXT
+            )
+            """
+        )
+
+    with pytest.raises(ValueError, match="stock factor rows"):
+        validate_equity_factor_inputs(source_db=source_db, factor_db=factor_db)
+
+
+def test_equity_factor_output_validation_requires_exposures_and_ready_pool(
+    tmp_path: Path,
+) -> None:
+    output_db = tmp_path / "label_results.sqlite"
+    with sqlite3.connect(output_db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE fund_factor_exposures (
+                fund_code TEXT,
+                report_date TEXT,
+                factor_code TEXT,
+                exposure_value REAL,
+                coverage_weight REAL,
+                holding_total_weight REAL,
+                stock_count INTEGER,
+                covered_stock_count INTEGER,
+                source TEXT,
+                as_of_date TEXT,
+                computed_at TEXT
+            );
+            CREATE TABLE fund_group_results (
+                run_id TEXT,
+                fund_code TEXT,
+                group_code TEXT,
+                group_name TEXT,
+                group_type TEXT,
+                reason_code TEXT,
+                evidence TEXT,
+                source TEXT
+            );
+            CREATE TABLE label_calculation_states (
+                run_id TEXT,
+                fund_code TEXT,
+                label_code TEXT,
+                label_name TEXT,
+                category TEXT,
+                state TEXT,
+                reason_code TEXT,
+                observed TEXT,
+                threshold TEXT,
+                source TEXT,
+                message TEXT
+            );
+            """
+        )
+
+    with pytest.raises(ValueError, match="fund_factor_exposures"):
+        validate_equity_factor_outputs(output_db, run_id="r1")
+
+    with sqlite3.connect(output_db) as conn:
+        conn.execute(
+            "INSERT INTO fund_factor_exposures VALUES "
+            "('000001', '2025-12-31', 'factor_coverage_weight', 0.8, 0.8, 0.8, "
+            "10, 10, 'test', '2026-06-23', 'now')"
+        )
+        conn.execute(
+            "INSERT INTO label_calculation_states VALUES "
+            "('r1', '000001', 'deep_value', '深度价值', 'holding_style', "
+            "'not_triggered', 'threshold_not_met', '0.1', '0.6', 'test', '')"
+        )
+
+    with pytest.raises(ValueError, match="style_factor_ready_pool"):
+        validate_equity_factor_outputs(output_db, run_id="r1")
+
+    with sqlite3.connect(output_db) as conn:
+        conn.execute(
+            "INSERT INTO fund_group_results VALUES "
+            "('r1', '000001', 'style_factor_ready_pool', '风格因子可用池', "
+            "'style', 'stock_factors_available', '{}', 'stock_factors')"
+        )
+
+    validate_equity_factor_outputs(output_db, run_id="r1")
+
+
+def test_equity_factor_validation_requires_contributions_for_triggered_styles(
+    tmp_path: Path,
+) -> None:
+    """触发了风格标签的基金，必须有对应的股票级贡献明细，否则校验失败。"""
+    output_db = tmp_path / "label_results.sqlite"
+    with sqlite3.connect(output_db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE fund_factor_exposures (
+                fund_code TEXT, report_date TEXT, factor_code TEXT,
+                exposure_value REAL, coverage_weight REAL, holding_total_weight REAL,
+                stock_count INTEGER, covered_stock_count INTEGER, source TEXT,
+                as_of_date TEXT, computed_at TEXT
+            );
+            CREATE TABLE fund_group_results (
+                run_id TEXT, fund_code TEXT, group_code TEXT, group_name TEXT,
+                group_type TEXT, reason_code TEXT, evidence TEXT, source TEXT
+            );
+            CREATE TABLE label_calculation_states (
+                run_id TEXT, fund_code TEXT, label_code TEXT, label_name TEXT,
+                category TEXT, state TEXT, reason_code TEXT, observed TEXT,
+                threshold TEXT, source TEXT, message TEXT
+            );
+            CREATE TABLE fund_label_results (
+                run_id TEXT, fund_code TEXT, label_code TEXT, label_name TEXT,
+                category TEXT, confidence REAL, status TEXT
+            );
+            CREATE TABLE fund_equity_style_contributions (
+                fund_code TEXT, report_date TEXT, stock_code TEXT, stock_name TEXT,
+                weight REAL, style_code TEXT, style_name TEXT, matched INTEGER,
+                contribution_weight REAL, factor_values_json TEXT,
+                rule_snapshot_json TEXT, factor_as_of_date TEXT, source TEXT,
+                computed_at TEXT
+            );
+            INSERT INTO fund_factor_exposures VALUES
+                ('000001','2025-12-31','factor_coverage_weight',0.8,0.8,0.8,
+                 10,10,'test','2026-06-23','now');
+            INSERT INTO label_calculation_states VALUES
+                ('r1','000001','dividend_steady','红利稳健','holding_style',
+                 'triggered','threshold_met','0.6','0.5','test','');
+            INSERT INTO fund_group_results VALUES
+                ('r1','000001','style_factor_ready_pool','风格因子可用池',
+                 'style','stock_factors_available','{}','stock_factors');
+            INSERT INTO fund_label_results VALUES
+                ('r1','000001','dividend_steady','红利稳健','style',0.9,'active');
+            """
+        )
+
+    with pytest.raises(ValueError, match="equity style contributions"):
+        validate_equity_factor_outputs(output_db, run_id="r1")
+
+    with sqlite3.connect(output_db) as conn:
+        conn.execute(
+            "INSERT INTO fund_equity_style_contributions VALUES "
+            "('000001','2025-12-31','600002','红利股票',0.082,'dividend_steady',"
+            "'红利稳健',1,0.082,'{}','{}','2026-06-23','test','now')"
+        )
+
+    validate_equity_factor_outputs(output_db, run_id="r1")

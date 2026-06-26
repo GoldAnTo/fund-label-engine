@@ -365,6 +365,13 @@ DEFAULT_LABEL_DEFINITIONS = (
         "description": "基金级因子覆盖权重低于最低阈值，不能正式判断风格。",
     },
     {
+        "label_code": "style_exposure_scope_not_applicable",
+        "label_name": "风格暴露适用范围不足",
+        "category": "style_boundary",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "股票持仓总权重不足，A 股风格暴露不适合正式判断。",
+    },
+    {
         "label_code": "style_exposure_observe",
         "label_name": "风格暴露仅观察",
         "category": "style_boundary",
@@ -3038,28 +3045,29 @@ class LabelEngine:
                     ),
                 )
             )
-            labels.append(
-                LabelResult(
-                    label_code="style_recent_shift",
-                    label_name="近期风格切换",
-                    category="style_stability",
-                    confidence=0.7,
-                    status="observe",
+            if abs(latest_delta) >= cfg.style_recent_shift_threshold:
+                labels.append(
+                    LabelResult(
+                        label_code="style_recent_shift",
+                        label_name="近期风格切换",
+                        category="style_stability",
+                        confidence=0.7,
+                        status="observe",
+                    )
                 )
-            )
-            evidence.append(
-                EvidenceItem(
-                    label_code="style_recent_shift",
-                    metric="latest_dominant_style_delta",
-                    value=round(latest_delta, 4),
-                    threshold=cfg.style_recent_shift_threshold,
-                    source="fund_factor_exposures",
-                    message=(
-                        f"最新一期 {latest_style} 暴露较上一期增加 "
-                        f"{latest_delta:.0%}，达到近期切换观察阈值。"
-                    ),
+                evidence.append(
+                    EvidenceItem(
+                        label_code="style_recent_shift",
+                        metric="latest_dominant_style_delta",
+                        value=round(latest_delta, 4),
+                        threshold=cfg.style_recent_shift_threshold,
+                        source="fund_factor_exposures",
+                        message=(
+                            f"最新一期 {latest_style} 暴露较上一期变化 "
+                            f"{latest_delta:.0%}，达到近期切换观察阈值。"
+                        ),
+                    )
                 )
-            )
             return
 
         dominant_values = [

@@ -99,6 +99,7 @@ class LabelRunReader:
             "classifications": self.list_classifications(run_id, fund_code),
             "groups": self.list_groups(run_id, fund_code),
             "factor_exposures": self.list_factor_exposures(fund_code),
+            "equity_style_contributions": self.list_equity_style_contributions(fund_code),
             "reviews": self.list_reviews(run_id, fund_code),
         }
 
@@ -196,6 +197,27 @@ class LabelRunReader:
                 return []
         return [dict(row) for row in rows]
 
+    def list_equity_style_contributions(
+        self,
+        fund_code: str | None = None,
+        style_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM fund_equity_style_contributions WHERE 1=1"
+        params: list[Any] = []
+        if fund_code:
+            sql += " AND fund_code = ?"
+            params.append(fund_code)
+        if style_code:
+            sql += " AND style_code = ?"
+            params.append(style_code)
+        sql += " ORDER BY style_code, contribution_weight DESC, stock_code"
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(sql, params).fetchall()
+            except sqlite3.OperationalError:
+                return []
+        return [dict(row) for row in rows]
+
     def list_reviews(self, run_id: str, fund_code: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             try:
@@ -227,6 +249,9 @@ class LabelRunReader:
             "classification_count": len(payload["classifications"]),
             "group_count": len(payload["groups"]),
             "factor_exposure_count": len(payload["factor_exposures"]),
+            "equity_style_contribution_count": len(
+                payload["equity_style_contributions"]
+            ),
             "missing_field_count": len(missing_fields),
             "review_count": len(payload["reviews"]),
             "review_action": payload["review_action"],
@@ -735,6 +760,13 @@ class LabelRunReader:
                 ).fetchall()
             except sqlite3.OperationalError:
                 factor_exposures = []
+            try:
+                equity_style_contributions = conn.execute(
+                    "SELECT * FROM fund_equity_style_contributions "
+                    "ORDER BY fund_code, style_code, contribution_weight DESC, stock_code"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                equity_style_contributions = []
         return {
             "run_id": run_id,
             "run_at": run["run_at"],
@@ -748,6 +780,9 @@ class LabelRunReader:
             "groups": [dict(r) for r in groups],
             "coverage": [dict(r) for r in coverage],
             "factor_exposures": [dict(r) for r in factor_exposures],
+            "equity_style_contributions": [
+                dict(r) for r in equity_style_contributions
+            ],
             "failures": [dict(r) for r in failures],
         }
 

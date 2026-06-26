@@ -14,6 +14,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 from dataclasses import asdict, replace
 from datetime import date
@@ -22,9 +23,146 @@ from typing import Any
 
 from app.data_access import create_repository
 from app.factors.exposure_aggregator import aggregate_factor_exposures
+from app.factors.equity_contributions import build_equity_style_contributions
 from app.label_engine import LabelEngine
 from app.label_engine.engine import FundInput, RuleConfig
 from app.persistence import LabelRunWriter
+
+
+STYLE_LABEL_CODES = ("deep_value", "quality_growth", "dividend_steady")
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _factor_row_count(conn: sqlite3.Connection) -> int:
+    count = 0
+    if _table_exists(conn, "stock_factor_values"):
+        count += int(
+            conn.execute("SELECT COUNT(*) FROM stock_factor_values").fetchone()[0]
+        )
+    if _table_exists(conn, "stock_factors"):
+        count += int(conn.execute("SELECT COUNT(*) FROM stock_factors").fetchone()[0])
+    return count
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def validate_equity_factor_inputs(
+    *,
+    source_db: str | Path,
+    factor_db: str | Path | None,
+) -> None:
+    """Fail early when a real separated batch has no usable stock-factor rows."""
+    candidate = Path(factor_db) if factor_db is not None else Path(source_db)
+    if not candidate.is_file():
+        raise ValueError(f"equity factor DB does not exist: {candidate}")
+    with sqlite3.connect(candidate) as conn:
+        rows = _factor_row_count(conn)
+    if rows <= 0:
+        raise ValueError(
+            f"equity factor DB must contain stock factor rows: {candidate}"
+        )
+
+
+def validate_equity_factor_outputs(output_db: str | Path, *, run_id: str) -> None:
+    """Validate that a batch run actually produced equity-factor analysis."""
+    with sqlite3.connect(output_db) as conn:
+        exposure_count = 0
+        if _table_exists(conn, "fund_factor_exposures"):
+            if "run_id" in _table_columns(conn, "fund_factor_exposures"):
+                exposure_count = conn.execute(
+                    "SELECT COUNT(*) FROM fund_factor_exposures WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()[0]
+            else:
+                exposure_count = conn.execute(
+                    "SELECT COUNT(*) FROM fund_factor_exposures"
+                ).fetchone()[0]
+        if exposure_count <= 0:
+            raise ValueError(
+                "equity factor validation failed: fund_factor_exposures is empty"
+            )
+
+        ready_count = (
+            conn.execute(
+                """
+                SELECT COUNT(DISTINCT fund_code)
+                FROM fund_group_results
+                WHERE run_id = ? AND group_code = 'style_factor_ready_pool'
+                """,
+                (run_id,),
+            ).fetchone()[0]
+            if _table_exists(conn, "fund_group_results")
+            else 0
+        )
+        if ready_count <= 0:
+            raise ValueError(
+                "equity factor validation failed: style_factor_ready_pool is empty"
+            )
+
+        style_state_count = (
+            conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM label_calculation_states
+                WHERE run_id = ?
+                  AND label_code IN ({",".join("?" for _ in STYLE_LABEL_CODES)})
+                  AND state != 'not_computed'
+                """,
+                (run_id, *STYLE_LABEL_CODES),
+            ).fetchone()[0]
+            if _table_exists(conn, "label_calculation_states")
+            else 0
+        )
+        if style_state_count <= 0:
+            raise ValueError(
+                "equity factor validation failed: holding-style labels were not evaluated"
+            )
+
+        if _table_exists(conn, "fund_label_results"):
+            triggered = conn.execute(
+                f"""
+                SELECT DISTINCT fund_code, label_code
+                FROM fund_label_results
+                WHERE run_id = ?
+                  AND label_code IN ({",".join("?" for _ in STYLE_LABEL_CODES)})
+                """,
+                (run_id, *STYLE_LABEL_CODES),
+            ).fetchall()
+            if triggered and _table_exists(conn, "fund_equity_style_contributions"):
+                for fund_code, label_code in triggered:
+                    contrib_count = conn.execute(
+                        "SELECT COUNT(*) FROM fund_equity_style_contributions "
+                        "WHERE fund_code = ? AND style_code = ? AND matched = 1",
+                        (fund_code, label_code),
+                    ).fetchone()[0]
+                    if contrib_count <= 0:
+                        raise ValueError(
+                            "equity factor validation failed: missing equity style "
+                            f"contributions for {fund_code}/{label_code}"
+                        )
+            elif triggered:
+                raise ValueError(
+                    "equity factor validation failed: equity style contributions "
+                    "table is missing while style labels were triggered"
+                )
+
+
+def _should_validate_equity_factors(args: argparse.Namespace) -> bool:
+    return bool(
+        args.source_db
+        and args.output_db
+        and args.source in {"auto", "funddata"}
+        and not args.skip_equity_factor_check
+    )
 
 
 def _compute_exposures(
@@ -180,6 +318,14 @@ def run_batch(
                             fund,
                             factor_exposures=[asdict(item) for item in exposures],
                         )
+                    contributions = build_equity_style_contributions(
+                        fund_code=fund.fund_code,
+                        report_date=fund.holding_report_date,
+                        holdings=fund.stock_holdings,
+                        stock_factors=fund.stock_factors,
+                        rule_config=rule_config,
+                    )
+                    writer.write_equity_style_contributions(contributions)
                 except Exception as exc:  # noqa: BLE001 - 聚合失败降级走旧路径
                     writer.write_failure(
                         run_id=run_id,
@@ -272,6 +418,13 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--skip-equity-factor-check",
+        action="store_true",
+        help=(
+            "跳过真实双库 batch 的权益因子输入/输出校验。仅用于无权益因子的小样本 smoke。"
+        ),
+    )
+    parser.add_argument(
         "--rule-config",
         default=None,
         help="可选 JSON 规则配置文件路径。命令行上的单项阈值覆盖优先级更高。",
@@ -332,6 +485,16 @@ def main(argv: list[str] | None = None) -> int:
             else RuleConfig(disabled_rules=merged)
         )
 
+    validate_equity_factors = _should_validate_equity_factors(args)
+    if validate_equity_factors:
+        try:
+            validate_equity_factor_inputs(
+                source_db=args.source_db,
+                factor_db=args.factor_db,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+
     run_id, processed = run_batch(
         db_path=args.db,
         source_db=args.source_db,
@@ -342,6 +505,11 @@ def main(argv: list[str] | None = None) -> int:
         factor_db=args.factor_db,
         style_history_periods=args.style_history_periods,
     )
+    if validate_equity_factors:
+        try:
+            validate_equity_factor_outputs(args.output_db, run_id=run_id)
+        except ValueError as exc:
+            parser.error(str(exc))
     print(f"run_id={run_id} processed={processed}")
     return 0
 

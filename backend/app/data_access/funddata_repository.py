@@ -9,10 +9,7 @@ from app.label_engine.engine import SUPPORTED_ACTIVE_EQUITY_TYPES, FundInput
 
 
 # 真库里大量 ETF / LOF 在 fee_structures 表只存了「场内ETF-无费率信息」
-# 这一占位行，没有标准的「管理费率/托管费率/销售服务费率」三件套。
-# 这种情况下视为 ETF 隐含费率：management/custody/sales 三项都按 0 兜底，
-# 让 fee_structure gate 能通过；evidence 仍会显示 total_annual_fee=0，
-# 留给复核判断是否需要打补丁。
+# 这一占位行不等于管理费/托管费为 0，不能作为正式 fee_low 证据。
 _ETF_NO_FEE_CONDITION = "场内ETF-无费率信息"
 
 
@@ -180,18 +177,10 @@ class FundDataRepository:
             custody_fee = fee_row["custody_fee"] if fee_row else None
             sales_service_fee = fee_row["sales_service_fee"] if fee_row else None
             etf_no_fee = bool(fee_row["etf_no_fee_flag"]) if fee_row else False
-            # ETF 场内只在表里挂了「无费率信息」占位 → 三项费率按 0 兜底，
-            # 与标准基金保持同一套 fee_structure gate；下游标签若关心绝对值
-            # 仍可通过 total_annual_fee=0 + evidence 看到这是 ETF 兜底而非真低。
-            if (
-                etf_no_fee
-                and management_fee is None
-                and custody_fee is None
-                and sales_service_fee is None
-            ):
-                management_fee = 0.0
-                custody_fee = 0.0
-                sales_service_fee = 0.0
+            # 只出现「场内ETF-无费率信息」占位时，保持 None，让 fee_structure
+            # gate 显式失败；等抓到真实运作费用后再输出 fee_low/fee_high。
+            if etf_no_fee and management_fee is None and custody_fee is None:
+                sales_service_fee = None
 
             equity_row = conn.execute(
                 "SELECT SUM(net_value_ratio) AS equity_position "

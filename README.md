@@ -99,10 +99,20 @@ FLE_DB_PATH=data/sample_fund_data.sqlite uvicorn app.main:app --reload
 ## fundData 试跑
 
 ```bash
-cp /Users/xiongjiali/Desktop/code/fundData/fund-data/data/fund_data.sqlite /tmp/fund_data_label.sqlite
-python -m app.batch --db /tmp/fund_data_label.sqlite --source funddata --rule-config config/rules.v1.json
+cp /Users/xiongjiali/Desktop/code/fundData/fund-data/data/fund_data.sqlite /tmp/fund_data_source.sqlite
+python -m app.batch \
+  --source-db /tmp/fund_data_source.sqlite \
+  --output-db /tmp/fund_data_label.sqlite \
+  --source funddata \
+  --rule-config config/rules.v1.json \
+  --factor-db data/stock_factors.sqlite \
+  --style-history-periods 2
 FLE_DB_PATH=/tmp/fund_data_label.sqlite uvicorn app.main:app --reload
 ```
+
+真实 fundData 双库跑批会自动校验权益因子链路：`--factor-db` 必须指向非空
+股票因子库，并且输出库必须生成 `fund_factor_exposures` 和
+`style_factor_ready_pool`。
 
 ## Phase1 批量跑批（推荐工作流）
 
