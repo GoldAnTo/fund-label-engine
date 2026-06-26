@@ -2583,6 +2583,53 @@ class LabelEngine:
             str(row.get("as_of_date") or ""),
         )
 
+    def _dividend_sector_values(
+        self,
+        exposure_by_code: dict[str, dict[str, Any]],
+    ) -> dict[str, float]:
+        def value(code: str) -> float:
+            row = exposure_by_code.get(code) or {}
+            return float(row.get("exposure_value") or 0.0)
+
+        return {
+            "financial": value("dividend_sector_financial_ratio"),
+            "energy_utility": value("dividend_sector_energy_utility_ratio"),
+            "consumer": value("dividend_sector_consumer_ratio"),
+            "coverage": value("dividend_sector_coverage"),
+        }
+
+    def _dividend_split_label(
+        self,
+        sector_values: dict[str, float],
+    ) -> tuple[str, str, str]:
+        cfg = self._rule_config
+        high_dividend_ratio = (
+            sector_values["financial"] + sector_values["energy_utility"]
+        )
+        if sector_values["coverage"] < cfg.sector_coverage_min:
+            return (
+                "dividend_steady",
+                "红利稳健",
+                "行业映射覆盖不足，保留红利稳健并追加观察标签。",
+            )
+        if high_dividend_ratio >= cfg.high_dividend_sector_ratio_min:
+            return (
+                "high_dividend_financial",
+                "金融高股息",
+                f"金融/能源/公用事业红利贡献占比 {high_dividend_ratio:.0%}。",
+            )
+        if sector_values["consumer"] >= cfg.consumer_dominant_ratio_min:
+            return (
+                "consumer_quality",
+                "消费质量",
+                f"消费红利贡献占比 {sector_values['consumer']:.0%}。",
+            )
+        return (
+            "dividend_steady",
+            "红利稳健",
+            "红利贡献未被单一金融/能源或消费行业主导。",
+        )
+
     def _add_style_labels_from_exposures(
         self,
         exposure_by_code: dict[str, dict[str, Any]],
@@ -2746,16 +2793,44 @@ class LabelEngine:
                 ),
             )
         if dividend_weight >= cfg.dividend_steady_weight_min:
+            sector_values = self._dividend_sector_values(exposure_by_code)
+            split_code, split_name, split_message = self._dividend_split_label(
+                sector_values
+            )
             _emit(
-                "dividend_steady",
-                "红利稳健",
+                split_code,
+                split_name,
                 "dividend_steady_weight",
                 cfg.dividend_steady_weight_min,
                 (
-                    f"预聚合红利稳健持仓权重 {dividend_weight:.0%}，"
-                    f"达到 {cfg.dividend_steady_weight_min:.0%} 阈值。"
+                    f"预聚合红利持仓权重 {dividend_weight:.0%}，"
+                    f"达到 {cfg.dividend_steady_weight_min:.0%} 阈值；"
+                    f"行业映射覆盖率 {sector_values['coverage']:.0%}；"
+                    f"financial={sector_values['financial']:.0%}, "
+                    f"energy_utility={sector_values['energy_utility']:.0%}, "
+                    f"consumer={sector_values['consumer']:.0%}。{split_message}"
                 ),
             )
+            if sector_values["coverage"] < cfg.sector_coverage_min:
+                labels.append(
+                    LabelResult(
+                        label_code="sector_mapping_insufficient",
+                        label_name="行业映射覆盖不足",
+                        category="style_boundary",
+                        confidence=1.0,
+                        status="observe",
+                    )
+                )
+                evidence.append(
+                    EvidenceItem(
+                        label_code="sector_mapping_insufficient",
+                        metric="dividend_sector_coverage",
+                        value=round(sector_values["coverage"], 4),
+                        threshold=cfg.sector_coverage_min,
+                        source="fund_factor_exposures",
+                        message="红利贡献股票行业映射覆盖不足，暂不进行金融/消费/红利分流。",
+                    )
+                )
 
         if not triggered:
             labels.append(

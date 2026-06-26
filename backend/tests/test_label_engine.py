@@ -978,3 +978,78 @@ def test_disabled_rules_persist_in_rule_config_json(tmp_path):
     )
     cfg = RuleConfig.from_file(str(cfg_path))
     assert cfg.disabled_rules == frozenset({"fee_low", "volatility_high"})
+
+
+def _fund_with_dividend_sector_exposures(
+    financial: float,
+    energy: float,
+    consumer: float,
+    coverage: float = 1.0,
+) -> FundInput:
+    return FundInput(
+        fund_code="110022",
+        fund_name="红利分流测试基金",
+        fund_type="股票型",
+        nav_returns=[0.001] * 30,
+        stock_holdings=[
+            {"stock_code": "600519", "weight": 0.40},
+            {"stock_code": "601398", "weight": 0.30},
+        ],
+        industry_allocations=[{"industry": "食品饮料", "weight": 0.20}],
+        stock_factors=[],
+        factor_exposures=[
+            {"report_date": "2026-06-30", "factor_code": "factor_coverage_weight", "exposure_value": 0.90, "coverage_weight": 0.90, "holding_total_weight": 0.90},
+            {"report_date": "2026-06-30", "factor_code": "dividend_steady_weight", "exposure_value": 0.70, "coverage_weight": 0.90, "holding_total_weight": 0.90},
+            {"report_date": "2026-06-30", "factor_code": "dividend_sector_financial_ratio", "exposure_value": financial, "coverage_weight": coverage, "holding_total_weight": 0.70},
+            {"report_date": "2026-06-30", "factor_code": "dividend_sector_energy_utility_ratio", "exposure_value": energy, "coverage_weight": coverage, "holding_total_weight": 0.70},
+            {"report_date": "2026-06-30", "factor_code": "dividend_sector_consumer_ratio", "exposure_value": consumer, "coverage_weight": coverage, "holding_total_weight": 0.70},
+            {"report_date": "2026-06-30", "factor_code": "dividend_sector_coverage", "exposure_value": coverage, "coverage_weight": coverage, "holding_total_weight": 0.70},
+        ],
+        manager_tenure_years=6.2,
+        management_fee=0.010,
+        custody_fee=0.002,
+        fund_size=180.0,
+        equity_position=0.89,
+    )
+
+
+def test_dividend_sector_split_emits_high_dividend_financial() -> None:
+    result = LabelEngine().evaluate(
+        _fund_with_dividend_sector_exposures(financial=0.50, energy=0.15, consumer=0.10)
+    )
+
+    codes = label_codes(result)
+    assert "high_dividend_financial" in codes
+    assert "dividend_steady" not in codes
+
+
+def test_dividend_sector_split_emits_consumer_quality() -> None:
+    result = LabelEngine().evaluate(
+        _fund_with_dividend_sector_exposures(financial=0.05, energy=0.05, consumer=0.72)
+    )
+
+    codes = label_codes(result)
+    assert "consumer_quality" in codes
+    assert "dividend_steady" not in codes
+
+
+def test_dividend_sector_split_keeps_broad_dividend_steady() -> None:
+    result = LabelEngine().evaluate(
+        _fund_with_dividend_sector_exposures(financial=0.25, energy=0.15, consumer=0.20)
+    )
+
+    codes = label_codes(result)
+    assert "dividend_steady" in codes
+    assert "high_dividend_financial" not in codes
+    assert "consumer_quality" not in codes
+
+
+def test_dividend_sector_split_observes_low_sector_coverage() -> None:
+    result = LabelEngine().evaluate(
+        _fund_with_dividend_sector_exposures(financial=0.80, energy=0.00, consumer=0.00, coverage=0.50)
+    )
+
+    codes = label_codes(result)
+    assert "sector_mapping_insufficient" in codes
+    assert "dividend_steady" in codes
+    assert "high_dividend_financial" not in codes
