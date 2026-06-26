@@ -65,7 +65,7 @@ def generate_report(db_path: str, run_id: str, out_path: str) -> None:
     try:
         for row in conn.execute(
             "SELECT DISTINCT fund_code, label_code FROM fund_label_results "
-            "WHERE run_id = ? AND label_code IN (?, ?, ?)",
+            f"WHERE run_id = ? AND label_code IN ({','.join('?' for _ in STYLE_CODES)})",
             (run_id, *STYLE_CODES),
         ).fetchall():
             style_label_funds[row["label_code"]].add(row["fund_code"])
