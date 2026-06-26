@@ -24,6 +24,7 @@ from typing import Any
 from app.data_access import create_repository
 from app.factors.exposure_aggregator import aggregate_factor_exposures
 from app.factors.equity_contributions import build_equity_style_contributions
+from app.factors.dividend_sector_mix import aggregate_dividend_sector_mix
 from app.label_engine import LabelEngine
 from app.label_engine.engine import FundInput, RuleConfig
 from app.persistence import LabelRunWriter
@@ -271,6 +272,32 @@ def _compute_equity_contributions(
     return all_contributions
 
 
+def _compute_dividend_sector_exposures(
+    repo: Any,
+    fund: FundInput,
+    contributions: list[Any],
+) -> list[Any]:
+    """基于最新报告期的红利贡献明细 + 股票行业映射，算红利行业占比暴露。"""
+    if not contributions or not hasattr(repo, "load_stock_industry_map"):
+        return []
+    latest_report_date = max(str(row.report_date) for row in contributions)
+    latest_rows = [
+        asdict(row)
+        for row in contributions
+        if str(row.report_date) == latest_report_date
+    ]
+    stock_codes = sorted(
+        {row["stock_code"] for row in latest_rows if row.get("stock_code")}
+    )
+    industry_map = repo.load_stock_industry_map(stock_codes, None)
+    return aggregate_dividend_sector_mix(
+        fund_code=fund.fund_code,
+        report_date=latest_report_date,
+        contributions=latest_rows,
+        industry_map=industry_map,
+    )
+
+
 def run_batch(
     db_path: str | Path | None = None,
     rule_version: str = "v1",
@@ -357,6 +384,18 @@ def run_batch(
                         style_history_periods=style_history_periods,
                     )
                     writer.write_equity_style_contributions(contributions)
+                    sector_exposures = _compute_dividend_sector_exposures(
+                        repo=repo,
+                        fund=fund,
+                        contributions=contributions,
+                    )
+                    if sector_exposures:
+                        writer.write_factor_exposures(sector_exposures)
+                        merged_exposures = [asdict(item) for item in exposures]
+                        merged_exposures.extend(
+                            asdict(item) for item in sector_exposures
+                        )
+                        fund = replace(fund, factor_exposures=merged_exposures)
                 except Exception as exc:  # noqa: BLE001 - 聚合失败降级走旧路径
                     writer.write_failure(
                         run_id=run_id,

@@ -250,6 +250,51 @@ def test_run_batch_persists_equity_style_contributions(tmp_path: Path) -> None:
     assert all(r["contribution_weight"] > 0 for r in rows)
 
 
+def test_run_batch_persists_dividend_sector_mix_exposures(tmp_path: Path) -> None:
+    db = _make_db_with_holdings(tmp_path)
+    _add_narrow_factors(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE stock_industry_map (
+                stock_code TEXT NOT NULL,
+                industry_code TEXT NOT NULL,
+                industry_name TEXT NOT NULL,
+                sector_group TEXT NOT NULL,
+                source TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                PRIMARY KEY (stock_code, as_of_date)
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO stock_industry_map VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("600519", "801120", "食品饮料", "consumer", "fixture", "2025-12-31"),
+                ("601398", "801780", "银行", "financial", "fixture", "2025-12-31"),
+            ],
+        )
+
+    run_id, processed = run_batch(db, source="funddata")
+    assert processed == 1
+
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT factor_code, exposure_value, coverage_weight "
+            "FROM fund_factor_exposures "
+            "WHERE factor_code LIKE 'dividend_sector_%' "
+            "ORDER BY factor_code"
+        ).fetchall()
+
+    assert run_id
+    assert {row[0] for row in rows} == {
+        "dividend_sector_consumer_ratio",
+        "dividend_sector_coverage",
+        "dividend_sector_energy_utility_ratio",
+        "dividend_sector_financial_ratio",
+    }
+
+
 def _make_multi_period_db(tmp_path: Path) -> Path:
     """两只基金股票 V(纯价值) / G(纯成长)，两期持仓权重反转 → 主导风格漂移。
 
