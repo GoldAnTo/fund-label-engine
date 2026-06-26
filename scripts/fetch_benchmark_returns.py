@@ -48,24 +48,24 @@ INDEX_MAP = {
     "科创50": ("000688", "1.000688", "科创50"),
     "上证科创板50成份指数": ("000688", "1.000688", "科创50"),
     "上证科创板50指数": ("000688", "1.000688", "科创50"),
-    "创业板指数": ("399006", "sina:sz399006", "创业板指"),
-    "创业板指": ("399006", "sina:sz399006", "创业板指"),
+    "创业板指数": ("399006", "0.399006", "创业板指"),
+    "创业板指": ("399006", "0.399006", "创业板指"),
     "北证50成份指数": ("899050", "1.899050", "北证50"),
     "北证50": ("899050", "1.899050", "北证50"),
     "中证港股通大消费主题指数": ("931027", "2.931027", "港股通大消费"),
     "港股通大消费": ("931027", "2.931027", "港股通大消费"),
-    "中证主要消费行业指数": ("000932", "sina:sh000932", "中证主要消费"),
-    "中证主要消费": ("000932", "sina:sh000932", "中证主要消费"),
-    "中证可选消费行业指数": ("000931", "sina:sh000931", "中证可选消费"),
-    "中证可选消费": ("000931", "sina:sh000931", "中证可选消费"),
-    "中证新兴产业指数": ("000964", "sina:sh000964", "中证新兴产业"),
-    "中证新兴产业": ("000964", "sina:sh000964", "中证新兴产业"),
-    "中证医药卫生指数": ("000933", "sina:sh000933", "中证医药卫生"),
-    "中证医药卫生": ("000933", "sina:sh000933", "中证医药卫生"),
-    "创业板综合指数": ("399102", "sina:sz399102", "创业板综合"),
-    "创业板综合": ("399102", "sina:sz399102", "创业板综合"),
-    "中小企业综合指数": ("399101", "sina:sz399101", "中小企业综合"),
-    "中小企业综合": ("399101", "sina:sz399101", "中小企业综合"),
+    "中证主要消费行业指数": ("000932", "1.000932", "中证主要消费"),
+    "中证主要消费": ("000932", "1.000932", "中证主要消费"),
+    "中证可选消费行业指数": ("000931", "1.000931", "中证可选消费"),
+    "中证可选消费": ("000931", "1.000931", "中证可选消费"),
+    "中证新兴产业指数": ("000964", "1.000964", "中证新兴产业"),
+    "中证新兴产业": ("000964", "1.000964", "中证新兴产业"),
+    "中证医药卫生指数": ("000933", "1.000933", "中证医药卫生"),
+    "中证医药卫生": ("000933", "1.000933", "中证医药卫生"),
+    "创业板综合指数": ("399102", "0.399102", "创业板综合"),
+    "创业板综合": ("399102", "0.399102", "创业板综合"),
+    "中小企业综合指数": ("399101", "0.399101", "中小企业综合"),
+    "中小企业综合": ("399101", "0.399101", "中小企业综合"),
     "中证全债指数": ("H11001", "sina:shH11001", "中证全债"),
     "中证全债": ("H11001", "sina:shH11001", "中证全债"),
     "中证综合债指数": ("H11008", "sina:shH11008", "中证综合债"),
@@ -129,6 +129,11 @@ _EAST_TO_SINA: dict[str, str] = {
     "2.932000": "sh932000",
     "1.000012": "sh000012",
 }
+
+# Reverse map for sina-prefixed components: when sina is unreachable, fall back
+# to eastmoney only for symbols that have a valid eastmoney secid. CSI bond
+# H-codes (shH11001 etc.) are intentionally absent — they have no free source.
+_SINA_TO_EAST: dict[str, str] = {sina: east for east, sina in _EAST_TO_SINA.items()}
 
 
 @dataclass(frozen=True)
@@ -516,10 +521,17 @@ def fetch_sina_index_returns(symbol: str, start_date: str, end_date: str) -> lis
 
 def fetch_component_returns(secid: str, start_date: str, end_date: str) -> list[dict[str, str | float]]:
     if secid.startswith("sina:"):
-        sina_rows = fetch_sina_index_returns(secid.split(":", 1)[1], start_date, end_date)
+        sina_symbol = secid.split(":", 1)[1]
+        sina_rows = fetch_sina_index_returns(sina_symbol, start_date, end_date)
         if sina_rows:
             return sina_rows
-        return fetch_index_returns(secid.split(":", 1)[1], start_date, end_date)
+        # sina fallback: only retry on eastmoney for SH/SZ symbols we can
+        # translate into an eastmoney secid; H-prefixed CSI bond codes have
+        # no eastmoney source and must not be passed through verbatim.
+        east_secid = _SINA_TO_EAST.get(sina_symbol)
+        if east_secid:
+            return fetch_index_returns(east_secid, start_date, end_date)
+        return []
     sina_symbol = _EAST_TO_SINA.get(secid)
     if sina_symbol:
         sina_rows = fetch_sina_index_returns(sina_symbol, start_date, end_date)
