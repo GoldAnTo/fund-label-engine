@@ -279,6 +279,51 @@ def test_style_exposure_observe_blocks_formal_style_label():
     assert "quality_growth" not in codes
 
 
+def test_factor_exposure_lookup_uses_latest_report_date_when_as_of_ties():
+    fund = _style_fund(stock_factors=[])
+    fund = FundInput(
+        **{
+            **fund.__dict__,
+            "factor_exposures": [
+                {
+                    "factor_code": "deep_value_weight",
+                    "report_date": "2025-12-31",
+                    "exposure_value": 0.80,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-23",
+                },
+                {
+                    "factor_code": "factor_coverage_weight",
+                    "report_date": "2025-12-31",
+                    "exposure_value": 0.80,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-23",
+                },
+                {
+                    "factor_code": "deep_value_weight",
+                    "report_date": "2025-09-30",
+                    "exposure_value": 0.20,
+                    "coverage_weight": 0.20,
+                    "as_of_date": "2026-06-23",
+                },
+                {
+                    "factor_code": "factor_coverage_weight",
+                    "report_date": "2025-09-30",
+                    "exposure_value": 0.20,
+                    "coverage_weight": 0.20,
+                    "as_of_date": "2026-06-23",
+                },
+            ],
+        }
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "deep_value" in codes
+    assert "style_exposure_low_coverage" not in codes
+
+
 def test_deep_value_label_emits_from_precomputed_factor_exposures():
     fund = _style_fund(stock_factors=[])
     fund = FundInput(

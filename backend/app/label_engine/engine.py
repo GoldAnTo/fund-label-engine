@@ -2491,11 +2491,23 @@ class LabelEngine:
             if not factor_code:
                 continue
             current = latest_by_code.get(str(factor_code))
-            if current is None or str(row.get("as_of_date") or "") >= str(
-                current.get("as_of_date") or ""
+            # 多期暴露会复用同一份因子快照，因此 as_of_date 通常完全相同；
+            # 当前期风格标签必须按 report_date 选最新报告期，否则批处理按降序
+            # 计算时，后写入的历史期会覆盖当前期，导致低覆盖误判。
+            if (
+                current is None
+                or LabelEngine._factor_exposure_key(row)
+                >= LabelEngine._factor_exposure_key(current)
             ):
                 latest_by_code[str(factor_code)] = row
         return latest_by_code
+
+    @staticmethod
+    def _factor_exposure_key(row: dict[str, Any]) -> tuple[str, str]:
+        return (
+            str(row.get("report_date") or row.get("as_of_date") or ""),
+            str(row.get("as_of_date") or ""),
+        )
 
     def _add_style_labels_from_exposures(
         self,
