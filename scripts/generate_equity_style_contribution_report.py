@@ -23,6 +23,14 @@ STYLE_NAMES = {
     "quality_growth": "质量成长",
     "dividend_steady": "红利稳健",
 }
+# 与 RuleConfig 默认风格阈值保持一致（基金级 *_weight 阈值）。
+STYLE_WEIGHT_THRESHOLDS = {
+    "deep_value": 0.60,
+    "quality_growth": 0.50,
+    "dividend_steady": 0.50,
+}
+# 金融类启发式：贡献股票名称中包含这些关键字即视为金融持仓。
+FINANCIAL_KEYWORDS = ("银行", "保险", "证券", "金融", "租赁", "信托", "财险", "人寿", "太保", "平安")
 
 
 def generate_report(db_path: str, run_id: str, out_path: str) -> None:
@@ -47,17 +55,38 @@ def generate_report(db_path: str, run_id: str, out_path: str) -> None:
         pass
     conn.close()
 
-    # 按 style 聚合
+    # 按 style 聚合。多期模式下同一基金有多个报告期，标签判定基于单期，
+    # 因此报告也按 (fund, report_date, style) 聚合，再对每个基金取最新报告期作为
+    # 代表，避免跨期累加导致贡献权重 > 100%。
     style_counts = {code: 0 for code in STYLE_CODES}
-    fund_style_weight: dict[tuple[str, str], float] = defaultdict(float)
-    style_funds_with_contrib = defaultdict(set)
-    by_style_stock = defaultdict(list)
+    # (fund, style) -> {report_date -> 累计贡献权重}
+    period_weight: dict[tuple[str, str], dict[str, float]] = defaultdict(
+        lambda: defaultdict(float)
+    )
+    # (fund, style) -> {report_date -> [贡献行]}
+    period_stocks: dict[tuple[str, str], dict[str, list]] = defaultdict(
+        lambda: defaultdict(list)
+    )
     for row in contributions:
         code = row["style_code"]
         style_counts[code] = style_counts.get(code, 0) + 1
-        fund_style_weight[(row["fund_code"], code)] += row["contribution_weight"]
-        style_funds_with_contrib[code].add(row["fund_code"])
-        by_style_stock[code].append(row)
+        key = (row["fund_code"], code)
+        period_weight[key][row["report_date"]] += row["contribution_weight"]
+        period_stocks[key][row["report_date"]].append(row)
+
+    def _latest(d: dict[str, float] | dict[str, list]) -> str:
+        return max(d.keys())
+
+    # 取每个基金最新报告期作为代表
+    fund_style_weight: dict[tuple[str, str], float] = {}
+    style_funds_with_contrib = defaultdict(set)
+    by_style_stock = defaultdict(list)  # 仅含各基金最新期的贡献行
+    for key, by_period in period_weight.items():
+        fund, code = key
+        latest = _latest(by_period)
+        fund_style_weight[key] = by_period[latest]
+        style_funds_with_contrib[code].add(fund)
+        by_style_stock[code].extend(period_stocks[key][latest])
 
     lines: list[str] = []
     lines.append(f"# 权益风格贡献明细报告")
@@ -135,7 +164,102 @@ def generate_report(db_path: str, run_id: str, out_path: str) -> None:
             )
         lines.append("")
 
-    # 4) 异常清单：有风格标签但没有贡献明细
+    # 4) 有贡献但未成标签：贡献权重达不到基金级阈值的基金分布
+    lines.append("## 有贡献但未成标签（按风格）")
+    lines.append("")
+    lines.append("规则：累计贡献权重 < 基金级阈值即不会打标签。")
+    lines.append("")
+    lines.append("| 风格 | 阈值 | 有贡献基金数 | 已成标签 | 有贡献未成标签 |")
+    lines.append("| --- | ---: | ---: | ---: | ---: |")
+    contrib_not_labeled: dict[str, list[tuple[str, float]]] = {}
+    for code in STYLE_CODES:
+        thr = STYLE_WEIGHT_THRESHOLDS[code]
+        with_contrib = style_funds_with_contrib.get(code, set())
+        labeled = style_label_funds.get(code, set())
+        not_labeled = sorted(
+            (
+                (fund, fund_style_weight[(fund, code)])
+                for fund in with_contrib
+                if fund not in labeled
+            ),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        contrib_not_labeled[code] = not_labeled
+        lines.append(
+            f"| {code} ({STYLE_NAMES[code]}) | {thr:.0%} | {len(with_contrib)} | "
+            f"{len(labeled)} | {len(not_labeled)} |"
+        )
+    lines.append("")
+    for code in STYLE_CODES:
+        not_labeled = contrib_not_labeled[code]
+        if not not_labeled:
+            continue
+        lines.append(f"### {code} ({STYLE_NAMES[code]}) 临界未成标签 Top 20")
+        lines.append("")
+        lines.append("| 基金 | 累计贡献权重 | 距阈值 |")
+        lines.append("| --- | ---: | ---: |")
+        thr = STYLE_WEIGHT_THRESHOLDS[code]
+        for fund, weight in not_labeled[:20]:
+            lines.append(f"| {fund} | {weight:.2%} | {thr - weight:+.2%} |")
+        lines.append("")
+
+    # 5) 风格重叠分析：deep_value 与 dividend_steady 同时成标签，是否金融主导
+    lines.append("## 风格重叠分析")
+    lines.append("")
+    dv = style_label_funds.get("deep_value", set())
+    ds = style_label_funds.get("dividend_steady", set())
+    qg = style_label_funds.get("quality_growth", set())
+    pairs = [
+        ("deep_value ∩ dividend_steady", dv & ds),
+        ("deep_value ∩ quality_growth", dv & qg),
+        ("quality_growth ∩ dividend_steady", qg & ds),
+        ("deep_value ∩ dividend_steady ∩ quality_growth", dv & ds & qg),
+    ]
+    lines.append("| 标签组合 | 重叠基金数 |")
+    lines.append("| --- | ---: |")
+    for name, funds in pairs:
+        lines.append(f"| {name} | {len(funds)} |")
+    lines.append("")
+
+    # 金融主导判定：在 dv ∩ ds 的基金里，看金融贡献股票权重占比
+    overlap = dv & ds
+    lines.append("### deep_value ∩ dividend_steady 金融主导度 Top 20")
+    lines.append("")
+    if not overlap:
+        lines.append("_无重叠基金_")
+        lines.append("")
+    else:
+        # 用 dividend_steady 贡献股票判断金融占比（红利贡献最能反映银行保险地产）
+        ds_stock_by_fund = defaultdict(list)
+        for r in by_style_stock["dividend_steady"]:
+            if r["fund_code"] in overlap:
+                ds_stock_by_fund[r["fund_code"]].append(r)
+        fin_ratio: list[tuple[str, float, float]] = []
+        for fund, rows in ds_stock_by_fund.items():
+            total = sum(r["contribution_weight"] for r in rows)
+            fin = sum(
+                r["contribution_weight"]
+                for r in rows
+                if r["stock_name"]
+                and any(k in r["stock_name"] for k in FINANCIAL_KEYWORDS)
+            )
+            ratio = (fin / total) if total > 0 else 0.0
+            fin_ratio.append((fund, ratio, total))
+        fin_ratio.sort(key=lambda item: item[1], reverse=True)
+        high_fin = sum(1 for _f, ratio, _t in fin_ratio if ratio >= 0.6)
+        lines.append(
+            f"重叠基金 {len(overlap)} 只，其中红利贡献中金融占比 ≥ 60% 的有 "
+            f"{high_fin} 只（{high_fin / len(overlap):.0%}）。"
+        )
+        lines.append("")
+        lines.append("| 基金 | 金融贡献占比 | 红利累计贡献 |")
+        lines.append("| --- | ---: | ---: |")
+        for fund, ratio, total in fin_ratio[:20]:
+            lines.append(f"| {fund} | {ratio:.0%} | {total:.2%} |")
+        lines.append("")
+
+    # 6) 异常清单：有风格标签但没有贡献明细
     lines.append("## 异常清单：有风格标签但缺贡献明细")
     lines.append("")
     warnings: list[str] = []

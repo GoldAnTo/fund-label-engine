@@ -313,6 +313,95 @@ def test_run_batch_style_history_periods_persists_multi_period_exposures(
     assert periods == {"2025-06-30", "2025-12-31"}
 
 
+def _make_latest_period_uncovered_db(tmp_path: Path) -> Path:
+    """最新持仓期不命中深度价值，主导风格标签来自历史期。
+
+    - 2025-12-31（最新）: 持仓 600099（高 pb/高估值，不命中 deep_value）
+    - 2025-06-30（历史）: 持仓 600001（低 pb/低估值，命中 deep_value，权重 0.70）
+    主导风格标签来自历史期，贡献明细必须覆盖历史期，否则与标签对不上。
+    """
+    db = tmp_path / "latest-uncovered.sqlite"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE fund_profiles (fund_code TEXT PRIMARY KEY, fund_name TEXT, fund_type TEXT, asset_size REAL);
+        CREATE TABLE nav_history (fund_code TEXT, nav_date TEXT, daily_growth_rate REAL,
+            PRIMARY KEY (fund_code, nav_date));
+        CREATE TABLE stock_holdings (fund_code TEXT, stock_code TEXT, stock_name TEXT,
+            report_period TEXT, net_value_ratio REAL);
+        CREATE TABLE industry_allocations (fund_code TEXT, industry_name TEXT,
+            report_period TEXT, net_value_ratio REAL);
+        CREATE TABLE fund_manager_links (fund_code TEXT, manager_id TEXT, tenure_days INTEGER);
+        CREATE TABLE fee_structures (fund_code TEXT, fee_type TEXT, condition_name TEXT, fee REAL);
+        CREATE TABLE stock_factor_values (stock_code TEXT, factor_code TEXT, factor_value REAL,
+            as_of_date TEXT, source TEXT, PRIMARY KEY (stock_code, factor_code, as_of_date));
+        INSERT INTO fund_profiles VALUES ('000001','最新期不命中样例','股票型',12.0);
+        INSERT INTO stock_holdings VALUES
+            ('000001','600001','深度价值股','2025-06-30',0.70),
+            ('000001','600099','高估值成长股','2025-12-31',0.70);
+        INSERT INTO industry_allocations VALUES ('000001','综合','2025-12-31',0.80);
+        INSERT INTO fund_manager_links VALUES ('000001','M1', 2200);
+        INSERT INTO fee_structures VALUES
+            ('000001','运作费用','管理费率',0.012),
+            ('000001','运作费用','托管费率',0.002),
+            ('000001','运作费用','销售服务费率',0.0);
+        -- 历史期 600001 命中 deep_value；最新期 600099 有因子但高 pb/高估值不命中
+        INSERT INTO stock_factor_values VALUES
+            ('600001','pb',0.8,'2025-12-31','fundamentals'),
+            ('600001','valuation_percentile',0.10,'2025-12-31','fundamentals'),
+            ('600001','roe',0.05,'2025-12-31','fundamentals'),
+            ('600001','revenue_growth',0.02,'2025-12-31','fundamentals'),
+            ('600001','dividend_yield',0.06,'2025-12-31','fundamentals'),
+            ('600099','pb',6.0,'2025-12-31','fundamentals'),
+            ('600099','valuation_percentile',0.95,'2025-12-31','fundamentals'),
+            ('600099','roe',0.10,'2025-12-31','fundamentals'),
+            ('600099','revenue_growth',0.05,'2025-12-31','fundamentals'),
+            ('600099','dividend_yield',0.005,'2025-12-31','fundamentals');
+        """
+    )
+    for i in range(30):
+        conn.execute(
+            "INSERT INTO nav_history VALUES (?,?,?)",
+            ("000001", f"2025-12-{i+1:02d}", 0.0005),
+        )
+    conn.commit()
+    conn.close()
+    return db
+
+
+def test_run_batch_contributions_cover_historical_period_when_latest_uncovered(
+    tmp_path: Path,
+) -> None:
+    """多期模式下，贡献明细必须与因子暴露同口径覆盖所有期次（含历史期）。"""
+    db = _make_latest_period_uncovered_db(tmp_path)
+    run_id, processed = run_batch(db, source="funddata", style_history_periods=2)
+    assert processed == 1
+
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        # 因子暴露覆盖了哪些期次
+        exposure_periods = {
+            row[0]
+            for row in conn.execute(
+                "SELECT DISTINCT report_date FROM fund_factor_exposures "
+                "WHERE fund_code='000001'"
+            )
+        }
+        # 历史期 deep_value 命中股票 600001 必须出现在贡献明细里
+        rows = conn.execute(
+            "SELECT report_date, stock_code, style_code, contribution_weight "
+            "FROM fund_equity_style_contributions "
+            "WHERE fund_code='000001' AND style_code='deep_value' AND matched=1"
+        ).fetchall()
+
+    # 修复前：贡献明细只用最新期 2025-12-31，历史期 deep_value 命中丢失（rows 为空）
+    assert rows, "deep_value 命中应被记录到贡献明细（修复前会丢失历史期）"
+    contrib_periods = {r["report_date"] for r in rows}
+    assert "2025-06-30" in contrib_periods
+    assert "2025-06-30" in exposure_periods
+    assert {r["stock_code"] for r in rows} == {"600001"}
+
+
 def test_run_batch_style_history_periods_emits_style_drift(tmp_path: Path) -> None:
     """两期主导风格 deep_value → quality_growth，应触发 style_drift（observe）。"""
     db = _make_multi_period_db(tmp_path)

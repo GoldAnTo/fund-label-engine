@@ -165,41 +165,22 @@ def _should_validate_equity_factors(args: argparse.Namespace) -> bool:
     )
 
 
-def _compute_exposures(
+def _collect_period_inputs(
     repo: Any,
     fund: FundInput,
-    rule_config: RuleConfig,
     style_history_periods: int,
-) -> list[Any]:
-    """计算基金级因子暴露，支持单期或多期（用于风格稳定性分析）。
+) -> list[tuple[str | None, list[dict[str, Any]], list[dict[str, Any]]]]:
+    """收集用于因子暴露与贡献明细的逐期持仓/因子输入。
 
-    - ``style_history_periods <= 1``：仅计算最新一期持仓的暴露（历史行为）。
-    - ``style_history_periods >= 2``：计算最近 N 个有持仓的报告期，每期独立
-      聚合；最新一期复用已加载的 ``fund.stock_holdings`` / ``fund.stock_factors``，
-      历史期通过 repo 重新加载持仓与因子快照。所有期次的暴露拼成同一份列表，
-      交给引擎的 ``_style_history_periods`` 识别多期主导风格变化。
-
-    风格稳定性需要 ≥2 个覆盖率达标的期次才会触发标签；这里多算期次只是提供
-    原料，是否打标由引擎按 ``style_stability_min_periods`` 与覆盖率阈值决定。
+    返回 ``(report_date, holdings, stock_factors)`` 列表，单期与多期共用同一份口径，
+    确保基金级暴露（决定标签）与股票级贡献明细（解释标签）报告期一致。
     """
     if style_history_periods <= 1 or not hasattr(repo, "list_recent_holding_periods"):
-        return aggregate_factor_exposures(
-            fund_code=fund.fund_code,
-            report_date=fund.holding_report_date,
-            holdings=fund.stock_holdings,
-            stock_factors=fund.stock_factors,
-            rule_config=rule_config,
-        )
+        return [(fund.holding_report_date, fund.stock_holdings, fund.stock_factors)]
 
     periods = repo.list_recent_holding_periods(fund.fund_code, style_history_periods)
     if not periods:
-        return aggregate_factor_exposures(
-            fund_code=fund.fund_code,
-            report_date=fund.holding_report_date,
-            holdings=fund.stock_holdings,
-            stock_factors=fund.stock_factors,
-            rule_config=rule_config,
-        )
+        return [(fund.holding_report_date, fund.stock_holdings, fund.stock_factors)]
 
     # periods 为降序；最新一期直接复用 fund 上已加载的持仓与因子，避免重复拉取。
     # 历史期复用同一份最新因子快照（设计文档约定），因此把所有历史期持仓涉及的
@@ -220,23 +201,74 @@ def _compute_exposures(
         else []
     )
 
-    all_exposures: list[Any] = []
+    period_inputs: list[
+        tuple[str | None, list[dict[str, Any]], list[dict[str, Any]]]
+    ] = []
     for period in periods:
         if period == latest_period:
-            holdings = fund.stock_holdings
-            stock_factors = fund.stock_factors
+            period_inputs.append(
+                (period, fund.stock_holdings, fund.stock_factors)
+            )
         else:
-            holdings = historical_holdings.get(period, [])
-            stock_factors = historical_factors
-        exposures = aggregate_factor_exposures(
-            fund_code=fund.fund_code,
-            report_date=period,
-            holdings=holdings,
-            stock_factors=stock_factors,
-            rule_config=rule_config,
+            period_inputs.append(
+                (period, historical_holdings.get(period, []), historical_factors)
+            )
+    return period_inputs
+
+
+def _compute_exposures(
+    repo: Any,
+    fund: FundInput,
+    rule_config: RuleConfig,
+    style_history_periods: int,
+) -> list[Any]:
+    """计算基金级因子暴露，支持单期或多期（用于风格稳定性分析）。
+
+    - ``style_history_periods <= 1``：仅计算最新一期持仓的暴露（历史行为）。
+    - ``style_history_periods >= 2``：计算最近 N 个有持仓的报告期，每期独立
+      聚合，所有期次的暴露拼成同一份列表，交给引擎的 ``_style_history_periods``
+      识别多期主导风格变化。
+
+    风格稳定性需要 ≥2 个覆盖率达标的期次才会触发标签；这里多算期次只是提供
+    原料，是否打标由引擎按 ``style_stability_min_periods`` 与覆盖率阈值决定。
+    """
+    all_exposures: list[Any] = []
+    for report_date, holdings, stock_factors in _collect_period_inputs(
+        repo, fund, style_history_periods
+    ):
+        all_exposures.extend(
+            aggregate_factor_exposures(
+                fund_code=fund.fund_code,
+                report_date=report_date,
+                holdings=holdings,
+                stock_factors=stock_factors,
+                rule_config=rule_config,
+            )
         )
-        all_exposures.extend(exposures)
     return all_exposures
+
+
+def _compute_equity_contributions(
+    repo: Any,
+    fund: FundInput,
+    rule_config: RuleConfig,
+    style_history_periods: int,
+) -> list[Any]:
+    """生成股票级风格贡献明细，逐期口径与 ``_compute_exposures`` 完全一致。"""
+    all_contributions: list[Any] = []
+    for report_date, holdings, stock_factors in _collect_period_inputs(
+        repo, fund, style_history_periods
+    ):
+        all_contributions.extend(
+            build_equity_style_contributions(
+                fund_code=fund.fund_code,
+                report_date=report_date,
+                holdings=holdings,
+                stock_factors=stock_factors,
+                rule_config=rule_config,
+            )
+        )
+    return all_contributions
 
 
 def run_batch(
@@ -318,12 +350,11 @@ def run_batch(
                             fund,
                             factor_exposures=[asdict(item) for item in exposures],
                         )
-                    contributions = build_equity_style_contributions(
-                        fund_code=fund.fund_code,
-                        report_date=fund.holding_report_date,
-                        holdings=fund.stock_holdings,
-                        stock_factors=fund.stock_factors,
+                    contributions = _compute_equity_contributions(
+                        repo=repo,
+                        fund=fund,
                         rule_config=rule_config,
+                        style_history_periods=style_history_periods,
                     )
                     writer.write_equity_style_contributions(contributions)
                 except Exception as exc:  # noqa: BLE001 - 聚合失败降级走旧路径
