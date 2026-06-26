@@ -911,3 +911,34 @@ def test_style_labels_emit_style_groups():
     groups = group_codes(result)
     assert "style_factor_ready_pool" in groups
     assert "deep_value_group" in groups
+
+
+def test_disabled_rules_filter_out_labels():
+    """停用的规则不出现在 labels 里，也不影响 classification/group。"""
+    fund = _style_fund(
+        stock_factors=[
+            {"stock_code": "600519", "pb": 1.0, "valuation_percentile": 0.10},
+            {"stock_code": "601398", "pb": 0.8, "valuation_percentile": 0.20},
+        ]
+    )
+    cfg = RuleConfig(disabled_rules=frozenset({"deep_value", "style_stable"}))
+    result = LabelEngine(cfg).evaluate(fund)
+
+    codes = label_codes(result)
+    assert "deep_value" not in codes
+    assert "style_stable" not in codes
+    # data_quality 类标签不可停用
+    assert "data_sufficient" in codes
+
+
+def test_disabled_rules_persist_in_rule_config_json(tmp_path):
+    """RuleConfig.from_file 能正确读取 disabled_rules JSON 数组。"""
+    import json
+
+    cfg_path = tmp_path / "rules.json"
+    cfg_path.write_text(
+        json.dumps({"disabled_rules": ["fee_low", "volatility_high"]}),
+        encoding="utf-8",
+    )
+    cfg = RuleConfig.from_file(str(cfg_path))
+    assert cfg.disabled_rules == frozenset({"fee_low", "volatility_high"})

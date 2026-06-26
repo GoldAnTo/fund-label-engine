@@ -277,6 +277,16 @@ def main(argv: list[str] | None = None) -> int:
         help="可选 JSON 规则配置文件路径。命令行上的单项阈值覆盖优先级更高。",
     )
     parser.add_argument(
+        "--disable-rule",
+        action="append",
+        default=[],
+        metavar="LABEL_CODE",
+        help=(
+            "停用指定规则（label_code），可多次指定。停用的规则不会出现在输出里，"
+            "也不影响分类/分组判定。data_quality/review 类标签不可停用。"
+        ),
+    )
+    parser.add_argument(
         "--style-history-periods",
         type=int,
         default=1,
@@ -310,6 +320,16 @@ def main(argv: list[str] | None = None) -> int:
             replace(rule_config, **rule_kwargs)
             if rule_config is not None
             else RuleConfig(**rule_kwargs)
+        )
+
+    # 命令行 --disable-rule 追加到 disabled_rules（与 --rule-config 里的合并）
+    if args.disable_rule:
+        existing = rule_config.disabled_rules if rule_config else frozenset()
+        merged = existing | frozenset(args.disable_rule)
+        rule_config = (
+            replace(rule_config, disabled_rules=merged)
+            if rule_config is not None
+            else RuleConfig(disabled_rules=merged)
         )
 
     run_id, processed = run_batch(

@@ -206,7 +206,13 @@ class LabelRunWriter:
         if rule_snapshot is None:
             snapshot_json = None
         elif is_dataclass(rule_snapshot):
-            snapshot_json = json.dumps(asdict(rule_snapshot), ensure_ascii=False)
+            snapshot = asdict(rule_snapshot)
+            # frozenset 不可 JSON 序列化，转成 list
+            if "disabled_rules" in snapshot and isinstance(
+                snapshot["disabled_rules"], frozenset
+            ):
+                snapshot["disabled_rules"] = sorted(snapshot["disabled_rules"])
+            snapshot_json = json.dumps(snapshot, ensure_ascii=False)
         elif isinstance(rule_snapshot, dict):
             snapshot_json = json.dumps(rule_snapshot, ensure_ascii=False)
         else:

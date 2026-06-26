@@ -93,6 +93,11 @@ class RuleConfig:
     # 配置后，若 nav 样本不足以支撑该窗口，则 gate 失败，
     # 子原因码 return_window_insufficient。
     gate_min_return_window: str | None = None
+    # 停用的规则（label_code 集合）。evaluate 会在 coverage 降级后、
+    # 分类/分组前过滤掉这些标签，使它们不出现在最终输出里，
+    # 也不影响 classification / group 判定。
+    # data_quality / review 类标签（data_insufficient 等）不可停用。
+    disabled_rules: frozenset[str] = frozenset()
 
     @classmethod
     def from_file(cls, path: str | Path) -> "RuleConfig":
@@ -103,6 +108,13 @@ class RuleConfig:
         unknown = sorted(set(payload) - allowed)
         if unknown:
             raise ValueError(f"Unknown rule config field(s): {', '.join(unknown)}")
+        # disabled_rules 支持 JSON 数组，转成 frozenset
+        if "disabled_rules" in payload:
+            dr = payload["disabled_rules"]
+            if isinstance(dr, list):
+                payload["disabled_rules"] = frozenset(str(x) for x in dr)
+            elif not isinstance(dr, frozenset):
+                raise ValueError("disabled_rules must be a JSON array of label codes.")
         return cls(**payload)
 
     def thresholds_for(self, label_code: str) -> dict[str, Any]:
@@ -734,6 +746,16 @@ class LabelEngine:
                     status="observe",
                 )
                 for label in labels
+            ]
+
+        # 规则启停：过滤掉 disabled_rules 里的标签。
+        # data_quality / review 类标签不可停用（gate 语义必须保留）。
+        if self._rule_config.disabled_rules:
+            labels = [
+                label
+                for label in labels
+                if label.category in ("data_quality", "review")
+                or label.label_code not in self._rule_config.disabled_rules
             ]
 
         calculations = self._calculate_label_states(
