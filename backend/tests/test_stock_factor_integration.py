@@ -295,6 +295,60 @@ def test_run_batch_persists_dividend_sector_mix_exposures(tmp_path: Path) -> Non
     }
 
 
+def test_run_batch_dividend_split_gate_maps_to_dividend_steady_contributions(
+    tmp_path: Path,
+) -> None:
+    """Gate：分红风格拆分标签需能映射回 dividend_steady 贡献行（单库 + stock_industry_map）。"""
+    db = _make_db_with_holdings(tmp_path)
+    _add_narrow_factors(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE stock_industry_map (
+                stock_code TEXT NOT NULL,
+                industry_code TEXT NOT NULL,
+                industry_name TEXT NOT NULL,
+                sector_group TEXT NOT NULL,
+                source TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                PRIMARY KEY (stock_code, as_of_date)
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO stock_industry_map VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("600519", "801120", "食品饮料", "consumer", "fixture", "2025-12-31"),
+                ("601398", "801780", "银行", "financial", "fixture", "2025-12-31"),
+            ],
+        )
+
+    run_id, processed = run_batch(db, source="funddata")
+    assert processed == 1
+
+    with sqlite3.connect(db) as conn:
+        missing = conn.execute(
+            """
+            WITH style_labels AS (
+              SELECT fund_code, label_code FROM fund_label_results
+              WHERE run_id = ?
+                AND label_code IN ('dividend_steady', 'high_dividend_financial', 'consumer_quality')
+            ),
+            contribs AS (
+              SELECT fund_code, COUNT(*) AS n FROM fund_equity_style_contributions
+              WHERE matched=1 AND style_code='dividend_steady'
+              GROUP BY fund_code
+            )
+            SELECT COUNT(*) FROM style_labels l
+            LEFT JOIN contribs c ON c.fund_code=l.fund_code
+            WHERE COALESCE(c.n, 0)=0
+            """,
+            (run_id,),
+        ).fetchone()[0]
+
+    assert missing == 0
+
+
 def _make_multi_period_db(tmp_path: Path) -> Path:
     """两只基金股票 V(纯价值) / G(纯成长)，两期持仓权重反转 → 主导风格漂移。
 

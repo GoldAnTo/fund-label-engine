@@ -30,7 +30,21 @@ from app.label_engine.engine import FundInput, RuleConfig
 from app.persistence import LabelRunWriter
 
 
-STYLE_LABEL_CODES = ("deep_value", "quality_growth", "dividend_steady")
+STYLE_LABEL_CODES = (
+    "deep_value",
+    "quality_growth",
+    "dividend_steady",
+    "high_dividend_financial",
+    "consumer_quality",
+)
+# 拆分出的红利系标签复用 dividend_steady 的贡献明细行。
+STYLE_CONTRIBUTION_CODE = {
+    "deep_value": "deep_value",
+    "quality_growth": "quality_growth",
+    "dividend_steady": "dividend_steady",
+    "high_dividend_financial": "dividend_steady",
+    "consumer_quality": "dividend_steady",
+}
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
@@ -140,10 +154,13 @@ def validate_equity_factor_outputs(output_db: str | Path, *, run_id: str) -> Non
             ).fetchall()
             if triggered and _table_exists(conn, "fund_equity_style_contributions"):
                 for fund_code, label_code in triggered:
+                    contribution_code = STYLE_CONTRIBUTION_CODE.get(
+                        label_code, label_code
+                    )
                     contrib_count = conn.execute(
                         "SELECT COUNT(*) FROM fund_equity_style_contributions "
                         "WHERE fund_code = ? AND style_code = ? AND matched = 1",
-                        (fund_code, label_code),
+                        (fund_code, contribution_code),
                     ).fetchone()[0]
                     if contrib_count <= 0:
                         raise ValueError(

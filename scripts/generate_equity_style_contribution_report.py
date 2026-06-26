@@ -17,17 +17,35 @@ import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
-STYLE_CODES = ("deep_value", "quality_growth", "dividend_steady")
+STYLE_CODES = (
+    "deep_value",
+    "quality_growth",
+    "dividend_steady",
+    "high_dividend_financial",
+    "consumer_quality",
+)
 STYLE_NAMES = {
     "deep_value": "深度价值",
     "quality_growth": "质量成长",
     "dividend_steady": "红利稳健",
+    "high_dividend_financial": "金融高股息",
+    "consumer_quality": "消费质量",
 }
 # 与 RuleConfig 默认风格阈值保持一致（基金级 *_weight 阈值）。
 STYLE_WEIGHT_THRESHOLDS = {
     "deep_value": 0.60,
     "quality_growth": 0.50,
     "dividend_steady": 0.50,
+    "high_dividend_financial": 0.50,
+    "consumer_quality": 0.50,
+}
+# 拆分出的红利系标签复用 dividend_steady 的贡献明细行。
+CONTRIBUTION_STYLE_CODE = {
+    "deep_value": "deep_value",
+    "quality_growth": "quality_growth",
+    "dividend_steady": "dividend_steady",
+    "high_dividend_financial": "dividend_steady",
+    "consumer_quality": "dividend_steady",
 }
 # 金融类启发式：贡献股票名称中包含这些关键字即视为金融持仓。
 FINANCIAL_KEYWORDS = ("银行", "保险", "证券", "金融", "租赁", "信托", "财险", "人寿", "太保", "平安")
@@ -102,22 +120,24 @@ def generate_report(db_path: str, run_id: str, out_path: str) -> None:
     lines.append("| 风格 | 贡献行数 | 涉及基金数 | 有标签基金数 |")
     lines.append("| --- | ---: | ---: | ---: |")
     for code in STYLE_CODES:
+        cc = CONTRIBUTION_STYLE_CODE[code]
         lines.append(
-            f"| {code} ({STYLE_NAMES[code]}) | {style_counts.get(code, 0)} | "
-            f"{len(style_funds_with_contrib.get(code, set()))} | "
+            f"| {code} ({STYLE_NAMES[code]}) | {style_counts.get(cc, 0)} | "
+            f"{len(style_funds_with_contrib.get(cc, set()))} | "
             f"{len(style_label_funds.get(code, set()))} |"
         )
     lines.append("")
 
     # 2) 每个风格 top 20 基金（按总贡献权重）
     for code in STYLE_CODES:
+        cc = CONTRIBUTION_STYLE_CODE[code]
         lines.append(f"## {code} ({STYLE_NAMES[code]}) 贡献权重 Top 20 基金")
         lines.append("")
         ranked = sorted(
             (
                 (fund, weight)
                 for (fund, sc), weight in fund_style_weight.items()
-                if sc == code
+                if sc == cc
             ),
             key=lambda item: item[1],
             reverse=True,
@@ -136,11 +156,12 @@ def generate_report(db_path: str, run_id: str, out_path: str) -> None:
     lines.append("## 单基金贡献股票样例")
     lines.append("")
     for code in STYLE_CODES:
+        cc = CONTRIBUTION_STYLE_CODE[code]
         ranked = sorted(
             (
                 (fund, weight)
                 for (fund, sc), weight in fund_style_weight.items()
-                if sc == code
+                if sc == cc
             ),
             key=lambda item: item[1],
             reverse=True,
@@ -153,7 +174,7 @@ def generate_report(db_path: str, run_id: str, out_path: str) -> None:
         lines.append("| 股票 | 名称 | 持仓权重 |")
         lines.append("| --- | --- | ---: |")
         stocks = sorted(
-            (r for r in by_style_stock[code] if r["fund_code"] == top_fund),
+            (r for r in by_style_stock[cc] if r["fund_code"] == top_fund),
             key=lambda r: r["contribution_weight"],
             reverse=True,
         )
@@ -173,12 +194,13 @@ def generate_report(db_path: str, run_id: str, out_path: str) -> None:
     lines.append("| --- | ---: | ---: | ---: | ---: |")
     contrib_not_labeled: dict[str, list[tuple[str, float]]] = {}
     for code in STYLE_CODES:
+        cc = CONTRIBUTION_STYLE_CODE[code]
         thr = STYLE_WEIGHT_THRESHOLDS[code]
-        with_contrib = style_funds_with_contrib.get(code, set())
+        with_contrib = style_funds_with_contrib.get(cc, set())
         labeled = style_label_funds.get(code, set())
         not_labeled = sorted(
             (
-                (fund, fund_style_weight[(fund, code)])
+                (fund, fund_style_weight[(fund, cc)])
                 for fund in with_contrib
                 if fund not in labeled
             ),
@@ -264,8 +286,9 @@ def generate_report(db_path: str, run_id: str, out_path: str) -> None:
     lines.append("")
     warnings: list[str] = []
     for code in STYLE_CODES:
+        cc = CONTRIBUTION_STYLE_CODE[code]
         missing = style_label_funds.get(code, set()) - style_funds_with_contrib.get(
-            code, set()
+            cc, set()
         )
         for fund in sorted(missing):
             warnings.append(f"- {fund}: 有 `{code}` 标签但无对应贡献明细")
