@@ -217,3 +217,13 @@ class FundRepository:
         from app.data_access.stock_factors import load_stock_factors
 
         return load_stock_factors(conn, stock_codes, as_of)
+
+    def load_stock_industry_map(
+        self,
+        stock_codes: list[str],
+        as_of: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        with self._connect() as conn:
+            from app.data_access.stock_industries import load_stock_industry_map
+
+            return load_stock_industry_map(conn, stock_codes, as_of)

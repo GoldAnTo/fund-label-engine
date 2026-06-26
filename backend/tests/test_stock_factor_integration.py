@@ -107,6 +107,35 @@ def _add_wide_factors(db: Path) -> None:
     conn.close()
 
 
+def test_funddata_repository_loads_attached_stock_industry_map(tmp_path: Path) -> None:
+    source_db = tmp_path / "source.sqlite"
+    factor_db = tmp_path / "factor.sqlite"
+    sqlite3.connect(source_db).close()
+    with sqlite3.connect(factor_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE stock_industry_map (
+                stock_code TEXT NOT NULL,
+                industry_code TEXT NOT NULL,
+                industry_name TEXT NOT NULL,
+                sector_group TEXT NOT NULL,
+                source TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                PRIMARY KEY (stock_code, as_of_date)
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO stock_industry_map VALUES (?, ?, ?, ?, ?, ?)",
+            ("601398", "801780", "银行", "financial", "fixture", "2026-06-30"),
+        )
+
+    repo = FundDataRepository(source_db, factor_db_path=factor_db)
+    rows = repo.load_stock_industry_map(["601398"], None)
+
+    assert rows["601398"]["sector_group"] == "financial"
+
+
 def test_load_stock_factors_returns_empty_when_neither_table_exists(tmp_path: Path) -> None:
     db = tmp_path / "empty.sqlite"
     sqlite3.connect(db).close()  # 建空库

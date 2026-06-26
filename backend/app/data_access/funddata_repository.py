@@ -72,6 +72,20 @@ class FundDataRepository:
                     "CREATE TEMP VIEW stock_factor_values AS "
                     "SELECT * FROM factordb.stock_factor_values"
                 )
+            industry_row = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='stock_industry_map'"
+            ).fetchone()
+            if industry_row is None:
+                attached_row = conn.execute(
+                    "SELECT name FROM factordb.sqlite_master "
+                    "WHERE type='table' AND name='stock_industry_map'"
+                ).fetchone()
+                if attached_row is not None:
+                    conn.execute(
+                        "CREATE TEMP VIEW stock_industry_map AS "
+                        "SELECT * FROM factordb.stock_industry_map"
+                    )
         return conn
 
     def list_supported_fund_codes(self) -> list[str]:
@@ -277,6 +291,18 @@ class FundDataRepository:
 
         with self._connect() as conn:
             return load_stock_factors(conn, stock_codes, None)
+
+    def load_stock_industry_map(
+        self,
+        stock_codes: list[str],
+        as_of: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        if not stock_codes:
+            return {}
+        from app.data_access.stock_industries import load_stock_industry_map
+
+        with self._connect() as conn:
+            return load_stock_industry_map(conn, stock_codes, as_of)
 
     @staticmethod
     def _load_factor_exposures(
