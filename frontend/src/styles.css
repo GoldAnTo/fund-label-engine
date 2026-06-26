@@ -194,3 +194,47 @@ button:disabled {
   color: #6b7280;
   font-size: 13px;
 }
+
+.alert {
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.alert-warn {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+}
+
+.alert-ok {
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  color: #065f46;
+}
+
+.alert-info {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #1e40af;
+}
+
+.pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+.pill-gap {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.pill-ok {
+  background: #ecfdf5;
+  color: #047857;
+}

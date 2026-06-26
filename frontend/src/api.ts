@@ -102,6 +102,18 @@ export interface Review {
   comment: string;
 }
 
+export interface Calculation {
+  label_code: string;
+  label_name: string;
+  category: string;
+  state: string;
+  reason_code: string;
+  observed: string | number | null;
+  threshold: string | number | null;
+  source: string;
+  message: string;
+}
+
 export interface FundReport {
   run_id: string;
   fund_code: string;
@@ -113,6 +125,7 @@ export interface FundReport {
   features: FeatureValue[];
   factor_exposures: FactorExposure[];
   reviews: Review[];
+  calculations: Calculation[];
   summary: {
     label_count: number;
     feature_count: number;
@@ -159,6 +172,33 @@ export async function fetchRun(runId: string): Promise<RunDetail> {
 
 export async function fetchFundReport(runId: string, fundCode: string): Promise<FundReport> {
   return json(`/v1/runs/${runId}/funds/${fundCode}/report`);
+}
+
+export interface BenchmarkComponent {
+  component_order: number;
+  component_code: string | null;
+  component_name: string;
+  weight: number | null;
+  source_text: string;
+  status: string;
+  reason: string;
+  has_returns: boolean;
+}
+
+export interface BenchmarkComponents {
+  run_id: string;
+  fund_code: string;
+  components: BenchmarkComponent[];
+  benchmark_returns_count: number;
+  has_benchmark_returns: boolean;
+  unresolved_count: number;
+}
+
+export async function fetchBenchmarkComponents(
+  runId: string,
+  fundCode: string
+): Promise<BenchmarkComponents> {
+  return json(`/v1/runs/${runId}/funds/${fundCode}/benchmark-components`);
 }
 
 export async function searchFunds(

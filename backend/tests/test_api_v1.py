@@ -462,3 +462,34 @@ def test_search_unknown_run_returns_404(seeded_run) -> None:
     response = client.get("/v1/runs/does_not_exist/search")
 
     assert response.status_code == 404
+
+
+def test_benchmark_components_endpoint_returns_structure(seeded_run) -> None:
+    db, run_id = seeded_run
+    client = TestClient(create_app(db_path=db))
+
+    response = client.get(
+        f"/v1/runs/{run_id}/funds/000001/benchmark-components"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["fund_code"] == "000001"
+    assert "components" in payload
+    assert isinstance(payload["components"], list)
+    assert "has_benchmark_returns" in payload
+    assert "unresolved_count" in payload
+    assert payload["unresolved_count"] == len(
+        [c for c in payload["components"] if c["status"] != "resolved" or not c["has_returns"]]
+    )
+
+
+def test_benchmark_components_endpoint_503_without_source_db(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("FLE_SOURCE_DB", raising=False)
+    monkeypatch.delenv("FLE_DB_PATH", raising=False)
+    client = TestClient(create_app())
+
+    response = client.get("/v1/runs/x/funds/000001/benchmark-components")
+    assert response.status_code == 503

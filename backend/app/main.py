@@ -286,6 +286,110 @@ def create_app(
             )
         return payload
 
+    @app.get("/v1/runs/{run_id}/funds/{fund_code}/benchmark-components")
+    def get_run_fund_benchmark_components(
+        run_id: str,
+        fund_code: str,
+    ) -> dict[str, Any]:
+        """返回该基金基准组件解析与收益缺口（从 source 库读取）。
+
+        用于单基金报告页醒目展示基准覆盖缺口：哪些组件未解析、哪些已解析但
+        无日收益源、合成基准收益是否成功。
+        """
+        import sqlite3
+
+        source_db = app.state.source_db_path or app.state.db_path
+        if not source_db:
+            raise HTTPException(
+                status_code=503,
+                detail="Source database is not configured.",
+            )
+        conn = sqlite3.connect(source_db)
+        conn.row_factory = sqlite3.Row
+        try:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            components: list[dict[str, Any]] = []
+            if "benchmark_components" in tables:
+                rows = conn.execute(
+                    "SELECT component_order, component_code, component_name, "
+                    "weight, source_text, status, reason "
+                    "FROM benchmark_components WHERE fund_code = ? "
+                    "ORDER BY component_order",
+                    (fund_code,),
+                ).fetchall()
+                # 哪些 component_code 有本地日收益
+                have_returns: set[str] = set()
+                if "benchmark_component_returns" in tables and rows:
+                    codes = [r["component_code"] for r in rows if r["component_code"]]
+                    if codes:
+                        placeholders = ",".join("?" for _ in codes)
+                        have_returns = {
+                            r[0]
+                            for r in conn.execute(
+                                f"SELECT DISTINCT component_code FROM "
+                                f"benchmark_component_returns "
+                                f"WHERE component_code IN ({placeholders})",
+                                codes,
+                            ).fetchall()
+                        }
+                for r in rows:
+                    code = r["component_code"]
+                    reason = r["reason"]
+                    # 收益源判定：
+                    # - synthetic 组件恒有收益（合成利率）
+                    # - 在 benchmark_component_returns 表里有行的组件有收益
+                    # - 基金已成功合成 benchmark_returns 时，所有 resolved 组件必然都有收益
+                    #   （股指等直取组件不入 component_returns 表，但合成成功即证明可取）
+                    has_returns = (
+                        reason == "synthetic"
+                        or (bool(code) and code in have_returns)
+                    )
+                    components.append(
+                        {
+                            "component_order": r["component_order"],
+                            "component_code": code,
+                            "component_name": r["component_name"],
+                            "weight": r["weight"],
+                            "source_text": r["source_text"],
+                            "status": r["status"],
+                            "reason": reason,
+                            "has_returns": has_returns,
+                        }
+                    )
+            benchmark_returns_count = 0
+            if "benchmark_returns" in tables:
+                benchmark_returns_count = (
+                    conn.execute(
+                        "SELECT COUNT(*) FROM benchmark_returns WHERE fund_code = ?",
+                        (fund_code,),
+                    ).fetchone()[0]
+                )
+        finally:
+            conn.close()
+
+        # 基金已合成基准收益 → 所有 resolved 组件都有收益（直取组件不入 component_returns）
+        if benchmark_returns_count > 0:
+            for c in components:
+                if c["status"] == "resolved" and not c["has_returns"]:
+                    c["has_returns"] = True
+
+        unresolved = [
+            c for c in components if c["status"] != "resolved" or not c["has_returns"]
+        ]
+        return {
+            "run_id": run_id,
+            "fund_code": fund_code,
+            "components": components,
+            "benchmark_returns_count": benchmark_returns_count,
+            "has_benchmark_returns": benchmark_returns_count > 0,
+            "unresolved_count": len(unresolved),
+        }
+
     @app.get("/v1/runs/{run_id}/search")
     def search_run_funds(
         run_id: str,
