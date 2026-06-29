@@ -24,7 +24,14 @@ REPORT_DATE ?= 2025-09-30
 NAV_START   ?= 2025-06-01
 NAV_END     ?= 2026-06-23
 
-.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 test
+BENCHMARK_START ?= 2025-06-25
+BENCHMARK_END   ?= 2026-06-24
+BENCHMARK_REPORT_DIR ?= reports/phase1-real-run-2026-06-29
+BENCHMARK_MAPPING_CSV ?= $(BENCHMARK_REPORT_DIR)/benchmark-mapping.csv
+BENCHMARK_QUALITY_CSV ?= $(BENCHMARK_REPORT_DIR)/benchmark-quality.csv
+BENCHMARK_QUALITY_MD  ?= $(BENCHMARK_REPORT_DIR)/benchmark-quality-gate.md
+
+.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark audit-benchmark run-batch-v1-with-benchmark test
 
 help:
 	@echo "Available targets:"
@@ -33,6 +40,9 @@ help:
 	@echo "  make copy-source        把 fundData cache DB 拷贝到 $(SOURCE_DB)"
 	@echo "  make run-batch          运行 batch（依赖 copy-source；用 $(FACTOR_DB) 作为 factor cache）"
 	@echo "  make run-batch-v1       运行 v1 正式权益清单 batch（排除待复核/低权益仓位基金）"
+	@echo "  make refresh-benchmark  解析/拉取 phase1 v1 基准收益到 $(SOURCE_DB)"
+	@echo "  make audit-benchmark    输出 benchmark 质量审计到 $(BENCHMARK_REPORT_DIR)"
+	@echo "  make run-batch-v1-with-benchmark  先补 benchmark，再跑 v1 标签"
 	@echo "  RULE_CONFIG=$(RULE_CONFIG)"
 	@echo "  make test               跑 pytest"
 
@@ -61,7 +71,7 @@ run-batch: copy-source
 	    --source-db $(SOURCE_DB) \
 	    --output-db $(OUTPUT_DB) \
 	    --source funddata \
-	    --rule-config $(RULE_CONFIG) \
+	    --rule-config $(PWD)/$(RULE_CONFIG) \
 	    --factor-db $(PWD)/$(FACTOR_DB) \
 	    --min-nav-samples 180 \
 	    --min-holding-total-weight 0.5 \
@@ -75,7 +85,38 @@ run-batch-v1: copy-source
 	    --source-db $(SOURCE_DB) \
 	    --output-db $(OUTPUT_DB) \
 	    --source funddata \
-	    --rule-config $(RULE_CONFIG) \
+	    --rule-config $(PWD)/$(RULE_CONFIG) \
+	    --factor-db $(PWD)/$(FACTOR_DB) \
+	    --min-nav-samples 180 \
+	    --min-holding-total-weight 0.5 \
+	    --deep-value-weight-min 0.4 \
+	    --quality-growth-weight-min 0.4
+
+refresh-benchmark: copy-source
+	@mkdir -p $(BENCHMARK_REPORT_DIR)
+	$(PYTHON) scripts/fetch_benchmark_returns.py \
+	  --db $(SOURCE_DB) \
+	  --codes-file $(PHASE1_OFFICIAL_FILE) \
+	  --start-date $(BENCHMARK_START) \
+	  --end-date $(BENCHMARK_END) \
+	  --mapping-csv $(BENCHMARK_MAPPING_CSV)
+
+audit-benchmark:
+	@mkdir -p $(BENCHMARK_REPORT_DIR)
+	$(PYTHON) scripts/audit_benchmark_quality.py \
+	  --db $(SOURCE_DB) \
+	  --codes-file $(PHASE1_OFFICIAL_FILE) \
+	  --csv $(BENCHMARK_QUALITY_CSV) \
+	  --markdown $(BENCHMARK_QUALITY_MD)
+
+run-batch-v1-with-benchmark: refresh-benchmark audit-benchmark
+	@rm -f $(OUTPUT_DB)
+	FLE_PHASE1_CODES_FILE=$(PWD)/$(PHASE1_OFFICIAL_FILE) PYTHONPATH=backend \
+	  $(PYTHON) -m app.batch \
+	    --source-db $(SOURCE_DB) \
+	    --output-db $(OUTPUT_DB) \
+	    --source funddata \
+	    --rule-config $(PWD)/$(RULE_CONFIG) \
 	    --factor-db $(PWD)/$(FACTOR_DB) \
 	    --min-nav-samples 180 \
 	    --min-holding-total-weight 0.5 \

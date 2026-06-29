@@ -137,3 +137,53 @@ def test_load_local_component_returns_accepts_plain_sqlite_connection(tmp_path):
         rows = load_local_component_returns(conn, "LOCAL_CBOND_TOTAL")
 
     assert rows == [{"trade_date": "2026-01-02", "daily_return": 0.0002}]
+
+
+def test_parse_rejects_hs300_financial_real_estate_as_plain_hs300():
+    components, audits = parse_benchmark_components(
+        "80%×沪深300金融地产行业指数收益率+20%×上证国债指数收益率"
+    )
+
+    assert components is None
+    assert any(
+        audit.status == "unresolved"
+        and audit.reason == "exact_component_mapping_required"
+        and audit.component_name == "沪深300金融地产行业指数"
+        for audit in audits
+    )
+    assert not any(
+        audit.status == "resolved"
+        and audit.component_code == "000300"
+        and audit.source_text == "80%×沪深300金融地产行业指数收益率"
+        for audit in audits
+    )
+
+
+def test_parse_rejects_hs300_anzhong_strategy_as_plain_hs300():
+    components, audits = parse_benchmark_components(
+        "沪深300安中动态策略指数收益率*95%+金融机构人民币活期存款基准利率(税后)*5%"
+    )
+
+    assert components is None
+    assert any(
+        audit.status == "unresolved"
+        and audit.reason == "exact_component_mapping_required"
+        and audit.component_name == "沪深300安中动态策略指数"
+        for audit in audits
+    )
+    assert not any(
+        audit.status == "resolved"
+        and audit.component_code == "000300"
+        for audit in audits
+    )
+
+
+def test_parse_keeps_plain_hs300_supported():
+    components, audits = parse_benchmark_components(
+        "沪深300指数收益率*80%+上证国债指数收益率*20%"
+    )
+
+    assert components is not None
+    assert [component.benchmark_code for component in components] == ["000300", "000012"]
+    assert [component.weight for component in components] == [0.8, 0.2]
+    assert all(audit.status == "resolved" for audit in audits)

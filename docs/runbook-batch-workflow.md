@@ -189,6 +189,36 @@ CREATE TABLE IF NOT EXISTS benchmark_component_returns (
 
 原则：没有可靠日收益源时保留 `benchmark_data_missing`，不使用不相干指数做代理。
 
+## Benchmark Quality Gate
+
+相对基准标签只允许在 benchmark quality 为 `ready` 的基金上解释和展示。
+
+运行顺序：
+
+```bash
+make run-batch-v1-with-benchmark \
+  PYTHON=.venv/bin/python \
+  OUTPUT_DB=/tmp/fle-run/output-v1-with-benchmark.sqlite
+```
+
+输出文件：
+
+- `reports/phase1-real-run-2026-06-29/benchmark-mapping.csv`
+- `reports/phase1-real-run-2026-06-29/benchmark-quality.csv`
+- `reports/phase1-real-run-2026-06-29/benchmark-quality-gate.md`
+
+状态含义：
+
+| status | 含义 | 是否允许相对基准标签 |
+|---|---|---|
+| `ready` | 组件映射明确，且有可用日收益序列 | 是 |
+| `missing_source` | 组件映射明确，但缺少可靠日收益源 | 否 |
+| `mapping_required` | 文本命中高风险宽指数，必须补精确映射 | 否 |
+| `unresolved` | 暂不支持或解析失败 | 否 |
+| `benchmark_missing` | 基金未披露基准 | 否 |
+
+原则：宁可缺失，也不使用宽指数代理。比如 `沪深300金融地产行业指数` 不得自动退化为普通 `沪深300`。
+
 ## 八、当前能产出的标签（截至 2026-06-25）
 
 跑 phase1 168 只的典型分布：

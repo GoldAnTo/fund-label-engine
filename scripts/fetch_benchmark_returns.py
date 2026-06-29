@@ -97,6 +97,16 @@ INDEX_MAP = {
     ),
 }
 
+# 高风险宽指数：文本里以这些精确前缀开头的行业/策略指数，绝不能退化成宽指数。
+# 没有精确映射前宁可标记为 unresolved，避免把行业/策略指数误算成普通沪深300。
+EXACT_COMPONENT_REQUIRED_PREFIXES = {
+    "沪深300": (
+        "沪深300金融地产",
+        "沪深300安中",
+        "沪深300非周期",
+    ),
+}
+
 _KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 _SINA_KLINE_URL = "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketData.getKLineData"
 _SYNTHETIC_CALENDAR_SECID = "1.000300"
@@ -244,8 +254,17 @@ def _clean_component_name(name: str) -> str:
     return cleaned.strip()
 
 
+def _requires_exact_component_mapping(cleaned_name: str) -> bool:
+    for _broad_alias, exact_required_prefixes in EXACT_COMPONENT_REQUIRED_PREFIXES.items():
+        if any(cleaned_name.startswith(prefix) for prefix in exact_required_prefixes):
+            return True
+    return False
+
+
 def _match_index_component(name: str, weight: float, source_text: str) -> BenchmarkComponent | None:
     cleaned = _clean_component_name(name)
+    if _requires_exact_component_mapping(cleaned):
+        return None
     for key in sorted(INDEX_MAP, key=len, reverse=True):
         if key in cleaned:
             code, secid, index_name = INDEX_MAP[key]
@@ -341,7 +360,11 @@ def parse_benchmark_components(text: str | None) -> tuple[tuple[BenchmarkCompone
                     weight,
                     term,
                     "unresolved",
-                    "unsupported_component_or_missing_source",
+                    (
+                        "exact_component_mapping_required"
+                        if _requires_exact_component_mapping(component_name)
+                        else "unsupported_component_or_missing_source"
+                    ),
                 )
             )
             continue
