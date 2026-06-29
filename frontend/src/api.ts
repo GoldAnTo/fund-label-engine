@@ -194,6 +194,48 @@ export interface BenchmarkComponents {
   unresolved_count: number;
 }
 
+export interface RelativeEligibilityRow {
+  fund_code: string;
+  fund_name: string;
+  benchmark_source_status: string;
+  nav_sample_count: number;
+  benchmark_sample_count: number;
+  return_window_status: string;
+  relative_label_status: string;
+  blocking_reason: string;
+  blocking_components: string;
+}
+
+export interface RelativeBlockerGroup {
+  key: string;
+  status: string;
+  component: string;
+  count: number;
+  sample_fund_codes: string[];
+}
+
+export interface RelativeEligibilityResponse {
+  run_id: string;
+  total_funds: number;
+  ready_count: number;
+  blocked_count: number;
+  status_counts: Record<string, number>;
+  benchmark_source_counts: Record<string, number>;
+  blocker_groups: RelativeBlockerGroup[];
+  filters: {
+    status: "all" | "ready" | "blocked";
+    limit: number;
+  };
+  results: RelativeEligibilityRow[];
+}
+
+export async function fetchRelativeEligibility(
+  runId: string,
+  status: "all" | "ready" | "blocked" = "all"
+): Promise<RelativeEligibilityResponse> {
+  return json(`/v1/runs/${runId}/relative-label-eligibility?status=${status}&limit=300`);
+}
+
 export async function fetchBenchmarkComponents(
   runId: string,
   fundCode: string

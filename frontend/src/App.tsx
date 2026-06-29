@@ -3,6 +3,7 @@ import RunsPage from "./pages/RunsPage";
 import RunDetailPage from "./pages/RunDetailPage";
 import RunDiffPage from "./pages/RunDiffPage";
 import FundReportPage from "./pages/FundReportPage";
+import ReadyPoolPage from "./pages/ReadyPoolPage";
 import SearchPage from "./pages/SearchPage";
 import ReviewQueuePage from "./pages/ReviewQueuePage";
 
@@ -13,6 +14,7 @@ export default function App() {
         <h1>Fund Label Workbench</h1>
         <nav>
           <NavLink to="/runs">批次 Runs</NavLink>
+          <NavLink to="/ready-pool">Ready Pool</NavLink>
           <NavLink to="/diff">批次对比</NavLink>
           <NavLink to="/search">基金检索</NavLink>
           <NavLink to="/review-queue">复核队列</NavLink>
@@ -22,6 +24,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/runs" replace />} />
           <Route path="/runs" element={<RunsPage />} />
+          <Route path="/ready-pool" element={<ReadyPoolPage />} />
           <Route path="/runs/:runId" element={<RunDetailPage />} />
           <Route
             path="/runs/:runId/funds/:fundCode"

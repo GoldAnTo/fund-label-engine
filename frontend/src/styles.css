@@ -238,3 +238,39 @@ button:disabled {
   background: #ecfdf5;
   color: #047857;
 }
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.metric-tile {
+  background: oklch(0.995 0.004 255);
+  border-radius: 10px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 2px oklch(0.22 0.01 255 / 0.08);
+}
+
+.metric-tile span {
+  display: block;
+  color: oklch(0.48 0.025 255);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.metric-tile strong {
+  display: block;
+  color: oklch(0.23 0.025 255);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.metric-ready strong {
+  color: oklch(0.46 0.13 160);
+}
+
+.metric-blocked strong {
+  color: oklch(0.54 0.13 65);
+}

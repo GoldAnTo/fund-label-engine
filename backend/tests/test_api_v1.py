@@ -1,4 +1,5 @@
 from pathlib import Path
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
@@ -477,6 +478,136 @@ def test_search_unknown_run_returns_404(seeded_run) -> None:
     assert response.status_code == 404
 
 
+def test_relative_label_eligibility_endpoint_lists_ready_and_blocked(seeded_run) -> None:
+    db, run_id = seeded_run
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE benchmark_components (
+                fund_code TEXT,
+                component_order INTEGER,
+                component_code TEXT,
+                component_name TEXT,
+                weight REAL,
+                source_text TEXT,
+                status TEXT,
+                reason TEXT,
+                secid TEXT
+            );
+            CREATE TABLE benchmark_returns (
+                fund_code TEXT,
+                benchmark_code TEXT,
+                trade_date TEXT,
+                daily_return REAL
+            );
+            CREATE TABLE benchmark_component_returns (
+                component_code TEXT,
+                trade_date TEXT,
+                daily_return REAL
+            );
+            ALTER TABLE fund_profiles ADD COLUMN benchmark TEXT;
+            ALTER TABLE fund_profiles ADD COLUMN tracking_target TEXT;
+            """
+        )
+        conn.executemany(
+            "INSERT INTO benchmark_components VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("000001", 1, "000300", "沪深300", 1.0, "沪深300", "resolved", "exact", "1.000300"),
+                ("000002", 1, "LOCAL_CBOND_TOTAL", "中债总", 1.0, "中债总", "resolved", "exact", "LOCAL_CBOND_TOTAL"),
+            ],
+        )
+        for i in range(200):
+            conn.execute(
+                "INSERT INTO nav_history (fund_code, nav_date, daily_return) VALUES ('000001', ?, 0.001)",
+                (f"2026-01-{i:03d}",),
+            )
+            conn.execute(
+                "INSERT INTO benchmark_returns VALUES ('000001', '000300', ?, 0.001)",
+                (f"2026-01-{i:03d}",),
+            )
+        conn.commit()
+    client = TestClient(create_app(db_path=db))
+
+    response = client.get(f"/v1/runs/{run_id}/relative-label-eligibility")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_funds"] == 2
+    assert payload["ready_count"] == 1
+    assert payload["blocked_count"] == 1
+    assert payload["blocker_groups"] == [
+        {
+            "key": "benchmark_source_missing|LOCAL_CBOND_TOTAL:中债总",
+            "status": "benchmark_source_missing",
+            "component": "LOCAL_CBOND_TOTAL:中债总",
+            "count": 1,
+            "sample_fund_codes": ["000002"],
+        }
+    ]
+    by_code = {row["fund_code"]: row for row in payload["results"]}
+    assert by_code["000001"]["relative_label_status"] == "relative_label_ready"
+    assert by_code["000002"]["relative_label_status"] == "benchmark_source_missing"
+
+
+def test_relative_label_eligibility_endpoint_filters_blocked(seeded_run) -> None:
+    db, run_id = seeded_run
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE benchmark_components (
+                fund_code TEXT,
+                component_order INTEGER,
+                component_code TEXT,
+                component_name TEXT,
+                weight REAL,
+                source_text TEXT,
+                status TEXT,
+                reason TEXT,
+                secid TEXT
+            );
+            CREATE TABLE benchmark_returns (
+                fund_code TEXT,
+                benchmark_code TEXT,
+                trade_date TEXT,
+                daily_return REAL
+            );
+            CREATE TABLE benchmark_component_returns (
+                component_code TEXT,
+                trade_date TEXT,
+                daily_return REAL
+            );
+            ALTER TABLE fund_profiles ADD COLUMN benchmark TEXT;
+            ALTER TABLE fund_profiles ADD COLUMN tracking_target TEXT;
+            """
+        )
+        conn.execute(
+            "INSERT INTO benchmark_components VALUES ('000001', 1, '000300', '沪深300', 1.0, '沪深300', 'resolved', 'exact', '1.000300')"
+        )
+        conn.execute(
+            "INSERT INTO benchmark_components VALUES ('000002', 1, 'LOCAL_CBOND_TOTAL', '中债总', 1.0, '中债总', 'resolved', 'exact', 'LOCAL_CBOND_TOTAL')"
+        )
+        for i in range(200):
+            conn.execute(
+                "INSERT INTO nav_history (fund_code, nav_date, daily_return) VALUES ('000001', ?, 0.001)",
+                (f"2026-01-{i:03d}",),
+            )
+            conn.execute(
+                "INSERT INTO benchmark_returns VALUES ('000001', '000300', ?, 0.001)",
+                (f"2026-01-{i:03d}",),
+            )
+        conn.commit()
+    client = TestClient(create_app(db_path=db))
+
+    response = client.get(
+        f"/v1/runs/{run_id}/relative-label-eligibility",
+        params={"status": "blocked"},
+    )
+
+    assert response.status_code == 200
+    rows = response.json()["results"]
+    assert [row["fund_code"] for row in rows] == ["000002"]
+
+
 def test_benchmark_components_endpoint_returns_structure(seeded_run) -> None:
     db, run_id = seeded_run
     client = TestClient(create_app(db_path=db))
@@ -498,7 +629,7 @@ def test_benchmark_components_endpoint_returns_structure(seeded_run) -> None:
 
 
 def test_benchmark_components_endpoint_503_without_source_db(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("FLE_SOURCE_DB", raising=False)
     monkeypatch.delenv("FLE_DB_PATH", raising=False)

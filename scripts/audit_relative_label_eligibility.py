@@ -74,9 +74,14 @@ def classify_relative_eligibility(
 
 
 def _nav_sample_count(conn: sqlite3.Connection, fund_code: str) -> int:
+    cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(nav_history)").fetchall()
+    }
+    return_col = "daily_growth_rate" if "daily_growth_rate" in cols else "daily_return"
     return conn.execute(
-        "SELECT count(*) FROM nav_history "
-        "WHERE fund_code = ? AND daily_growth_rate IS NOT NULL",
+        f"SELECT count(*) FROM nav_history "
+        f"WHERE fund_code = ? AND {return_col} IS NOT NULL",
         (fund_code,),
     ).fetchone()[0]
 

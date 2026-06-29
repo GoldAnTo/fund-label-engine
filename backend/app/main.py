@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections import Counter
 from pathlib import Path
 from typing import Any, Literal
 
@@ -532,6 +533,100 @@ def create_app(
             "decision": request.decision,
             "reviewer": request.reviewer,
             "comment": request.comment,
+        }
+
+    @app.get("/v1/runs/{run_id}/relative-label-eligibility")
+    def get_run_relative_label_eligibility(
+        run_id: str,
+        status: Literal["all", "ready", "blocked"] = "all",
+        limit: int = 200,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """返回相对基准标签 ready/blocked 池，用于工作台展示。"""
+        import sqlite3
+
+        if reader.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        source_db = app.state.source_db_path or app.state.db_path
+        if not source_db:
+            raise HTTPException(
+                status_code=503,
+                detail="Source database is not configured.",
+            )
+
+        from scripts.audit_benchmark_quality import build_quality_rows
+        from scripts.audit_relative_label_eligibility import build_eligibility_rows
+
+        codes = reader.list_run_funds(run_id)
+        try:
+            with sqlite3.connect(source_db) as conn:
+                conn.row_factory = sqlite3.Row
+                quality_rows = build_quality_rows(conn, codes)
+                quality_by_code = {row["fund_code"]: row for row in quality_rows}
+                rows = build_eligibility_rows(conn, codes, quality_by_code)
+        except sqlite3.OperationalError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Relative eligibility source tables are not ready: {exc}",
+            ) from exc
+
+        status_counts = Counter(row["relative_label_status"] for row in rows)
+        source_counts = Counter(row["benchmark_source_status"] for row in rows)
+        blocker_groups: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if row["relative_label_status"] == "relative_label_ready":
+                continue
+            components = [
+                item.strip()
+                for item in str(row.get("blocking_components") or "").split(";")
+                if item.strip()
+            ] or [str(row.get("blocking_reason") or row["relative_label_status"])]
+            for component in components:
+                key = f"{row['relative_label_status']}|{component}"
+                group = blocker_groups.setdefault(
+                    key,
+                    {
+                        "key": key,
+                        "status": row["relative_label_status"],
+                        "component": component,
+                        "count": 0,
+                        "sample_fund_codes": [],
+                    },
+                )
+                group["count"] += 1
+                if len(group["sample_fund_codes"]) < 5:
+                    group["sample_fund_codes"].append(row["fund_code"])
+        blocker_group_rows = sorted(
+            blocker_groups.values(),
+            key=lambda item: (-item["count"], item["status"], item["component"]),
+        )
+        if status == "ready":
+            display_rows = [
+                row for row in rows
+                if row["relative_label_status"] == "relative_label_ready"
+            ]
+        elif status == "blocked":
+            display_rows = [
+                row for row in rows
+                if row["relative_label_status"] != "relative_label_ready"
+            ]
+        else:
+            display_rows = rows
+        display_rows = sorted(
+            display_rows,
+            key=lambda row: (row["relative_label_status"] != "relative_label_ready", row["fund_code"]),
+        )[:limit]
+
+        return {
+            "run_id": run_id,
+            "total_funds": len(rows),
+            "ready_count": status_counts.get("relative_label_ready", 0),
+            "blocked_count": len(rows) - status_counts.get("relative_label_ready", 0),
+            "status_counts": dict(status_counts),
+            "benchmark_source_counts": dict(source_counts),
+            "blocker_groups": blocker_group_rows,
+            "filters": {"status": status, "limit": limit},
+            "results": display_rows,
         }
 
     @app.get("/v1/funds/{fund_code}/labels")
