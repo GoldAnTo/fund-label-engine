@@ -24,17 +24,39 @@ def read_codes(path: str | Path) -> list[str]:
     ]
 
 
+def _component_has_source(component: dict[str, Any], component_codes_with_returns: set[str]) -> bool:
+    """判断单个组件是否有可用日收益源。
+
+    - synthetic 利率组件（secid 形如 ``synthetic:xxx``）可被确定性合成，自带源。
+    - 可实时拉取的数字指数码（secid 形如 ``1.000300`` / ``0.399006`` / ``2.932000``）
+      由 fetch 脚本直接从行情源取，视为有源；它们在 ``benchmark_returns`` 里以复合串
+      形式落库，不会以单个 code 出现，因此不能靠字符串匹配来判断。
+    - 其余（LOCAL_* 债券指数等）只有出现在已落库的收益表里才算有源。
+    """
+    secid = str(component.get("secid") or "")
+    code = component.get("component_code")
+    if secid.startswith("synthetic:"):
+        return True
+    if _is_live_numeric_secid(secid):
+        return True
+    return bool(code) and str(code) in component_codes_with_returns
+
+
+def _is_live_numeric_secid(secid: str) -> bool:
+    prefix, _, body = secid.partition(".")
+    return prefix in {"0", "1", "2"} and body.isdigit()
+
+
 def classify_component(component: dict[str, Any], component_codes_with_returns: set[str]) -> str:
     status = str(component.get("status") or "")
     reason = str(component.get("reason") or "")
-    code = component.get("component_code")
     if reason == "benchmark_missing":
         return "benchmark_missing"
     if reason == "exact_component_mapping_required":
         return "mapping_required"
     if status != "resolved":
         return "unresolved"
-    if code and str(code) in component_codes_with_returns:
+    if _component_has_source(component, component_codes_with_returns):
         return "ready"
     return "missing_source"
 
@@ -42,6 +64,7 @@ def classify_component(component: dict[str, Any], component_codes_with_returns: 
 def summarize_fund_quality(
     components: list[dict[str, Any]],
     component_codes_with_returns: set[str],
+    has_composed_returns: bool = False,
 ) -> dict[str, str]:
     if not components:
         return {
@@ -52,6 +75,10 @@ def summarize_fund_quality(
         (classify_component(component, component_codes_with_returns), component)
         for component in components
     ]
+    # 真相优先：所有组件都 resolved 且实际已合成出 benchmark_returns，即为 ready。
+    # 这避免了债券/利率等组件因不单独落库而把已成功合成的基金误判为 missing_source。
+    if has_composed_returns and all(status != "unresolved" and status != "mapping_required" and status != "benchmark_missing" for status, _ in classified):
+        return {"quality_status": "ready", "blocking_components": ""}
     worst_status = max(classified, key=lambda item: QUALITY_ORDER[item[0]])[0]
     blockers = [
         f"{component.get('component_code') or ''}:{component.get('component_name') or ''}".strip(":")
@@ -105,11 +132,15 @@ def build_quality_rows(conn: sqlite3.Connection, codes: list[str]) -> list[dict[
                 (profile["fund_code"],),
             ).fetchall()
         ]
-        summary = summarize_fund_quality(components, component_codes_with_returns)
         has_returns = conn.execute(
             "SELECT 1 FROM benchmark_returns WHERE fund_code = ? LIMIT 1",
             (profile["fund_code"],),
         ).fetchone()
+        summary = summarize_fund_quality(
+            components,
+            component_codes_with_returns,
+            has_composed_returns=bool(has_returns),
+        )
         rows.append(
             {
                 "fund_code": profile["fund_code"],
