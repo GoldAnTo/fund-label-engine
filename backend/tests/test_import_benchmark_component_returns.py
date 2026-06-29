@@ -96,7 +96,18 @@ def test_import_csv_rejects_when_rows_below_min(tmp_path: Path):
 
 
 def test_allowed_whitelist_contents():
-    assert {"H11001", "H11008", "LOCAL_CBOND_COMPOSITE", "LOCAL_CBOND_TOTAL"}.issubset(
-        ALLOWED_COMPONENT_CODES
-    )
+    assert {
+        "H11001",
+        "H11006",
+        "H11008",
+        "H11009",
+        "000998",
+        "000964",
+        "000942",
+        "931027",
+        "399102",
+        "399101",
+        "LOCAL_CBOND_COMPOSITE",
+        "LOCAL_CBOND_TOTAL",
+    }.issubset(ALLOWED_COMPONENT_CODES)
     assert "LOCAL_CHINA_BOND_TOTAL" in ALLOWED_COMPONENT_CODES

@@ -8,8 +8,8 @@ Total funds: 142
 
 | status | count |
 | --- | ---: |
-| `relative_label_ready` | 67 |
-| `benchmark_source_missing` | 58 |
+| `relative_label_ready` | 104 |
+| `benchmark_source_missing` | 21 |
 | `benchmark_mapping_required` | 2 |
 | `benchmark_unresolved` | 14 |
 | `benchmark_missing` | 1 |
@@ -18,8 +18,8 @@ Total funds: 142
 
 | status | count |
 | --- | ---: |
-| `ready` | 67 |
-| `missing_source` | 58 |
+| `ready` | 104 |
+| `missing_source` | 21 |
 | `unresolved` | 14 |
 | `mapping_required` | 2 |
 | `benchmark_missing` | 1 |

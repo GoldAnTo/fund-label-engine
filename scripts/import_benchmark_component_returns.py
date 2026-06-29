@@ -24,7 +24,15 @@ from typing import Any
 
 ALLOWED_COMPONENT_CODES = {
     "H11001",            # 中证全债
-    "H11008",            # 中证综合债
+    "H11006",            # 中证国债
+    "H11008",            # 中证企业债（保留白名单，但不用于中证综合债）
+    "H11009",            # 中证综合债
+    "000998",            # 中证TMT
+    "000964",            # 中证新兴产业
+    "000942",            # 内地消费
+    "931027",            # 港股通大消费
+    "399102",            # 创业板综合
+    "399101",            # 中小企业综合
     "LOCAL_CBOND_COMPOSITE",  # 中债综合
     "LOCAL_CBOND_TOTAL",      # 中债总
     "LOCAL_CHINA_BOND_TOTAL",  # 中国债券总

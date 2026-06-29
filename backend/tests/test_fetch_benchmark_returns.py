@@ -86,6 +86,22 @@ def test_parse_components_records_unresolved_bond_component():
     assert all(audit.status == "resolved" for audit in audits)
 
 
+def test_parse_components_maps_csi_composite_bond_to_h11009():
+    components, audits = parse_benchmark_components(
+        "中证综合债指数收益率*80%+银行活期存款利率(税后)*20%"
+    )
+
+    assert components is not None
+    assert components[0].benchmark_code == "H11009"
+    assert components[0].benchmark_name == "中证综合债"
+    assert any(
+        audit.status == "resolved"
+        and audit.component_code == "H11009"
+        and audit.component_name == "中证综合债"
+        for audit in audits
+    )
+
+
 def test_resolve_thematic_index_with_deposit_component():
     mapping = resolve_benchmark(
         "000005",
