@@ -30,8 +30,10 @@ BENCHMARK_REPORT_DIR ?= reports/phase1-real-run-2026-06-29
 BENCHMARK_MAPPING_CSV ?= $(BENCHMARK_REPORT_DIR)/benchmark-mapping.csv
 BENCHMARK_QUALITY_CSV ?= $(BENCHMARK_REPORT_DIR)/benchmark-quality.csv
 BENCHMARK_QUALITY_MD  ?= $(BENCHMARK_REPORT_DIR)/benchmark-quality-gate.md
+RELATIVE_ELIGIBILITY_CSV ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.csv
+RELATIVE_ELIGIBILITY_MD  ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.md
 
-.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark audit-benchmark run-batch-v1-with-benchmark test
+.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark audit-benchmark audit-relative-eligibility run-batch-v1-with-benchmark test
 
 help:
 	@echo "Available targets:"
@@ -108,6 +110,14 @@ audit-benchmark:
 	  --codes-file $(PHASE1_OFFICIAL_FILE) \
 	  --csv $(BENCHMARK_QUALITY_CSV) \
 	  --markdown $(BENCHMARK_QUALITY_MD)
+
+audit-relative-eligibility:
+	@mkdir -p $(BENCHMARK_REPORT_DIR)
+	$(PYTHON) scripts/audit_relative_label_eligibility.py \
+	  --db $(SOURCE_DB) \
+	  --codes-file $(PHASE1_OFFICIAL_FILE) \
+	  --csv $(RELATIVE_ELIGIBILITY_CSV) \
+	  --markdown $(RELATIVE_ELIGIBILITY_MD)
 
 run-batch-v1-with-benchmark: refresh-benchmark audit-benchmark
 	@rm -f $(OUTPUT_DB)
