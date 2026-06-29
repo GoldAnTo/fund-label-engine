@@ -32,8 +32,9 @@ BENCHMARK_QUALITY_CSV ?= $(BENCHMARK_REPORT_DIR)/benchmark-quality.csv
 BENCHMARK_QUALITY_MD  ?= $(BENCHMARK_REPORT_DIR)/benchmark-quality-gate.md
 RELATIVE_ELIGIBILITY_CSV ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.csv
 RELATIVE_ELIGIBILITY_MD  ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.md
+READY_POOL_MD  ?= $(BENCHMARK_REPORT_DIR)/phase1-v1-ready-pool-sample.md
 
-.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark audit-benchmark audit-relative-eligibility run-batch-v1-with-benchmark test
+.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark audit-benchmark audit-relative-eligibility render-ready-pool-report run-batch-v1-with-benchmark test
 
 help:
 	@echo "Available targets:"
@@ -44,6 +45,8 @@ help:
 	@echo "  make run-batch-v1       运行 v1 正式权益清单 batch（排除待复核/低权益仓位基金）"
 	@echo "  make refresh-benchmark  解析/拉取 phase1 v1 基准收益到 $(SOURCE_DB)"
 	@echo "  make audit-benchmark    输出 benchmark 质量审计到 $(BENCHMARK_REPORT_DIR)"
+	@echo "  make audit-relative-eligibility  输出相对标签 ready 池审计"
+	@echo "  make render-ready-pool-report  渲染 8 只样本 Phase1 v1 ready pool 验收报告"
 	@echo "  make run-batch-v1-with-benchmark  先补 benchmark，再跑 v1 标签"
 	@echo "  RULE_CONFIG=$(RULE_CONFIG)"
 	@echo "  make test               跑 pytest"
@@ -118,6 +121,15 @@ audit-relative-eligibility:
 	  --codes-file $(PHASE1_OFFICIAL_FILE) \
 	  --csv $(RELATIVE_ELIGIBILITY_CSV) \
 	  --markdown $(RELATIVE_ELIGIBILITY_MD)
+
+# Phase1 v1 ready pool 验收报告：从 108 ready 池抽 8 只基金逐只展示
+# 依赖：SOURCE_DB 已是含 Investoday/HSI/cbond 数据的 source，OUTPUT_DB 已是最新 batch 输出
+render-ready-pool-report:
+	@mkdir -p $(BENCHMARK_REPORT_DIR)
+	$(PYTHON) scripts/render_ready_pool_report.py \
+	  --source-db $(SOURCE_DB) \
+	  --output-db $(OUTPUT_DB) \
+	  --out-md $(READY_POOL_MD)
 
 run-batch-v1-with-benchmark: refresh-benchmark audit-benchmark
 	@rm -f $(OUTPUT_DB)

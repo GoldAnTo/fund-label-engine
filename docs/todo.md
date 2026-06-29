@@ -12,12 +12,20 @@
 - 已完成：API、导出、复核队列、run diff、搜索页、单基金报告页和前端构建。
 - 已完成：CI 覆盖 pytest、前端 build、样例 DB smoke 和关键 API smoke。
 - 已完成：规则配置可从 `config/rules.v1.json` 加载，并随 run snapshot 落库。
+- 已完成：相对基准 v3——`fetch_benchmark_returns.py` 优先消费 `benchmark_component_returns`，合成复合基准后落 `benchmark_returns`。
+- 已完成：导入层 `scripts/import_benchmark_component_returns.py`：白名单 + `daily_return` 范围 + `min_rows` 防误填。
+- 已完成：Investoday 债券指数日频源接入：`H11001`/`H11006`/`H11009` 通过 `/index/basic-info` 校验名称后拉 `/index/quotes`。
+- 已完成：Investoday 精确宽指数日频源接入：`000998`/`000964`/`000942`/`931027`/`399102`/`399101`/`HSI`，5 只恒生/量化等基金从 `unresolved` 收口到 `ready`。
+- 已完成：cbond 总指数探针（`scripts/probe_cbond_benchmark_sources.py`）— `LOCAL_CBOND_TOTAL` / `LOCAL_CHINA_BOND_TOTAL` / `LOCAL_SP_CHINA_BOND` 在 Investoday 和 akshare 中债登均无精确源，固化"不代理"决策。
+- 已完成：Phase1 v1 relative-benchmark eligibility audit 三层状态（基准源 / NAV 窗口 / 相对标签），audit 与 engine 双向差集为空。
+- 已完成：相对标签池 67 → 108（`relative_label_ready=108`，`mapping_required=2`，`missing_source=21`，`benchmark_missing=1`）。
+- 已完成：Phase1 v1 ready pool 验收报告（8 只样本）—— `scripts/render_ready_pool_report.py` + `make render-ready-pool-report` + 5 个 smoke 单测，固化 v1 release baseline。
 
 ## P0：当前最优先
 
 - 继续补：把稳定债券指数、行业/主题指数、港股指数日收益先写入 `benchmark_component_returns`，再运行 `scripts/fetch_benchmark_returns.py`，提高 `benchmark_returns` 覆盖。
 - 继续补：基于 `benchmark_components` 输出 unresolved component 榜单，优先处理 `中债综合`、`中债总`、`中国债券总` 等高频缺口。
-- 继续补：固定 5-10 只真实基金，输出“标签、证据、计算状态、分类、分组、基准组件、风格稳定性”的验收报告。
+- 已完成：固定 5-10 只真实基金，输出"标签、证据、计算状态、分类、分组、基准组件、风格稳定性"的验收报告（`reports/phase1-real-run-2026-06-29/phase1-v1-ready-pool-sample.md` + 5 个 smoke 单测）。
 - 继续补：对 `data_gap_pool` 基金做缺口归因，决定补 NAV、补持仓穿透，还是从第一版正式清单剔除。
 
 ## P1：工作台增强
