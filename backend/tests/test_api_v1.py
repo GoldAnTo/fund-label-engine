@@ -256,10 +256,16 @@ def test_frontend_dist_is_mounted_when_provided(
 
     # API 仍然可用
     assert client.get("/health").status_code == 200
-    # 根路径返回 index.html
+    # 根路径和前端路由都返回 index.html
     root = client.get("/")
     assert root.status_code == 200
     assert b"id=root" in root.content
+    ready_pool = client.get("/ready-pool")
+    assert ready_pool.status_code == 200
+    assert b"id=root" in ready_pool.content
+    fund_report = client.get("/runs/run-1/funds/000001")
+    assert fund_report.status_code == 200
+    assert b"id=root" in fund_report.content
     # 静态资源也能拿到
     js = client.get("/assets/app.js")
     assert js.status_code == 200

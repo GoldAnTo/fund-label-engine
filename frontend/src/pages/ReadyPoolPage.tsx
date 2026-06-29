@@ -4,15 +4,42 @@ import { fetchRelativeEligibility, fetchRuns, RelativeEligibilityResponse } from
 
 const STATUS_LABELS: Record<string, string> = {
   relative_label_ready: "可展示",
-  benchmark_source_missing: "缺收益源",
-  benchmark_mapping_required: "需映射",
-  benchmark_unresolved: "未解析",
-  benchmark_missing: "无基准",
-  nav_window_insufficient: "窗口不足",
+  benchmark_source_missing: "缺少基准收益源",
+  benchmark_mapping_required: "需要确认基准映射",
+  benchmark_unresolved: "基准组件未解析",
+  benchmark_missing: "未配置业绩基准",
+  nav_window_insufficient: "收益窗口不足",
+};
+
+const SOURCE_STATUS_LABELS: Record<string, string> = {
+  ready: "基准已就绪",
+  missing_source: "缺少收益源",
+  mapping_required: "需要映射",
+  unresolved: "未解析",
+  benchmark_missing: "无业绩基准",
 };
 
 function statusLabel(value: string) {
   return STATUS_LABELS[value] ?? value;
+}
+
+function sourceStatusLabel(value: string) {
+  return SOURCE_STATUS_LABELS[value] ?? value;
+}
+
+function displayText(value: string) {
+  return value
+    .replaceAll("benchmark_source_status=benchmark_missing", "未配置业绩基准")
+    .replaceAll("benchmark_source_status=missing_source", "缺少基准收益源")
+    .replaceAll("benchmark_source_status=mapping_required", "需要确认基准映射")
+    .replaceAll("benchmark_source_status=unresolved", "基准组件未解析")
+    .replaceAll("relative_label_ready", "可展示")
+    .replaceAll("benchmark_source_missing", "缺少基准收益源")
+    .replaceAll("benchmark_mapping_required", "需要确认基准映射")
+    .replaceAll("benchmark_unresolved", "基准组件未解析")
+    .replaceAll("benchmark_missing", "未配置业绩基准")
+    .replaceAll("nav_window_insufficient", "收益窗口不足")
+    .replace(/\b[A-Z0-9_]+:/g, "");
 }
 
 function statusClass(value: string) {
@@ -49,9 +76,9 @@ export default function ReadyPoolPage() {
   return (
     <div>
       <div className="card">
-        <h2>Phase1 v1 Ready Pool</h2>
+        <h2>一期 v1 可展示基金池</h2>
         <p className="muted">
-          相对基准标签展示门禁：只有 relative_label_ready 才展示 Alpha、Beta、超额收益。
+          只有通过相对基准门禁的基金，才在前台展示阿尔法、贝塔和超额收益。
         </p>
         <div className="toolbar">
           <label>
@@ -68,8 +95,8 @@ export default function ReadyPoolPage() {
             状态&nbsp;
             <select value={status} onChange={(e) => setStatus(e.target.value as "all" | "ready" | "blocked")}>
               <option value="all">全部</option>
-              <option value="ready">仅 ready</option>
-              <option value="blocked">仅 blocked</option>
+              <option value="ready">仅看可展示</option>
+              <option value="blocked">仅看暂不可展示</option>
             </select>
           </label>
         </div>
@@ -83,11 +110,11 @@ export default function ReadyPoolPage() {
             <strong>{data.total_funds}</strong>
           </div>
           <div className="metric-tile metric-ready">
-            <span>relative ready</span>
+            <span>可展示</span>
             <strong>{data.ready_count}</strong>
           </div>
           <div className="metric-tile metric-blocked">
-            <span>blocked</span>
+            <span>暂不可展示</span>
             <strong>{data.blocked_count}</strong>
           </div>
         </div>
@@ -114,8 +141,8 @@ export default function ReadyPoolPage() {
 
       {data && data.blocker_groups.length > 0 && (
         <div className="card">
-          <h2>阻塞组件 Top</h2>
-          <p className="muted">按相对标签门禁原因和组件聚合，优先处理基金数最多的缺口。</p>
+          <h2>主要阻塞项</h2>
+          <p className="muted">按门禁原因和基准组件聚合，优先处理影响基金数最多的缺口。</p>
           <table>
             <thead>
               <tr>
@@ -129,7 +156,7 @@ export default function ReadyPoolPage() {
               {data.blocker_groups.slice(0, 12).map((group) => (
                 <tr key={group.key}>
                   <td><span className={`badge ${statusClass(group.status)}`}>{statusLabel(group.status)}</span></td>
-                  <td className="muted">{group.component}</td>
+                  <td className="muted">{displayText(group.component)}</td>
                   <td>{group.count}</td>
                   <td className="muted">{group.sample_fund_codes.join(", ")}</td>
                 </tr>
@@ -149,7 +176,7 @@ export default function ReadyPoolPage() {
                 <th>基金</th>
                 <th>相对标签状态</th>
                 <th>基准源</th>
-                <th>NAV / 基准样本</th>
+                <th>净值 / 基准样本</th>
                 <th>阻塞组件</th>
                 <th></th>
               </tr>
@@ -162,11 +189,11 @@ export default function ReadyPoolPage() {
                     <div className="muted">{row.fund_name}</div>
                   </td>
                   <td><span className={`badge ${statusClass(row.relative_label_status)}`}>{statusLabel(row.relative_label_status)}</span></td>
-                  <td>{row.benchmark_source_status}</td>
+                  <td>{sourceStatusLabel(row.benchmark_source_status)}</td>
                   <td>{row.nav_sample_count} / {row.benchmark_sample_count}</td>
-                  <td className="muted">{row.blocking_components || row.blocking_reason || "-"}</td>
+                  <td className="muted">{displayText(row.blocking_components || row.blocking_reason || "-")}</td>
                   <td>
-                    <Link to={`/runs/${data.run_id}/funds/${row.fund_code}`}>报告 →</Link>
+                    <Link to={`/runs/${data.run_id}/funds/${row.fund_code}`}>查看报告 →</Link>
                   </td>
                 </tr>
               ))}

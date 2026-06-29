@@ -11,10 +11,10 @@ export default function App() {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <h1>Fund Label Workbench</h1>
+        <h1>基金标签工作台</h1>
         <nav>
-          <NavLink to="/runs">批次 Runs</NavLink>
-          <NavLink to="/ready-pool">Ready Pool</NavLink>
+          <NavLink to="/runs">批次列表</NavLink>
+          <NavLink to="/ready-pool">可展示池</NavLink>
           <NavLink to="/diff">批次对比</NavLink>
           <NavLink to="/search">基金检索</NavLink>
           <NavLink to="/review-queue">复核队列</NavLink>

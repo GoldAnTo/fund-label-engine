@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -648,6 +648,29 @@ def create_app(
     # 在 API 路由之后 mount 前端静态文件
     dist_dir = _resolve_frontend_dist(frontend_dist)
     if dist_dir is not None:
+        def _frontend_index() -> FileResponse:
+            return FileResponse(dist_dir / "index.html")
+
+        @app.get("/ready-pool", include_in_schema=False)
+        def serve_ready_pool() -> FileResponse:
+            return _frontend_index()
+
+        @app.get("/runs/{full_path:path}", include_in_schema=False)
+        def serve_run_route(full_path: str) -> FileResponse:
+            return _frontend_index()
+
+        @app.get("/diff", include_in_schema=False)
+        def serve_diff_route() -> FileResponse:
+            return _frontend_index()
+
+        @app.get("/search", include_in_schema=False)
+        def serve_search_route() -> FileResponse:
+            return _frontend_index()
+
+        @app.get("/review-queue", include_in_schema=False)
+        def serve_review_queue_route() -> FileResponse:
+            return _frontend_index()
+
         app.mount("/", StaticFiles(directory=str(dist_dir), html=True), name="frontend")
 
     return app
