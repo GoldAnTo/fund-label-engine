@@ -86,6 +86,31 @@ def test_parse_components_records_unresolved_bond_component():
     assert all(audit.status == "resolved" for audit in audits)
 
 
+def test_parse_components_maps_hsi_to_local_hsi():
+    components, audits = parse_benchmark_components(
+        "沪深300指数收益率*50%+恒生指数收益率*20%+中证国债指数收益率*30%"
+    )
+
+    assert components is not None
+    assert [c.benchmark_code for c in components] == ["000300", "HSI", "H11006"]
+    assert components[1].secid == "local:HSI"
+    assert any(
+        audit.status == "resolved"
+        and audit.component_code == "HSI"
+        and audit.component_name == "恒生指数"
+        for audit in audits
+    )
+
+
+def test_parse_components_maps_hsi_with_fx_suffix():
+    components, _ = parse_benchmark_components(
+        "沪深300指数收益率*80%+恒生指数收益率(使用估值汇率折算)*10%+中债综合指数收益率*10%"
+    )
+    assert components is not None
+    assert components[1].benchmark_code == "HSI"
+    assert components[1].secid == "local:HSI"
+
+
 def test_parse_components_maps_csi_composite_bond_to_h11009():
     components, audits = parse_benchmark_components(
         "中证综合债指数收益率*80%+银行活期存款利率(税后)*20%"

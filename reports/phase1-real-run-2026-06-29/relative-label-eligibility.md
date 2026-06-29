@@ -8,19 +8,19 @@ Total funds: 142
 
 | status | count |
 | --- | ---: |
-| `relative_label_ready` | 104 |
+| `relative_label_ready` | 108 |
 | `benchmark_source_missing` | 21 |
 | `benchmark_mapping_required` | 2 |
-| `benchmark_unresolved` | 14 |
+| `benchmark_unresolved` | 10 |
 | `benchmark_missing` | 1 |
 
 ## benchmark_source_status Counts
 
 | status | count |
 | --- | ---: |
-| `ready` | 104 |
+| `ready` | 108 |
 | `missing_source` | 21 |
-| `unresolved` | 14 |
+| `unresolved` | 10 |
 | `mapping_required` | 2 |
 | `benchmark_missing` | 1 |
 

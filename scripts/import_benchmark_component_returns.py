@@ -33,6 +33,7 @@ ALLOWED_COMPONENT_CODES = {
     "931027",            # 港股通大消费
     "399102",            # 创业板综合
     "399101",            # 中小企业综合
+    "HSI",               # 恒生指数
     "LOCAL_CBOND_COMPOSITE",  # 中债综合
     "LOCAL_CBOND_TOTAL",      # 中债总
     "LOCAL_CHINA_BOND_TOTAL",  # 中国债券总

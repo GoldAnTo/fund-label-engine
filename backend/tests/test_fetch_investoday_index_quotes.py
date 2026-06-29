@@ -69,4 +69,5 @@ def test_fetch_whitelist_is_intentionally_narrow():
         "931027": "港股通大消费",
         "399102": "创业板综合",
         "399101": "中小企业综合",
+        "HSI": "恒生指数",
     }

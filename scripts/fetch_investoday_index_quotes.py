@@ -24,6 +24,7 @@ ALLOWED_INDEXES = {
     "931027": "港股通大消费",
     "399102": "创业板综合",
     "399101": "中小企业综合",
+    "HSI": "恒生指数",
 }
 SOURCE_TAG = "investoday:index/quotes"
 DEFAULT_BASE_URL = "https://data-api.investoday.net/data"

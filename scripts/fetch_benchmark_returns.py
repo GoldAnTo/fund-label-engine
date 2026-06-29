@@ -95,6 +95,8 @@ INDEX_MAP = {
         "local:LOCAL_XHFT_CHINA_GOV_BOND",
         "新华富时中国国债",
     ),
+    "恒生指数": ("HSI", "local:HSI", "恒生指数"),
+    "恒生指数收益率": ("HSI", "local:HSI", "恒生指数"),
 }
 
 # 高风险宽指数：文本里以这些精确前缀开头的行业/策略指数，绝不能退化成宽指数。

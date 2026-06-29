@@ -107,6 +107,7 @@ def test_allowed_whitelist_contents():
         "931027",
         "399102",
         "399101",
+        "HSI",
         "LOCAL_CBOND_COMPOSITE",
         "LOCAL_CBOND_TOTAL",
     }.issubset(ALLOWED_COMPONENT_CODES)

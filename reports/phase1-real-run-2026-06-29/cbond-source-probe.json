@@ -1,0 +1,71 @@
+{
+  "investoday": {
+    "api_key_present": true,
+    "queries": [
+      {
+        "query": "中债总",
+        "items": []
+      },
+      {
+        "query": "中债总指数",
+        "items": []
+      },
+      {
+        "query": "中国债券总",
+        "items": []
+      },
+      {
+        "query": "中国债券总指数",
+        "items": []
+      },
+      {
+        "query": "中债-总",
+        "items": []
+      },
+      {
+        "query": "中债-总指数",
+        "items": []
+      },
+      {
+        "query": "中债综合",
+        "items": []
+      },
+      {
+        "query": "中债综合指数",
+        "items": []
+      },
+      {
+        "query": "中债国债总",
+        "items": []
+      },
+      {
+        "query": "中债国债总指数",
+        "items": []
+      },
+      {
+        "query": "标普中国债券",
+        "items": []
+      },
+      {
+        "query": "标普中国债券指数",
+        "items": []
+      }
+    ],
+    "candidates": []
+  },
+  "akshare": {
+    "akshare_available": true,
+    "categories": [
+      "国债总指数",
+      "商业银行债券指数",
+      "浮动利率债券指数",
+      "资产支持证券指数"
+    ]
+  },
+  "decision": {
+    "LOCAL_CBOND_TOTAL": "missing_source",
+    "LOCAL_CHINA_BOND_TOTAL": "missing_source",
+    "LOCAL_SP_CHINA_BOND": "missing_source",
+    "fallback_policy": "no_proxy_no_broad_index"
+  }
+}
