@@ -2,32 +2,47 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   downloadFile,
-  fetchRelativeEligibility,
-  fetchReviewQueue,
   fetchRuns,
-  SearchResponse,
+  fetchWorkbenchSummary,
+  fetchWorkbenchTasks,
+  type WorkbenchSummary,
+  type WorkbenchTasksResponse,
 } from "../api";
-import { ReviewActionBadge } from "../components";
 
-function cleanReason(value: string) {
-  return value
-    .replaceAll("benchmark_source_status=benchmark_missing", "未配置业绩基准")
-    .replaceAll("benchmark_source_status=missing_source", "缺少基准收益源")
-    .replaceAll("benchmark_source_status=mapping_required", "需要确认基准映射")
-    .replaceAll("benchmark_source_status=unresolved", "基准组件未解析")
-    .replaceAll("benchmark_source_missing", "缺少基准收益源")
-    .replaceAll("benchmark_mapping_required", "需要确认基准映射")
-    .replaceAll("benchmark_unresolved", "基准组件未解析")
-    .replaceAll("benchmark_missing", "未配置业绩基准")
-    .replaceAll("nav_window_insufficient", "收益窗口不足")
-    .replace(/\b[A-Z0-9_]+:/g, "");
+function taskTypeLabel(value: string) {
+  const labels: Record<string, string> = {
+    benchmark_gap: "基准缺口",
+    manual_review: "人工复核",
+    observe_signal: "观察信号",
+    calibration_signal: "待校准信号",
+  };
+  return labels[value] ?? value;
+}
+
+function priorityLabel(value: string) {
+  const labels: Record<string, string> = {
+    high: "高",
+    medium: "中",
+    low: "低",
+  };
+  return labels[value] ?? value;
+}
+
+function taskTarget(task: WorkbenchTasksResponse["results"][number]) {
+  if (task.fund_code) {
+    return <><code>{task.fund_code}</code><div className="muted">{task.fund_name || "单基金任务"}</div></>;
+  }
+  if (task.label_code) {
+    return <><code>{task.label_code}</code><div className="muted">{task.label_name || "标签任务"}</div></>;
+  }
+  return <span className="muted">-</span>;
 }
 
 export default function ReviewQueuePage() {
   const [runs, setRuns] = useState<{ run_id: string; run_at: string }[]>([]);
   const [runId, setRunId] = useState("");
-  const [data, setData] = useState<SearchResponse | null>(null);
-  const [blocked, setBlocked] = useState<Awaited<ReturnType<typeof fetchRelativeEligibility>> | null>(null);
+  const [summary, setSummary] = useState<WorkbenchSummary | null>(null);
+  const [tasks, setTasks] = useState<WorkbenchTasksResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,12 +58,12 @@ export default function ReviewQueuePage() {
     if (!runId) return;
     setError(null);
     Promise.all([
-      fetchReviewQueue(runId),
-      fetchRelativeEligibility(runId, "blocked"),
+      fetchWorkbenchSummary(runId),
+      fetchWorkbenchTasks(runId),
     ])
-      .then(([reviewQueue, blockedPool]) => {
-        setData(reviewQueue);
-        setBlocked(blockedPool);
+      .then(([summaryPayload, taskPayload]) => {
+        setSummary(summaryPayload);
+        setTasks(taskPayload);
       })
       .catch((e) => setError(e.message));
   }, [runId]);
@@ -56,7 +71,7 @@ export default function ReviewQueuePage() {
   return (
     <div className="card">
       <h2>待处理队列</h2>
-      <p className="muted">汇总人工复核和基准缺口任务，第一版只读，处理入口仍在单基金报告。</p>
+      <p className="muted">汇总基准缺口、人工复核、观察信号和待校准信号，处理入口仍在单基金报告或标签检索。</p>
       <div className="toolbar">
         <label>
           批次&nbsp;
@@ -78,7 +93,7 @@ export default function ReviewQueuePage() {
                 )
               }
             >
-              导出 CSV
+              导出人工复核 CSV
             </button>
             <button
               onClick={() =>
@@ -88,74 +103,56 @@ export default function ReviewQueuePage() {
                 )
               }
             >
-              导出 XLSX
+              导出人工复核 XLSX
             </button>
           </>
         )}
       </div>
       {error && <div className="error">{error}</div>}
 
-      {blocked && blocked.results.length > 0 && (
-        <>
-          <h3>基准缺口任务</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>基金</th>
-                <th>任务类型</th>
-                <th>原因或组件</th>
-                <th>建议动作</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {blocked.results.slice(0, 80).map((r) => (
-                <tr key={`blocked-${r.fund_code}`}>
-                  <td><code>{r.fund_code}</code><div className="muted">{r.fund_name}</div></td>
-                  <td>基准缺口</td>
-                  <td className="muted">{cleanReason(r.blocking_components || r.blocking_reason || "-")}</td>
-                  <td>补数据源、确认映射或补解析规则</td>
-                  <td><Link to={`/runs/${blocked.run_id}/funds/${r.fund_code}`}>查看报告 →</Link></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+      {summary && (
+        <div className="metrics-grid">
+          <div className="metric-tile"><span>全部任务</span><strong>{tasks?.total_count ?? 0}</strong></div>
+          <div className="metric-tile"><span>基准缺口</span><strong>{summary.task_type_counts.benchmark_gap ?? 0}</strong></div>
+          <div className="metric-tile"><span>人工复核</span><strong>{summary.task_type_counts.manual_review ?? 0}</strong></div>
+          <div className="metric-tile"><span>观察 / 校准</span><strong>{(summary.task_type_counts.observe_signal ?? 0) + (summary.task_type_counts.calibration_signal ?? 0)}</strong></div>
+        </div>
       )}
 
-      {data && (
-        <>
-          <h3>人工复核任务</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>基金代码</th>
-                <th>标签数</th>
-                <th>缺失字段</th>
-                <th>状态</th>
-                <th></th>
+      {tasks && tasks.results.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>优先级</th>
+              <th>任务类型</th>
+              <th>对象</th>
+              <th>原因</th>
+              <th>建议动作</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.results.map((task) => (
+              <tr key={task.task_id}>
+                <td><span className="badge badge-manual_review">{priorityLabel(task.priority)}</span></td>
+                <td>{taskTypeLabel(task.task_type)}</td>
+                <td>{taskTarget(task)}</td>
+                <td className="muted">{task.reason_text || task.reason_code}</td>
+                <td>{task.suggested_action}</td>
+                <td>
+                  {task.fund_code ? (
+                    <Link to={`/runs/${tasks.run_id}/funds/${task.fund_code}`}>查看报告 →</Link>
+                  ) : task.label_code ? (
+                    <Link to={`/search?run_id=${tasks.run_id}&label_code=${task.label_code}`}>查看基金 →</Link>
+                  ) : null}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {data.results.map((r) => (
-                <tr key={r.fund_code}>
-                  <td><code>{r.fund_code}</code></td>
-                  <td>{r.label_count}</td>
-                  <td>{r.missing_field_count}</td>
-                  <td><ReviewActionBadge value={r.review_action} /></td>
-                  <td>
-                    <Link to={`/runs/${data.run_id}/funds/${r.fund_code}`}>
-                      复核 →
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+            ))}
+          </tbody>
+        </table>
       )}
-      {data && data.results.length === 0 && (
-        <p className="muted">当前批次没有需要人工复核的基金。</p>
+      {tasks && tasks.results.length === 0 && (
+        <p className="muted">当前批次没有待处理任务。</p>
       )}
     </div>
   );

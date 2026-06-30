@@ -614,6 +614,79 @@ def test_relative_label_eligibility_endpoint_filters_blocked(seeded_run) -> None
     assert [row["fund_code"] for row in rows] == ["000002"]
 
 
+def test_workbench_tasks_and_summary_aggregate_ready_pool_and_review_queue(seeded_run) -> None:
+    db, run_id = seeded_run
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE benchmark_components (
+                fund_code TEXT,
+                component_order INTEGER,
+                component_code TEXT,
+                component_name TEXT,
+                weight REAL,
+                source_text TEXT,
+                status TEXT,
+                reason TEXT,
+                secid TEXT
+            );
+            CREATE TABLE benchmark_returns (
+                fund_code TEXT,
+                benchmark_code TEXT,
+                trade_date TEXT,
+                daily_return REAL
+            );
+            CREATE TABLE benchmark_component_returns (
+                component_code TEXT,
+                trade_date TEXT,
+                daily_return REAL
+            );
+            ALTER TABLE fund_profiles ADD COLUMN benchmark TEXT;
+            ALTER TABLE fund_profiles ADD COLUMN tracking_target TEXT;
+            """
+        )
+        conn.execute(
+            "INSERT INTO benchmark_components VALUES ('000001', 1, '000300', '沪深300', 1.0, '沪深300', 'resolved', 'exact', '1.000300')"
+        )
+        conn.execute(
+            "INSERT INTO benchmark_components VALUES ('000002', 1, 'LOCAL_CBOND_TOTAL', '中债总', 1.0, '中债总', 'resolved', 'exact', 'LOCAL_CBOND_TOTAL')"
+        )
+        for i in range(200):
+            conn.execute(
+                "INSERT INTO nav_history (fund_code, nav_date, daily_return) VALUES ('000001', ?, 0.001)",
+                (f"2026-01-{i:03d}",),
+            )
+            conn.execute(
+                "INSERT INTO benchmark_returns VALUES ('000001', '000300', ?, 0.001)",
+                (f"2026-01-{i:03d}",),
+            )
+        conn.commit()
+    client = TestClient(create_app(db_path=db))
+
+    summary = client.get(f"/v1/runs/{run_id}/workbench-summary")
+    tasks = client.get(f"/v1/runs/{run_id}/workbench-tasks")
+
+    assert summary.status_code == 200
+    summary_payload = summary.json()
+    assert summary_payload["run_id"] == run_id
+    assert summary_payload["ready_count"] == 1
+    assert summary_payload["blocked_count"] == 1
+    assert summary_payload["manual_review_count"] == 1
+    assert summary_payload["task_type_counts"]["benchmark_gap"] == 1
+    assert summary_payload["task_type_counts"]["manual_review"] == 1
+    assert tasks.status_code == 200
+    task_payload = tasks.json()
+    task_types = {task["task_type"] for task in task_payload["results"]}
+    assert "benchmark_gap" in task_types
+    assert "manual_review" in task_types
+    benchmark_task = next(
+        task for task in task_payload["results"]
+        if task["task_type"] == "benchmark_gap"
+    )
+    assert benchmark_task["fund_code"] == "000002"
+    assert benchmark_task["suggested_action"] == "补齐基准收益源"
+
+
 def test_benchmark_components_endpoint_returns_structure(seeded_run) -> None:
     db, run_id = seeded_run
     client = TestClient(create_app(db_path=db))

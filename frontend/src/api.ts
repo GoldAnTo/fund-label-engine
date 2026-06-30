@@ -236,6 +236,49 @@ export async function fetchRelativeEligibility(
   return json(`/v1/runs/${runId}/relative-label-eligibility?status=${status}&limit=300`);
 }
 
+export interface WorkbenchTask {
+  task_id: string;
+  task_type: "benchmark_gap" | "manual_review" | "observe_signal" | "calibration_signal" | string;
+  priority: "high" | "medium" | "low" | string;
+  fund_code: string | null;
+  fund_name: string | null;
+  label_code: string | null;
+  label_name: string | null;
+  reason_code: string;
+  reason_text: string;
+  suggested_action: string;
+}
+
+export interface WorkbenchTasksResponse {
+  run_id: string;
+  total_count: number;
+  task_type_counts: Record<string, number>;
+  results: WorkbenchTask[];
+}
+
+export interface WorkbenchSummary {
+  run_id: string;
+  run_at: string;
+  rule_version: string;
+  status: string;
+  total_funds: number;
+  ready_count: number;
+  blocked_count: number;
+  manual_review_count: number;
+  task_type_counts: Record<string, number>;
+  blocker_groups: RelativeBlockerGroup[];
+  group_distribution: { group_type: string; group_code: string; group_name: string; fund_count: number }[];
+  classification_distribution: { dimension: string; classification_code: string; classification_name: string; fund_count: number }[];
+}
+
+export async function fetchWorkbenchTasks(runId: string): Promise<WorkbenchTasksResponse> {
+  return json(`/v1/runs/${runId}/workbench-tasks?limit=500`);
+}
+
+export async function fetchWorkbenchSummary(runId: string): Promise<WorkbenchSummary> {
+  return json(`/v1/runs/${runId}/workbench-summary`);
+}
+
 export async function fetchBenchmarkComponents(
   runId: string,
   fundCode: string

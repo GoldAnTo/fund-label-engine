@@ -19,6 +19,30 @@ from app.exporters import (
 )
 from app.persistence import LabelRunReader, LabelRunWriter
 
+OBSERVE_TASK_LABEL_CODES = {
+    "industry_concentration_high",
+    "industry_concentration_observe",
+    "industry_diversified",
+    "holding_concentration_high",
+    "equity_position_high",
+    "style_stable",
+    "style_drift",
+    "style_recent_shift",
+    "style_exposure_observe",
+    "style_exposure_low_coverage",
+}
+
+CALIBRATION_TASK_LABEL_CODES = {
+    "deep_value",
+    "quality_growth",
+    "dividend_steady",
+    "high_dividend_financial",
+    "consumer_quality",
+    "style_pending_rule_definition",
+    "style_unlabeled_stock_factors_missing",
+    "sector_mapping_insufficient",
+}
+
 
 def _resolve_db_path(db_path: str | Path | None) -> str | None:
     if db_path is not None:
@@ -535,12 +559,11 @@ def create_app(
             "comment": request.comment,
         }
 
-    @app.get("/v1/runs/{run_id}/relative-label-eligibility")
-    def get_run_relative_label_eligibility(
+    def _relative_eligibility_payload(
         run_id: str,
-        status: Literal["all", "ready", "blocked"] = "all",
-        limit: int = 200,
-        reader: LabelRunReader = Depends(get_reader),
+        status: Literal["all", "ready", "blocked"],
+        limit: int,
+        reader: LabelRunReader,
     ) -> dict[str, Any]:
         """返回相对基准标签 ready/blocked 池，用于工作台展示。"""
         import sqlite3
@@ -628,6 +651,169 @@ def create_app(
             "filters": {"status": status, "limit": limit},
             "results": display_rows,
         }
+
+    def _clean_blocking_component(value: str) -> str:
+        return value.split(":", 1)[1] if ":" in value else value
+
+    def _workbench_task_action(task_type: str, reason: str) -> str:
+        if task_type == "benchmark_gap":
+            if reason == "benchmark_source_missing":
+                return "补齐基准收益源"
+            if reason == "benchmark_mapping_required":
+                return "确认基准精确映射"
+            if reason == "benchmark_unresolved":
+                return "补解析规则或明确不支持"
+            if reason == "benchmark_missing":
+                return "补充基金业绩基准配置"
+            return "补齐相对基准展示条件"
+        if task_type == "manual_review":
+            return "进入单基金报告复核结论"
+        if task_type == "observe_signal":
+            return "观察业务解释，不进入正式结论"
+        if task_type == "calibration_signal":
+            return "补样本或校准阈值后再升级"
+        return "查看单基金报告"
+
+    def _workbench_tasks_payload(
+        run_id: str,
+        limit: int,
+        reader: LabelRunReader,
+    ) -> dict[str, Any]:
+        if reader.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        tasks: list[dict[str, Any]] = []
+
+        eligibility = _relative_eligibility_payload(run_id, "blocked", 1000, reader)
+        for row in eligibility["results"]:
+            tasks.append({
+                "task_id": f"benchmark_gap:{row['fund_code']}",
+                "task_type": "benchmark_gap",
+                "priority": "high",
+                "fund_code": row["fund_code"],
+                "fund_name": row.get("fund_name") or "",
+                "label_code": None,
+                "label_name": None,
+                "reason_code": row["relative_label_status"],
+                "reason_text": _clean_blocking_component(
+                    row.get("blocking_components") or row.get("blocking_reason") or ""
+                ),
+                "suggested_action": _workbench_task_action(
+                    "benchmark_gap", row["relative_label_status"]
+                ),
+            })
+
+        for row in reader.search_run_funds(
+            run_id,
+            review_action="manual_review",
+            limit=1000,
+        ):
+            tasks.append({
+                "task_id": f"manual_review:{row['fund_code']}",
+                "task_type": "manual_review",
+                "priority": "high",
+                "fund_code": row["fund_code"],
+                "fund_name": "",
+                "label_code": None,
+                "label_name": None,
+                "reason_code": "manual_review",
+                "reason_text": f"缺失字段数 {row['missing_field_count']}",
+                "suggested_action": _workbench_task_action("manual_review", "manual_review"),
+            })
+
+        summary = reader.get_summary(run_id)
+        labels_by_code = {
+            row["label_code"]: row
+            for row in summary.get("label_distribution", [])
+        }
+        for label_code in sorted(OBSERVE_TASK_LABEL_CODES & labels_by_code.keys()):
+            row = labels_by_code[label_code]
+            tasks.append({
+                "task_id": f"observe_signal:{label_code}",
+                "task_type": "observe_signal",
+                "priority": "medium",
+                "fund_code": None,
+                "fund_name": None,
+                "label_code": label_code,
+                "label_name": row["label_name"],
+                "reason_code": "observe_signal",
+                "reason_text": f"{row['fund_count']} 只基金命中",
+                "suggested_action": _workbench_task_action("observe_signal", "observe_signal"),
+            })
+        for label_code in sorted(CALIBRATION_TASK_LABEL_CODES & labels_by_code.keys()):
+            row = labels_by_code[label_code]
+            tasks.append({
+                "task_id": f"calibration_signal:{label_code}",
+                "task_type": "calibration_signal",
+                "priority": "medium",
+                "fund_code": None,
+                "fund_name": None,
+                "label_code": label_code,
+                "label_name": row["label_name"],
+                "reason_code": "calibration_signal",
+                "reason_text": f"{row['fund_count']} 只基金命中",
+                "suggested_action": _workbench_task_action("calibration_signal", "calibration_signal"),
+            })
+
+        order = {"high": 0, "medium": 1, "low": 2}
+        tasks = sorted(
+            tasks,
+            key=lambda task: (
+                order.get(task["priority"], 9),
+                task["task_type"],
+                task.get("fund_code") or task.get("label_code") or "",
+            ),
+        )
+        total_count = len(tasks)
+        tasks = tasks[:limit]
+        counts = Counter(task["task_type"] for task in tasks)
+        return {
+            "run_id": run_id,
+            "total_count": total_count,
+            "task_type_counts": dict(counts),
+            "results": tasks,
+        }
+
+    @app.get("/v1/runs/{run_id}/workbench-summary")
+    def get_run_workbench_summary(
+        run_id: str,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        summary = reader.get_summary(run_id)
+        if not summary:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        eligibility = _relative_eligibility_payload(run_id, "all", 300, reader)
+        tasks = _workbench_tasks_payload(run_id, 1000, reader)
+        return {
+            "run_id": run_id,
+            "run_at": summary["run_at"],
+            "rule_version": summary["rule_version"],
+            "status": summary["status"],
+            "total_funds": eligibility["total_funds"],
+            "ready_count": eligibility["ready_count"],
+            "blocked_count": eligibility["blocked_count"],
+            "manual_review_count": summary["counts"].get("manual_review", 0),
+            "task_type_counts": tasks["task_type_counts"],
+            "blocker_groups": eligibility["blocker_groups"][:10],
+            "group_distribution": summary.get("group_distribution", []),
+            "classification_distribution": summary.get("classification_distribution", []),
+        }
+
+    @app.get("/v1/runs/{run_id}/workbench-tasks")
+    def get_run_workbench_tasks(
+        run_id: str,
+        limit: int = 300,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        return _workbench_tasks_payload(run_id, limit, reader)
+
+    @app.get("/v1/runs/{run_id}/relative-label-eligibility")
+    def get_run_relative_label_eligibility(
+        run_id: str,
+        status: Literal["all", "ready", "blocked"] = "all",
+        limit: int = 200,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        return _relative_eligibility_payload(run_id, status, limit, reader)
 
     @app.get("/v1/funds/{fund_code}/labels")
     def get_latest_fund_labels(
