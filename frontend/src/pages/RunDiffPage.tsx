@@ -46,8 +46,7 @@ export default function RunDiffPage() {
         <h2>批次对比</h2>
         <p className="muted">
           选两个批次，输出标签集合差异。仅以两批共有的基金为统计对象；只在
-          某一边出现的基金会进入 only_in_base / only_in_target 名单，避免被
-          误判为"标签变动"。
+          某一边出现的基金会进入单边基金名单，避免被误判为“标签变动”。
         </p>
         <div className="toolbar">
           <label>
@@ -82,14 +81,14 @@ export default function RunDiffPage() {
           <div className="card">
             <h2>总览</h2>
             <dl className="kv">
-              <dt>base 基金数</dt><dd>{diff.totals.base_fund_count}</dd>
-              <dt>target 基金数</dt><dd>{diff.totals.target_fund_count}</dd>
+              <dt>基准批次基金数</dt><dd>{diff.totals.base_fund_count}</dd>
+              <dt>对比批次基金数</dt><dd>{diff.totals.target_fund_count}</dd>
               <dt>共同基金数</dt><dd>{diff.totals.common_fund_count}</dd>
-              <dt>新增 (label, fund) 对</dt><dd>{diff.totals.added_pair_count}</dd>
-              <dt>消失 (label, fund) 对</dt><dd>{diff.totals.removed_pair_count}</dd>
+              <dt>新增标签基金组合</dt><dd>{diff.totals.added_pair_count}</dd>
+              <dt>消失标签基金组合</dt><dd>{diff.totals.removed_pair_count}</dd>
               <dt>有变动的基金数</dt><dd>{diff.totals.changed_fund_count}</dd>
-              <dt>仅 base 有</dt><dd>{diff.totals.only_in_base_count}</dd>
-              <dt>仅 target 有</dt><dd>{diff.totals.only_in_target_count}</dd>
+              <dt>仅基准批次有</dt><dd>{diff.totals.only_in_base_count}</dd>
+              <dt>仅对比批次有</dt><dd>{diff.totals.only_in_target_count}</dd>
             </dl>
           </div>
 
@@ -170,9 +169,9 @@ export default function RunDiffPage() {
           {(diff.only_in_base.length > 0 || diff.only_in_target.length > 0) && (
             <div className="card">
               <h2>仅在单边出现的基金</h2>
-              <h3>仅 base ({diff.only_in_base.length})</h3>
+              <h3>仅基准批次有（{diff.only_in_base.length}）</h3>
               <p className="muted">{diff.only_in_base.join(", ") || "—"}</p>
-              <h3>仅 target ({diff.only_in_target.length})</h3>
+              <h3>仅对比批次有（{diff.only_in_target.length}）</h3>
               <p className="muted">{diff.only_in_target.join(", ") || "—"}</p>
             </div>
           )}

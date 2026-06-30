@@ -13,16 +13,16 @@ export default function App() {
       <aside className="sidebar">
         <h1>基金标签工作台</h1>
         <nav>
-          <NavLink to="/runs">批次列表</NavLink>
           <NavLink to="/ready-pool">可展示池</NavLink>
+          <NavLink to="/review-queue">待处理队列</NavLink>
+          <NavLink to="/runs">批次列表</NavLink>
           <NavLink to="/diff">批次对比</NavLink>
           <NavLink to="/search">基金检索</NavLink>
-          <NavLink to="/review-queue">复核队列</NavLink>
         </nav>
       </aside>
       <main className="main">
         <Routes>
-          <Route path="/" element={<Navigate to="/runs" replace />} />
+          <Route path="/" element={<Navigate to="/ready-pool" replace />} />
           <Route path="/runs" element={<RunsPage />} />
           <Route path="/ready-pool" element={<ReadyPoolPage />} />
           <Route path="/runs/:runId" element={<RunDetailPage />} />

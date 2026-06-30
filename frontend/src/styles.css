@@ -260,6 +260,52 @@ button:disabled {
   margin-bottom: 8px;
 }
 
+.workbench-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.display-gate {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: oklch(0.975 0.012 255);
+  margin: 12px 0;
+}
+
+.tier-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.tier-card {
+  margin-bottom: 0;
+}
+
+.tier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tier-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.tier-item:last-child {
+  border-bottom: 0;
+}
+
 .metric-tile strong {
   display: block;
   color: oklch(0.23 0.025 255);

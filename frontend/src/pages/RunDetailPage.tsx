@@ -1,6 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { downloadFile, fetchRun, fetchRunStyle, fetchRunSummary } from "../api";
-import { useAsync } from "../components";
+import { useAsync, runStatusLabel } from "../components";
 
 export default function RunDetailPage() {
   const { runId = "" } = useParams();
@@ -26,18 +26,18 @@ export default function RunDetailPage() {
                 downloadFile(`/v1/runs/${runId}/export?format=csv`, `run_${runId}.zip`)
               }
             >
-              导出 CSV (zip)
+              导出 CSV 压缩包
             </button>
           </div>
         </div>
-        <p className="muted">Run ID: <code>{runId}</code></p>
+        <p className="muted">批次编号：<code>{runId}</code></p>
         {loading && <p>加载中...</p>}
         {error && <div className="error">{error}</div>}
         {data && (
           <dl className="kv">
             <dt>开始时间</dt><dd>{data.run_at}</dd>
             <dt>规则版本</dt><dd>{data.rule_version}</dd>
-            <dt>状态</dt><dd>{data.status}</dd>
+            <dt>状态</dt><dd>{runStatusLabel(data.status)}</dd>
             <dt>处理基金数</dt><dd>{data.fund_codes.length}</dd>
             <dt>失败基金数</dt><dd>{data.failure_count ?? 0}</dd>
           </dl>
@@ -54,7 +54,7 @@ export default function RunDetailPage() {
             <dt>需人工复核</dt><dd>{summary.counts.manual_review}</dd>
             <dt>收益窗口不足</dt><dd>{summary.counts.return_window_insufficient}</dd>
           </dl>
-          <h3>标签命中分布（Top 10）</h3>
+          <h3>标签命中分布（前 10）</h3>
           <table>
             <thead>
               <tr><th>标签</th><th>分类</th><th>命中基金数</th></tr>
@@ -79,7 +79,7 @@ export default function RunDetailPage() {
         <div className="card">
           <h2>风格分布</h2>
           <p className="muted">
-            基于股票因子聚合的高级风格标签命中情况；rule_version =
+            基于股票因子聚合的高级风格标签命中情况；规则版本 =
             <code> {style.rule_version}</code>
           </p>
           <table>
@@ -138,7 +138,7 @@ export default function RunDetailPage() {
       {data && data.rule_snapshot && (
         <div className="card">
           <h2>规则快照</h2>
-          <p className="muted">本次批次使用的全部阈值参数（rule_version={data.rule_version}）。</p>
+          <p className="muted">本次批次使用的全部阈值参数（规则版本：{data.rule_version}）。</p>
           <table>
             <thead>
               <tr><th>参数</th><th>值</th></tr>

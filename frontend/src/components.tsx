@@ -28,13 +28,41 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   return { data, error, loading, refresh: () => setLoading(true) };
 }
 
+export function reviewActionLabel(value: string) {
+  const labels: Record<string, string> = {
+    manual_review: "需复核",
+    observe: "观察",
+    confirm: "确认",
+    reject: "驳回",
+  };
+  return labels[value] ?? value;
+}
+
+export function labelStatusLabel(value: string) {
+  const labels: Record<string, string> = {
+    active: "已命中",
+    observe: "观察",
+    inactive: "未命中",
+  };
+  return labels[value] ?? value;
+}
+
+export function runStatusLabel(value: string) {
+  const labels: Record<string, string> = {
+    succeeded: "成功",
+    failed: "失败",
+    running: "运行中",
+    pending: "等待中",
+  };
+  return labels[value] ?? value;
+}
+
 export function ReviewActionBadge({ value }: { value: string }) {
   const cls = value === "manual_review" ? "badge-manual_review" : "badge-observe";
-  const label = value === "manual_review" ? "需复核" : "观察";
-  return <span className={`badge ${cls}`}>{label}</span>;
+  return <span className={`badge ${cls}`}>{reviewActionLabel(value)}</span>;
 }
 
 export function LabelStatusBadge({ value }: { value: string }) {
   const cls = value === "observe" ? "badge-manual_review" : "badge-active";
-  return <span className={`badge ${cls}`}>{value}</span>;
+  return <span className={`badge ${cls}`}>{labelStatusLabel(value)}</span>;
 }

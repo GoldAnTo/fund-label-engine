@@ -4,16 +4,67 @@ import {
   downloadFile,
   fetchBenchmarkComponents,
   fetchFundReport,
+  fetchRelativeEligibility,
   postReview,
+  type Evidence,
   type FundLabel,
 } from "../api";
-import { useAsync, LabelStatusBadge, ReviewActionBadge } from "../components";
+import {
+  LabelStatusBadge,
+  ReviewActionBadge,
+  labelStatusLabel,
+  reviewActionLabel,
+  useAsync,
+} from "../components";
+import { labelTier, tierTitle, type LabelTier } from "../labelTiers";
+
+const ELIGIBILITY_LABELS: Record<string, string> = {
+  relative_label_ready: "可展示",
+  benchmark_source_missing: "缺少基准收益源",
+  benchmark_mapping_required: "需要确认基准映射",
+  benchmark_unresolved: "基准组件未解析",
+  benchmark_missing: "未配置业绩基准",
+  nav_window_insufficient: "收益窗口不足",
+};
 
 const STYLE_WEIGHT_CODES = [
   "deep_value_weight",
   "quality_growth_weight",
   "dividend_steady_weight",
 ] as const;
+function eligibilityLabel(value: string) {
+  return ELIGIBILITY_LABELS[value] ?? value;
+}
+
+function cleanBlocker(value: string) {
+  return value
+    .replaceAll("benchmark_source_status=benchmark_missing", "未配置业绩基准")
+    .replaceAll("benchmark_source_status=missing_source", "缺少基准收益源")
+    .replaceAll("benchmark_source_status=mapping_required", "需要确认基准映射")
+    .replaceAll("benchmark_source_status=unresolved", "基准组件未解析")
+    .replaceAll("relative_label_ready", "可展示")
+    .replaceAll("benchmark_source_missing", "缺少基准收益源")
+    .replaceAll("benchmark_mapping_required", "需要确认基准映射")
+    .replaceAll("benchmark_unresolved", "基准组件未解析")
+    .replaceAll("benchmark_missing", "未配置业绩基准")
+    .replaceAll("nav_window_insufficient", "收益窗口不足")
+    .replace(/\b[A-Z0-9_]+:/g, "");
+}
+
+function componentStatusLabel(value: string) {
+  const labels: Record<string, string> = {
+    resolved: "已解析",
+    unresolved: "未解析",
+    missing_source: "缺少收益源",
+    mapping_required: "需要映射",
+  };
+  return labels[value] ?? value;
+}
+
+function evidenceForLabel(data: { evidence: Evidence[] }, labelCode: string) {
+  return data.evidence.filter((e) => e.label_code === labelCode);
+}
+
 const STYLE_LABELS: Record<string, string> = {
   deep_value_weight: "深度价值",
   quality_growth_weight: "质量成长",
@@ -95,6 +146,22 @@ export default function FundReportPage() {
     );
   }, [data]);
 
+  const { data: eligibility } = useAsync(
+    () => fetchRelativeEligibility(runId, "all"),
+    [runId]
+  );
+  const eligibilityRow = eligibility?.results.find((row) => row.fund_code === fundCode) ?? null;
+  const relativeReady = eligibilityRow?.relative_label_status === "relative_label_ready";
+  const tieredLabels = useMemo<Record<LabelTier, FundLabel[]>>(() => {
+    const empty: Record<LabelTier, FundLabel[]> = { official: [], observe: [], calibration: [], other: [] };
+    if (!data) return empty;
+    for (const label of data.labels) {
+      empty[labelTier(label, relativeReady)].push(label);
+    }
+    return empty;
+  }, [data, relativeReady]);
+  const blockingCalculations = useMemo(() => unresolvedCalculations.slice(0, 12), [unresolvedCalculations]);
+
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
   const [reviewer, setReviewer] = useState("researcher");
   const [decision, setDecision] = useState("confirm");
@@ -149,11 +216,24 @@ export default function FundReportPage() {
                 )
               }
             >
-              导出 CSV (zip)
+              导出 CSV 压缩包
             </button>
           </div>
         </div>
-        <p className="muted">Run: <code>{runId}</code></p>
+        <p className="muted">批次编号：<code>{runId}</code></p>
+        {data && <div className="display-gate">
+          <span className={relativeReady ? "badge badge-observe" : "badge badge-manual_review"}>
+            {relativeReady ? "展示资格：可展示" : "展示资格：暂不可展示"}
+          </span>
+          <span>
+            {eligibilityRow
+              ? eligibilityLabel(eligibilityRow.relative_label_status)
+              : "展示资格加载中"}
+          </span>
+          {eligibilityRow && eligibilityRow.relative_label_status !== "relative_label_ready" && (
+            <span className="muted">{cleanBlocker(eligibilityRow.blocking_components || eligibilityRow.blocking_reason || "-")}</span>
+          )}
+        </div>}
         {loading && <p>加载中...</p>}
         {error && <div className="error">{error}</div>}
         {data && (
@@ -173,6 +253,13 @@ export default function FundReportPage() {
               <dt>缺失字段数</dt><dd>{data.summary.missing_field_count}</dd>
               <dt>已有复核</dt><dd>{data.summary.review_count}</dd>
             </dl>
+            <h3>展示分层</h3>
+            <dl className="kv">
+              <dt>正式结论</dt><dd>{tieredLabels.official.length}</dd>
+              <dt>观察信号</dt><dd>{tieredLabels.observe.length}</dd>
+              <dt>待校准信号</dt><dd>{tieredLabels.calibration.length}</dd>
+              <dt>阻断原因</dt><dd>{(eligibilityRow?.relative_label_status !== "relative_label_ready" ? 1 : 0) + blockingCalculations.length}</dd>
+            </dl>
             {data.missing_fields.length > 0 && (
               <>
                 <h3>缺失字段</h3>
@@ -188,13 +275,21 @@ export default function FundReportPage() {
         return (
           <div className="card">
             <h2>
-              基准组件缺口
+              展示资格证据
               {gap ? (
-                <span className="pill pill-gap">有缺口</span>
+                <span className="pill pill-gap">基准有缺口</span>
               ) : (
-                <span className="pill pill-ok">已就绪</span>
+                <span className="pill pill-ok">基准已就绪</span>
               )}
             </h2>
+            {eligibilityRow && (
+              <dl className="kv">
+                <dt>相对标签状态</dt><dd>{eligibilityLabel(eligibilityRow.relative_label_status)}</dd>
+                <dt>基准源状态</dt><dd>{eligibilityLabel(eligibilityRow.benchmark_source_status)}</dd>
+                <dt>净值样本</dt><dd>{eligibilityRow.nav_sample_count}</dd>
+                <dt>基准样本</dt><dd>{eligibilityRow.benchmark_sample_count}</dd>
+              </dl>
+            )}
             {gap ? (
               <div className="alert alert-warn">
                 {bench.unresolved_count > 0
@@ -227,7 +322,7 @@ export default function FundReportPage() {
                         )}
                       </td>
                       <td>{c.weight !== null ? `${(c.weight * 100).toFixed(1)}%` : "-"}</td>
-                      <td>{c.status}</td>
+                      <td>{componentStatusLabel(c.status)}</td>
                       <td>
                         {c.status === "resolved" && c.reason === "synthetic"
                           ? "合成"
@@ -292,10 +387,40 @@ export default function FundReportPage() {
         </div>
       )}
 
+      {data && (
+        <div className="tier-grid">
+          {(["official", "observe", "calibration"] as LabelTier[]).map((tier) => (
+            <div className="card tier-card" key={tier}>
+              <h2>{tierTitle(tier)}</h2>
+              {tier === "official" && <p className="muted">可作为 Phase1 v1 展示结论。</p>}
+              {tier === "observe" && <p className="muted">有业务参考价值，但语义必须保持观察。</p>}
+              {tier === "calibration" && <p className="muted">技术上已产出，仍需样本或阈值校准。</p>}
+              {tieredLabels[tier].length > 0 ? (
+                <div className="tier-list">
+                  {tieredLabels[tier].map((label) => {
+                    const ev = evidenceForLabel(data, label.label_code);
+                    return (
+                      <div className="tier-item" key={label.label_code}>
+                        <strong>{label.label_name}</strong>
+                        <span className="muted"><code>{label.label_code}</code></span>
+                        {ev[0] && <div className="muted">{ev[0].message}</div>}
+                        <button className="secondary" onClick={() => setActiveLabel(label.label_code)}>复核</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="muted">暂无</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {data && unresolvedCalculations.length > 0 && (
         <div className="card">
           <h2>标签计算原因（未触发）</h2>
-          <p className="muted">列出未达 active 状态且有具体原因码的标签计算，便于定位数据或阈值缺口。</p>
+          <p className="muted">列出未达“已命中”状态且有具体原因码的标签计算，便于定位数据或阈值缺口。</p>
           <table>
             <thead>
               <tr><th>标签</th><th>状态</th><th>原因码</th><th>观测值</th><th>阈值</th><th>说明</th></tr>
@@ -307,7 +432,7 @@ export default function FundReportPage() {
                     <strong>{c.label_name}</strong>
                     <div className="muted"><code>{c.label_code}</code></div>
                   </td>
-                  <td>{c.state}</td>
+                  <td>{labelStatusLabel(c.state)}</td>
                   <td><code>{c.reason_code}</code></td>
                   <td>{c.observed ?? "-"}</td>
                   <td>{c.threshold ?? "-"}</td>
@@ -369,7 +494,7 @@ export default function FundReportPage() {
       {data && data.factor_exposures.length > 0 && (
         <div className="card">
           <h2>基金级因子暴露</h2>
-          <p className="muted">基于持仓和股票因子预聚合，coverage 表示可用因子覆盖的持仓权重。</p>
+          <p className="muted">基于持仓和股票因子预聚合，覆盖率表示可用因子覆盖的持仓权重。</p>
           <table>
             <thead>
               <tr>
@@ -423,7 +548,7 @@ export default function FundReportPage() {
               {data.reviews.map((r) => (
                 <tr key={r.review_id}>
                   <td><code>{r.label_code}</code></td>
-                  <td>{r.decision}</td>
+                  <td>{reviewActionLabel(r.decision)}</td>
                   <td>{r.reviewer}</td>
                   <td>{r.comment}</td>
                 </tr>
@@ -442,9 +567,9 @@ export default function FundReportPage() {
             <label>
               决定&nbsp;
               <select value={decision} onChange={(e) => setDecision(e.target.value)}>
-                <option value="confirm">confirm</option>
-                <option value="reject">reject</option>
-                <option value="observe">observe</option>
+                <option value="confirm">确认</option>
+                <option value="reject">驳回</option>
+                <option value="observe">观察</option>
               </select>
             </label>
             <label>

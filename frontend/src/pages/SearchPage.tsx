@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { fetchRuns, searchFunds, SearchResponse } from "../api";
 import { ReviewActionBadge } from "../components";
 
 export default function SearchPage() {
+  const [searchParams] = useSearchParams();
   const [runs, setRuns] = useState<{ run_id: string; run_at: string }[]>([]);
-  const [runId, setRunId] = useState("");
-  const [fundCode, setFundCode] = useState("");
-  const [labelCode, setLabelCode] = useState("");
-  const [reviewAction, setReviewAction] = useState("");
-  const [groupCode, setGroupCode] = useState("");
-  const [groupType, setGroupType] = useState("");
-  const [classificationCode, setClassificationCode] = useState("");
+  const [runId, setRunId] = useState(searchParams.get("run_id") || "");
+  const [fundCode, setFundCode] = useState(searchParams.get("fund_code") || "");
+  const [labelCode, setLabelCode] = useState(searchParams.get("label_code") || "");
+  const [reviewAction, setReviewAction] = useState(searchParams.get("review_action") || "");
+  const [groupCode, setGroupCode] = useState(searchParams.get("group_code") || "");
+  const [groupType, setGroupType] = useState(searchParams.get("group_type") || "");
+  const [classificationCode, setClassificationCode] = useState(searchParams.get("classification_code") || "");
   const [data, setData] = useState<SearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,7 +20,7 @@ export default function SearchPage() {
     fetchRuns()
       .then((rs) => {
         setRuns(rs);
-        if (rs.length > 0) setRunId(rs[0].run_id);
+        if (rs.length > 0 && !runId) setRunId(rs[0].run_id);
       })
       .catch((e) => setError(e.message));
   }, []);
@@ -85,8 +86,8 @@ export default function SearchPage() {
             onChange={(e) => setReviewAction(e.target.value)}
           >
             <option value="">(全部)</option>
-            <option value="observe">observe</option>
-            <option value="manual_review">manual_review</option>
+            <option value="observe">观察</option>
+            <option value="manual_review">需复核</option>
           </select>
         </label>
         <label>
@@ -142,7 +143,7 @@ export default function SearchPage() {
                 <td>{r.missing_field_count}</td>
                 <td>
                   <Link to={`/runs/${data.run_id}/funds/${r.fund_code}`}>
-                    报告 →
+                    查看报告 →
                   </Link>
                 </td>
               </tr>

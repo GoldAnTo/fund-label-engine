@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchRuns, triggerRun } from "../api";
-import { useAsync } from "../components";
+import { useAsync, runStatusLabel } from "../components";
 
 export default function RunsPage() {
   const { data, error, loading, refresh } = useAsync(fetchRuns, []);
@@ -15,7 +15,7 @@ export default function RunsPage() {
       const result = await triggerRun("auto");
       // 跑完后刷新列表
       refresh();
-      alert(`批次完成：processed=${result.processed}, run_id=${result.run_id.slice(0,12)}…`);
+      alert(`批次完成：已处理 ${result.processed} 只基金，批次 ${result.run_id.slice(0,12)}…`);
     } catch (e: unknown) {
       setRunError((e as Error).message || String(e));
     } finally {
@@ -46,7 +46,7 @@ export default function RunsPage() {
           <table>
             <thead>
               <tr>
-                <th>Run ID</th>
+                <th>批次编号</th>
                 <th>开始时间</th>
                 <th>规则版本</th>
                 <th>状态</th>
@@ -59,7 +59,7 @@ export default function RunsPage() {
                   <td><code>{run.run_id.slice(0, 12)}…</code></td>
                   <td>{run.run_at}</td>
                   <td>{run.rule_version}</td>
-                  <td>{run.status}</td>
+                  <td>{runStatusLabel(run.status)}</td>
                   <td>
                     <Link to={`/runs/${run.run_id}`}>查看 →</Link>
                   </td>
