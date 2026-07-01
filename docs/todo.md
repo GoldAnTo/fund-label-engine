@@ -19,6 +19,7 @@
 - 已完成：cbond 总指数探针（`scripts/probe_cbond_benchmark_sources.py`）— `LOCAL_CBOND_TOTAL` / `LOCAL_CHINA_BOND_TOTAL` / `LOCAL_SP_CHINA_BOND` 在 Investoday 和 akshare 中债登均无精确源，固化"不代理"决策。
 - 已完成：Phase1 v1 relative-benchmark eligibility audit 三层状态（基准源 / NAV 窗口 / 相对标签），audit 与 engine 双向差集为空。
 - 已完成：相对标签池 67 → 108 → 113 → 114（`relative_label_ready=114`，剩余 `missing_source=27`、`benchmark_missing=1`；`mapping_required=0`、`unresolved=0`）。
+- 已完成：剩余 28 只暂不可展示基金分层——1 只可人工确认，21 只债券总类需授权源，6 只供应商/主题/策略指数需授权或可靠源。
 - 已完成：Phase1 v1 unresolved 6 只基准清零评估——`000172` 固定年化收益率组件可确定性合成并进入 ready，其余 5 只从 unresolved 降级为 missing_source。
 - 已完成：Phase1 v1 ready pool 验收报告（8 只样本）—— `scripts/render_ready_pool_report.py` + `make render-ready-pool-report` + 5 个 smoke 单测，固化 v1 release baseline。
 
