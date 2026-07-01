@@ -1,6 +1,8 @@
 import sqlite3
 
 from scripts.fetch_benchmark_returns import (
+    _compose_returns,
+    _daily_return_from_annual,
     load_local_component_returns,
     parse_benchmark_components,
     resolve_benchmark,
@@ -215,6 +217,43 @@ def test_parse_maps_verified_unresolved_equity_indexes():
         assert components is not None
         assert components[0].benchmark_code == expected_code
         assert audits[0].status == "resolved"
+
+
+def test_parse_maps_fixed_annual_additive_component():
+    components, audits = parse_benchmark_components(
+        "沪深300指数收益率*95%+2.5%(指年收益率,评价时按期间折算)"
+    )
+
+    assert components is not None
+    assert [component.benchmark_code for component in components] == ["000300", "FIXED_ANNUAL_RETURN"]
+    assert [component.weight for component in components] == [0.95, 0.025]
+    assert all(audit.status == "resolved" for audit in audits)
+
+
+def test_compose_treats_fixed_annual_return_as_additive_rate():
+    mapping = resolve_benchmark(
+        "000172",
+        "混合型-偏股",
+        "该基金无跟踪标的",
+        "沪深300指数收益率*95%+2.5%(指年收益率,评价时按期间折算)",
+    )
+
+    assert mapping is not None
+    rows = _compose_returns(
+        mapping,
+        {
+            "1.000300": [
+                {"trade_date": "2026-01-02", "daily_return": 0.01},
+                {"trade_date": "2026-01-03", "daily_return": -0.02},
+            ]
+        },
+    )
+
+    fixed_daily = _daily_return_from_annual(0.025)
+    assert rows == [
+        {"trade_date": "2026-01-02", "daily_return": 0.01 * 0.95 + fixed_daily},
+        {"trade_date": "2026-01-03", "daily_return": -0.02 * 0.95 + fixed_daily},
+    ]
 
 
 def test_parse_keeps_plain_hs300_supported():

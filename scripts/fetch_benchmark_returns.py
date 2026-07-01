@@ -22,6 +22,13 @@ INDEX_MAP = {
     "沪深300安中动态策略指数": ("H30124", "local:H30124", "沪深300安中动态策略"),
     "中证A500指数": ("000510", "1.000510", "中证A500"),
     "中证A500": ("000510", "1.000510", "中证A500"),
+    "新华富时中国A200指数": ("LOCAL_XHFT_CHINA_A200", "local:LOCAL_XHFT_CHINA_A200", "新华富时中国A200"),
+    "富时中国A600指数": ("LOCAL_FTSE_CHINA_A600", "local:LOCAL_FTSE_CHINA_A600", "富时中国A600"),
+    "MSCI中国A股指数": ("LOCAL_MSCI_CHINA_A", "local:LOCAL_MSCI_CHINA_A", "MSCI中国A股"),
+    "中证财通中国可持续发展100(ECPIESG)指数": ("LOCAL_CSI_ECPI_ESG100", "local:LOCAL_CSI_ECPI_ESG100", "中证财通ESG100"),
+    "中证财通中国可持续发展100(ECPI ESG)指数": ("LOCAL_CSI_ECPI_ESG100", "local:LOCAL_CSI_ECPI_ESG100", "中证财通ESG100"),
+    "中证服务业指数": ("H30074", "local:H30074", "中证服务业"),
+    "中证服务业": ("H30074", "local:H30074", "中证服务业"),
     "中证500指数": ("000905", "1.000905", "中证500"),
     "中证500": ("000905", "1.000905", "中证500"),
     "中证800指数": ("000906", "1.000906", "中证800"),
@@ -250,6 +257,9 @@ def _single_mapping(
 
 
 def _extract_weight(term: str) -> tuple[str, float | None]:
+    fixed_annual = re.fullmatch(r"(?P<rate>\d+(?:\.\d+)?)%\(指年收益率,评价时按期间折算\)", term)
+    if fixed_annual:
+        return f"{fixed_annual.group('rate')}%", float(fixed_annual.group("rate")) / 100.0
     patterns = [
         r"(?P<w>\d+(?:\.\d+)?)%[×*]?(?P<name>.+)",
         r"(?P<name>.+?)[×*](?P<w>\d+(?:\.\d+)?)%",
@@ -293,6 +303,15 @@ def _match_synthetic_component(name: str, weight: float, source_text: str) -> Be
             "BANK_CURRENT",
             "银行活期存款利率",
             _DEPOSIT_CURRENT_ANNUAL_RETURN,
+            weight,
+            source_text,
+        )
+    annual_rate = re.fullmatch(r"(?P<rate>\d+(?:\.\d+)?)%?", cleaned)
+    if annual_rate and "指年" in source_text:
+        return _synthetic_component(
+            "FIXED_ANNUAL_RETURN",
+            f"固定年化收益率{float(annual_rate.group('rate')):.2f}%",
+            float(annual_rate.group("rate")) / 100.0,
             weight,
             source_text,
         )
@@ -399,12 +418,21 @@ def parse_benchmark_components(text: str | None) -> tuple[tuple[BenchmarkCompone
         return None, audits
     if not components:
         return None, audits
-    if not 0.9999 <= total_weight <= 1.0001:
+    synthetic_fixed_additive_weight = sum(
+        component.weight
+        for component in components
+        if component.benchmark_code == "FIXED_ANNUAL_RETURN" and "指年" in component.source_text
+    )
+    weight_for_sum_check = total_weight - synthetic_fixed_additive_weight
+    if not (
+        0.9999 <= weight_for_sum_check <= 1.0001
+        or (synthetic_fixed_additive_weight > 0 and 0 < weight_for_sum_check <= 1.0001)
+    ):
         audits.append(
             ComponentAudit(
                 None,
                 "total_weight",
-                total_weight,
+                weight_for_sum_check,
                 normalized,
                 "unresolved",
                 "resolved_weight_sum_not_100_percent",
@@ -748,8 +776,9 @@ def _compose_returns(
         if component.secid.startswith("synthetic:"):
             annual_return = float(component.secid.split(":", 1)[1])
             daily_return = _daily_return_from_annual(annual_return)
+            effective_weight = 1.0 if component.benchmark_code == "FIXED_ANNUAL_RETURN" and "指年" in component.source_text else component.weight
             for trade_date in required_dates:
-                by_date[trade_date] = by_date.get(trade_date, 0.0) + daily_return * component.weight
+                by_date[trade_date] = by_date.get(trade_date, 0.0) + daily_return * effective_weight
             continue
         rows = cache[component.secid]
         row_by_date = {str(row["trade_date"]): float(row["daily_return"]) for row in rows}

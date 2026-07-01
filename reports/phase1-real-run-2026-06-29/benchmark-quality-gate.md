@@ -5,25 +5,23 @@
 | status | funds |
 |---|---:|
 | `benchmark_missing` | 1 |
-| `missing_source` | 22 |
-| `ready` | 113 |
-| `unresolved` | 6 |
+| `missing_source` | 27 |
+| `ready` | 114 |
 
 ## Blocked Funds
 
 | fund_code | fund_name | status | blocking_components | benchmark |
 |---|---|---|---|---|
 | `000001` | 华夏成长混合 | `benchmark_missing` |  | 该基金暂未披露业绩比较基准 |
-| `000011` | 华夏大盘精选混合A | `unresolved` | 新华富时中国A200指数;LOCAL_XHFT_CHINA_GOV_BOND:新华富时中国国债 | 新华富时中国A200指数*80%+新华富时中国国债指数*20% |
-| `000021` | 华夏优势增长混合 | `unresolved` | 富时中国A600指数 | 富时中国A600指数收益率×80%+中债综合指数(财富)收益率×20% |
+| `000011` | 华夏大盘精选混合A | `missing_source` | LOCAL_XHFT_CHINA_A200:新华富时中国A200;LOCAL_XHFT_CHINA_GOV_BOND:新华富时中国国债 | 新华富时中国A200指数*80%+新华富时中国国债指数*20% |
+| `000021` | 华夏优势增长混合 | `missing_source` | LOCAL_FTSE_CHINA_A600:富时中国A600 | 富时中国A600指数收益率×80%+中债综合指数(财富)收益率×20% |
 | `000030` | 长城核心优选混合A | `missing_source` | LOCAL_CBOND_TOTAL:中债总 | 沪深300指数收益率*55%+中债总财富指数收益率*45% |
-| `000042` | 财通中证ESG100指数增强A | `unresolved` | 中证财通中国可持续发展100(ECPIESG)指数 | 中证财通中国可持续发展100(ECPI ESG)指数收益率*95%+银行活期存款利率(税后)*5% |
+| `000042` | 财通中证ESG100指数增强A | `missing_source` | LOCAL_CSI_ECPI_ESG100:中证财通ESG100 | 中证财通中国可持续发展100(ECPI ESG)指数收益率*95%+银行活期存款利率(税后)*5% |
 | `000056` | 建信消费升级混合 | `missing_source` | LOCAL_CHINA_BOND_TOTAL:中国债券总 | 75%×沪深300指数收益率+25%×中国债券总指数收益率 |
 | `000073` | 摩根成长动力混合A | `missing_source` | LOCAL_CBOND_TOTAL:中债总 | 沪深300指数收益率*80%+中债总指数收益率*20% |
-| `000082` | 嘉实研究阿尔法股票A | `unresolved` | MSCI中国A股指数 | MSCI中国A股指数收益率*95%+银行活期存款利率(税后)*5% |
-| `000124` | 华宝服务优选混合 | `unresolved` | 中证服务业指数 | 中证服务业指数收益率×80%+上证国债指数收益率×20% |
+| `000082` | 嘉实研究阿尔法股票A | `missing_source` | LOCAL_MSCI_CHINA_A:MSCI中国A股 | MSCI中国A股指数收益率*95%+银行活期存款利率(税后)*5% |
+| `000124` | 华宝服务优选混合 | `missing_source` | H30074:中证服务业 | 中证服务业指数收益率×80%+上证国债指数收益率×20% |
 | `000165` | 国投瑞银策略精选混合 | `missing_source` | LOCAL_CBOND_TOTAL:中债总 | 55%×沪深300指数+45%×中债总指数 |
-| `000172` | 华泰柏瑞量化增强混合A | `unresolved` | (指年,评价时按期间折算) | 沪深300指数收益率*95%+2.5%(指年收益率,评价时按期间折算) |
 | `000294` | 华安生态优先混合A | `missing_source` | LOCAL_CHINA_BOND_TOTAL:中国债券总 | 中证800指数收益率*80%+中国债券总指数收益率*20% |
 | `000308` | 建信创新中国混合 | `missing_source` | LOCAL_CHINA_BOND_TOTAL:中国债券总 | 75%×沪深300指数收益率+25%中国债券总指数收益率 |
 | `000309` | 大摩品质生活精选股票A | `missing_source` | LOCAL_SP_CHINA_BOND:标普中国债券 | 沪深300指数收益率*85%+标普中国债券指数收益率*15% |
