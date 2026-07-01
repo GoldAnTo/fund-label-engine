@@ -13,6 +13,7 @@ FACTOR_DB   ?= data/stock_factors.sqlite
 RULE_CONFIG ?= config/rules.v1.json
 PHASE1_FILE ?= data/phase1_fund_codes_canonical.txt
 PHASE1_OFFICIAL_FILE ?= data/phase1_fund_codes_v1_official.txt
+CBOND_AUTHORIZED_CSV ?= data/authorized_benchmark_component_returns.csv
 FUND_DATA_CACHE ?= $(HOME)/.cache/fund-data/releases/2026-06-03T214600Z/fund_data_query.sqlite
 
 # 因子横截面用的"今天"。建议每次跑前手动改成最近交易日。
@@ -34,7 +35,7 @@ RELATIVE_ELIGIBILITY_CSV ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.c
 RELATIVE_ELIGIBILITY_MD  ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.md
 READY_POOL_MD  ?= $(BENCHMARK_REPORT_DIR)/phase1-v1-ready-pool-sample.md
 
-.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark audit-benchmark audit-relative-eligibility render-ready-pool-report run-batch-v1-with-benchmark test
+.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark import-authorized-benchmark-components audit-benchmark audit-relative-eligibility render-ready-pool-report run-batch-v1-with-benchmark test
 
 help:
 	@echo "Available targets:"
@@ -44,6 +45,7 @@ help:
 	@echo "  make run-batch          运行 batch（依赖 copy-source；用 $(FACTOR_DB) 作为 factor cache）"
 	@echo "  make run-batch-v1       运行 v1 正式权益清单 batch（排除待复核/低权益仓位基金）"
 	@echo "  make refresh-benchmark  解析/拉取 phase1 v1 基准收益到 $(SOURCE_DB)"
+	@echo "  make import-authorized-benchmark-components  导入授权债券指数日收益 CSV 到 $(SOURCE_DB)"
 	@echo "  make audit-benchmark    输出 benchmark 质量审计到 $(BENCHMARK_REPORT_DIR)"
 	@echo "  make audit-relative-eligibility  输出相对标签 ready 池审计"
 	@echo "  make render-ready-pool-report  渲染 8 只样本 Phase1 v1 ready pool 验收报告"
@@ -105,6 +107,12 @@ refresh-benchmark: copy-source
 	  --start-date $(BENCHMARK_START) \
 	  --end-date $(BENCHMARK_END) \
 	  --mapping-csv $(BENCHMARK_MAPPING_CSV)
+
+import-authorized-benchmark-components:
+	$(PYTHON) scripts/import_benchmark_component_returns.py \
+	  --db $(SOURCE_DB) \
+	  --from-csv $(CBOND_AUTHORIZED_CSV) \
+	  --min-rows 180
 
 audit-benchmark:
 	@mkdir -p $(BENCHMARK_REPORT_DIR)

@@ -37,6 +37,8 @@ ALLOWED_COMPONENT_CODES = {
     "LOCAL_CBOND_COMPOSITE",  # 中债综合
     "LOCAL_CBOND_TOTAL",      # 中债总
     "LOCAL_CHINA_BOND_TOTAL",  # 中国债券总
+    "LOCAL_SP_CHINA_BOND",  # 标普中国债券
+    "LOCAL_XHFT_CHINA_GOV_BOND",  # 新华富时中国国债
 }
 
 # 单日收益的合理区间。债券指数单日波动极小；用 ±10% 作为防百分数误填的上限，
