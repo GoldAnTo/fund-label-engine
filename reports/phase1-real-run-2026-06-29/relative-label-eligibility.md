@@ -8,20 +8,18 @@ Total funds: 142
 
 | status | count |
 | --- | ---: |
-| `relative_label_ready` | 108 |
-| `benchmark_source_missing` | 21 |
-| `benchmark_mapping_required` | 2 |
-| `benchmark_unresolved` | 10 |
+| `relative_label_ready` | 113 |
+| `benchmark_source_missing` | 22 |
+| `benchmark_unresolved` | 6 |
 | `benchmark_missing` | 1 |
 
 ## benchmark_source_status Counts
 
 | status | count |
 | --- | ---: |
-| `ready` | 108 |
-| `missing_source` | 21 |
-| `unresolved` | 10 |
-| `mapping_required` | 2 |
+| `ready` | 113 |
+| `missing_source` | 22 |
+| `unresolved` | 6 |
 | `benchmark_missing` | 1 |
 
 ## benchmark_ready 但 NAV 不足（可通过补 NAV 解决）
