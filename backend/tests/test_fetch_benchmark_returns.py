@@ -180,43 +180,41 @@ def test_load_local_component_returns_accepts_plain_sqlite_connection(tmp_path):
     assert rows == [{"trade_date": "2026-01-02", "daily_return": 0.0002}]
 
 
-def test_parse_rejects_hs300_financial_real_estate_as_plain_hs300():
+def test_parse_maps_verified_hs300_financial_real_estate_index():
     components, audits = parse_benchmark_components(
         "80%×沪深300金融地产行业指数收益率+20%×上证国债指数收益率"
     )
 
-    assert components is None
-    assert any(
-        audit.status == "unresolved"
-        and audit.reason == "exact_component_mapping_required"
-        and audit.component_name == "沪深300金融地产行业指数"
-        for audit in audits
-    )
-    assert not any(
-        audit.status == "resolved"
-        and audit.component_code == "000300"
-        and audit.source_text == "80%×沪深300金融地产行业指数收益率"
-        for audit in audits
-    )
+    assert components is not None
+    assert [component.benchmark_code for component in components] == ["000914", "000012"]
+    assert [component.weight for component in components] == [0.8, 0.2]
+    assert all(audit.status == "resolved" for audit in audits)
 
 
-def test_parse_rejects_hs300_anzhong_strategy_as_plain_hs300():
+def test_parse_maps_verified_hs300_anzhong_strategy_index():
     components, audits = parse_benchmark_components(
         "沪深300安中动态策略指数收益率*95%+金融机构人民币活期存款基准利率(税后)*5%"
     )
 
-    assert components is None
-    assert any(
-        audit.status == "unresolved"
-        and audit.reason == "exact_component_mapping_required"
-        and audit.component_name == "沪深300安中动态策略指数"
-        for audit in audits
-    )
-    assert not any(
-        audit.status == "resolved"
-        and audit.component_code == "000300"
-        for audit in audits
-    )
+    assert components is not None
+    assert [component.benchmark_code for component in components] == ["H30124", "BANK_CURRENT"]
+    assert [component.weight for component in components] == [0.95, 0.05]
+    assert all(audit.status == "resolved" for audit in audits)
+
+
+def test_parse_maps_verified_unresolved_equity_indexes():
+    cases = [
+        ("中证A500指数收益率*80%+中债-国债总全价(1-3年)指数收益率*20%", "000510"),
+        ("上证高端装备60指数收益率*50%+中证综合债指数收益率*50%", "000097"),
+        ("国证航天军工指数收益率*50%+中证综合债指数收益率*50%", "399368"),
+        ("中证军工指数收益率×95%+银行活期存款利率(税后)×5%", "399967"),
+    ]
+
+    for text, expected_code in cases:
+        components, audits = parse_benchmark_components(text)
+        assert components is not None
+        assert components[0].benchmark_code == expected_code
+        assert audits[0].status == "resolved"
 
 
 def test_parse_keeps_plain_hs300_supported():
