@@ -20,6 +20,29 @@ def test_ready_when_benchmark_ready_and_nav_sufficient():
     assert row["blocking_reason"] == ""
 
 
+def test_ready_approx_when_benchmark_precision_is_approx():
+    row = classify_relative_eligibility(
+        benchmark_source_status="ready",
+        nav_sample_count=241,
+        benchmark_sample_count=241,
+        benchmark_precision="approx",
+    )
+    assert row["return_window_status"] == "ready"
+    assert row["relative_label_status"] == "relative_label_ready_approx"
+    assert row["blocking_reason"] == "benchmark_precision=approx"
+
+
+def test_approx_precision_still_blocked_when_nav_insufficient():
+    # 近似只在“已就绪”时降档；NAV 不足仍按窗口不足归因，不被 approx 掩盖
+    row = classify_relative_eligibility(
+        benchmark_source_status="ready",
+        nav_sample_count=20,
+        benchmark_sample_count=241,
+        benchmark_precision="approx",
+    )
+    assert row["relative_label_status"] == "nav_window_insufficient"
+
+
 def test_benchmark_ready_but_nav_insufficient():
     # 100039 典型：基准源 ready，但 NAV 不足 180
     row = classify_relative_eligibility(
@@ -115,3 +138,27 @@ def test_build_eligibility_rows_joins_benchmark_quality(tmp_path: Path):
     assert by_code["B"]["relative_label_status"] == "nav_window_insufficient"
     assert by_code["A"]["nav_sample_count"] == 200
     assert by_code["B"]["nav_sample_count"] == 20
+
+
+def test_build_eligibility_rows_marks_approx_precision(tmp_path: Path):
+    db = tmp_path / "src.sqlite"
+    _seed_db(db)
+    quality = {
+        "A": {"quality_status": "ready", "blocking_components": ""},
+        "B": {"quality_status": "ready", "blocking_components": ""},
+    }
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = build_eligibility_rows(
+            conn, ["A", "B"], quality, precision_by_code={"A": "approx"}
+        )
+    finally:
+        conn.close()
+
+    by_code = {r["fund_code"]: r for r in rows}
+    assert by_code["A"]["relative_label_status"] == "relative_label_ready_approx"
+    assert by_code["A"]["benchmark_precision"] == "approx"
+    # B NAV 不足，仍按窗口不足归因；未标 approx 默认 exact
+    assert by_code["B"]["relative_label_status"] == "nav_window_insufficient"
+    assert by_code["B"]["benchmark_precision"] == "exact"

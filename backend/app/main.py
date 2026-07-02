@@ -682,12 +682,15 @@ def create_app(
         from scripts.audit_relative_label_eligibility import build_eligibility_rows
 
         codes = reader.list_run_funds(run_id)
+        precision_by_code = benchmark_precision_by_fund(source_db)
         try:
             with sqlite3.connect(source_db) as conn:
                 conn.row_factory = sqlite3.Row
                 quality_rows = build_quality_rows(conn, codes)
                 quality_by_code = {row["fund_code"]: row for row in quality_rows}
-                rows = build_eligibility_rows(conn, codes, quality_by_code)
+                rows = build_eligibility_rows(
+                    conn, codes, quality_by_code, precision_by_code
+                )
         except sqlite3.OperationalError as exc:
             raise HTTPException(
                 status_code=503,
@@ -696,9 +699,11 @@ def create_app(
 
         status_counts = Counter(row["relative_label_status"] for row in rows)
         source_counts = Counter(row["benchmark_source_status"] for row in rows)
+        # approx 是“可用但按近似口径解读”的就绪档，不算被阻塞。
+        ready_statuses = {"relative_label_ready", "relative_label_ready_approx"}
         blocker_groups: dict[str, dict[str, Any]] = {}
         for row in rows:
-            if row["relative_label_status"] == "relative_label_ready":
+            if row["relative_label_status"] in ready_statuses:
                 continue
             components = [
                 item.strip()
@@ -727,25 +732,29 @@ def create_app(
         if status == "ready":
             display_rows = [
                 row for row in rows
-                if row["relative_label_status"] == "relative_label_ready"
+                if row["relative_label_status"] in ready_statuses
             ]
         elif status == "blocked":
             display_rows = [
                 row for row in rows
-                if row["relative_label_status"] != "relative_label_ready"
+                if row["relative_label_status"] not in ready_statuses
             ]
         else:
             display_rows = rows
         display_rows = sorted(
             display_rows,
-            key=lambda row: (row["relative_label_status"] != "relative_label_ready", row["fund_code"]),
+            key=lambda row: (row["relative_label_status"] not in ready_statuses, row["fund_code"]),
         )[:limit]
 
+        ready_count = sum(
+            status_counts.get(s, 0) for s in ready_statuses
+        )
         return {
             "run_id": run_id,
             "total_funds": len(rows),
             "ready_count": status_counts.get("relative_label_ready", 0),
-            "blocked_count": len(rows) - status_counts.get("relative_label_ready", 0),
+            "ready_approx_count": status_counts.get("relative_label_ready_approx", 0),
+            "blocked_count": len(rows) - ready_count,
             "status_counts": dict(status_counts),
             "benchmark_source_counts": dict(source_counts),
             "blocker_groups": blocker_group_rows,

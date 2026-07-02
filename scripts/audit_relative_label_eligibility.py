@@ -42,6 +42,7 @@ def classify_relative_eligibility(
     benchmark_source_status: str,
     nav_sample_count: int,
     benchmark_sample_count: int,
+    benchmark_precision: str = "exact",
 ) -> dict[str, Any]:
     aligned = min(nav_sample_count, benchmark_sample_count)
     nav_ready = nav_sample_count >= NAV_WINDOW_MIN_SAMPLES
@@ -62,6 +63,11 @@ def classify_relative_eligibility(
                 f"aligned_sample_count={aligned}<{NAV_WINDOW_MIN_SAMPLES} "
                 f"(nav={nav_sample_count}, benchmark={benchmark_sample_count})"
             )
+    elif benchmark_precision == "approx":
+        # 源就绪、窗口足够，但基准用的是显式近似源：单列一档，
+        # 相对标签可用但需按“近似基准”解读，不与精确就绪同池。
+        relative_label_status = "relative_label_ready_approx"
+        blocking_reason = "benchmark_precision=approx"
     else:
         relative_label_status = "relative_label_ready"
         blocking_reason = ""
@@ -103,7 +109,9 @@ def build_eligibility_rows(
     conn: sqlite3.Connection,
     codes: list[str],
     quality_by_code: dict[str, dict[str, str]],
+    precision_by_code: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
+    precision_by_code = precision_by_code or {}
     rows: list[dict[str, Any]] = []
     for fund_code in codes:
         quality = quality_by_code.get(fund_code)
@@ -111,16 +119,19 @@ def build_eligibility_rows(
             continue
         nav_count = _nav_sample_count(conn, fund_code)
         bench_count = _benchmark_sample_count(conn, fund_code)
+        precision = precision_by_code.get(fund_code, "exact")
         verdict = classify_relative_eligibility(
             benchmark_source_status=quality["quality_status"],
             nav_sample_count=nav_count,
             benchmark_sample_count=bench_count,
+            benchmark_precision=precision,
         )
         rows.append(
             {
                 "fund_code": fund_code,
                 "fund_name": quality.get("fund_name", ""),
                 "benchmark_source_status": quality["quality_status"],
+                "benchmark_precision": precision,
                 "nav_sample_count": nav_count,
                 "benchmark_sample_count": bench_count,
                 "return_window_status": verdict["return_window_status"],
@@ -136,6 +147,7 @@ _CSV_FIELDS = [
     "fund_code",
     "fund_name",
     "benchmark_source_status",
+    "benchmark_precision",
     "nav_sample_count",
     "benchmark_sample_count",
     "return_window_status",
@@ -171,6 +183,7 @@ def write_markdown(rows: list[dict[str, Any]], path: str | Path) -> None:
     ]
     for status in [
         "relative_label_ready",
+        "relative_label_ready_approx",
         "nav_window_insufficient",
         "benchmark_source_missing",
         "benchmark_mapping_required",
@@ -217,12 +230,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     codes = read_codes(args.codes_file)
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
+    from app.benchmark_precision import benchmark_precision_by_fund
+
+    precision_by_code = benchmark_precision_by_fund(args.db)
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
     try:
         quality_rows = build_quality_rows(conn, codes)
         quality_by_code = {r["fund_code"]: r for r in quality_rows}
-        rows = build_eligibility_rows(conn, codes, quality_by_code)
+        rows = build_eligibility_rows(conn, codes, quality_by_code, precision_by_code)
     finally:
         conn.close()
 
@@ -231,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     rel_counts = Counter(r["relative_label_status"] for r in rows)
     print(
         f"relative_label_ready={rel_counts.get('relative_label_ready', 0)} "
+        f"relative_label_ready_approx={rel_counts.get('relative_label_ready_approx', 0)} "
         f"nav_window_insufficient={rel_counts.get('nav_window_insufficient', 0)} "
         f"total={len(rows)}"
     )

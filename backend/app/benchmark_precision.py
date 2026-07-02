@@ -24,6 +24,13 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     return row is not None
 
 
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    return any(
+        row[1] == column
+        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    )
+
+
 def benchmark_precision_by_fund(source_db_path: str | Path) -> dict[str, str]:
     """返回 {fund_code: 'exact'|'approx'|'none'}。
 
@@ -38,7 +45,9 @@ def benchmark_precision_by_fund(source_db_path: str | Path) -> dict[str, str]:
             return {}
 
         approx_codes: set[str] = set()
-        if _table_exists(conn, "benchmark_component_returns"):
+        if _table_exists(conn, "benchmark_component_returns") and _column_exists(
+            conn, "benchmark_component_returns", "source"
+        ):
             approx_codes = {
                 str(row[0])
                 for row in conn.execute(
