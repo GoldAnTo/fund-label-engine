@@ -1,0 +1,173 @@
+{
+  "version": "v1",
+  "objective": "core_satellite_equity_pool",
+  "feature_columns": [
+    "alpha_1y",
+    "annualized_excess_return_1y",
+    "annualized_return_1y",
+    "annualized_volatility_1y",
+    "beta_1y",
+    "deep_value_weight",
+    "dividend_steady_weight",
+    "information_ratio_1y",
+    "max_drawdown_1y",
+    "quality_growth_weight",
+    "sharpe_ratio_1y",
+    "tracking_error_1y"
+  ],
+  "tag_groups": {
+    "style_tags": [
+      "deep_value",
+      "quality_growth",
+      "dividend_steady",
+      "high_dividend_financial",
+      "consumer_quality"
+    ],
+    "return_tags": [
+      "alpha_positive",
+      "excess_return_strong",
+      "information_ratio_high",
+      "long_term_return_strong",
+      "sharpe_high"
+    ],
+    "risk_tags": [
+      "beta_high",
+      "drawdown_high",
+      "holding_concentration_high",
+      "industry_concentration_high",
+      "industry_concentration_observe",
+      "tracking_error_high",
+      "volatility_high"
+    ],
+    "data_tags": [
+      "data_sufficient",
+      "data_insufficient",
+      "manual_review_required"
+    ],
+    "review_required_labels": [
+      "data_insufficient",
+      "manual_review_required"
+    ],
+    "watch_labels": [
+      "benchmark_data_missing",
+      "return_window_insufficient",
+      "sector_mapping_insufficient",
+      "style_exposure_low_coverage",
+      "style_exposure_observe",
+      "style_pending_rule_definition",
+      "style_unlabeled_stock_factors_missing"
+    ]
+  },
+  "roles": [
+    {
+      "role_code": "needs_review",
+      "role_name": "Needs review",
+      "description": "Data or manual review blockers exist.",
+      "when": {
+        "allocation_status": ["review_required"]
+      }
+    },
+    {
+      "role_code": "active_equity_candidate",
+      "role_name": "Active equity candidate",
+      "description": "In the active equity candidate pool.",
+      "when": {
+        "any_group": ["active_equity_candidate_pool"]
+      }
+    },
+    {
+      "role_code": "core_holding_candidate",
+      "role_name": "Core holding candidate",
+      "description": "Active equity fund with enough data, manager tenure, and no high drawdown label.",
+      "when": {
+        "allocation_status": ["eligible", "observe"],
+        "all_labels": ["data_sufficient", "manager_tenure_long"],
+        "any_group": ["active_equity_candidate_pool"],
+        "none_labels": ["drawdown_high"]
+      }
+    },
+    {
+      "role_code": "satellite_alpha",
+      "role_name": "Satellite alpha",
+      "description": "Has positive alpha plus excess-return efficiency evidence.",
+      "when": {
+        "all_labels": ["alpha_positive"],
+        "any_labels": ["information_ratio_high", "excess_return_strong"]
+      }
+    },
+    {
+      "role_code": "defensive_anchor",
+      "role_name": "Defensive anchor",
+      "description": "Low beta or low volatility without high drawdown.",
+      "when": {
+        "any_labels": ["beta_low", "volatility_low"],
+        "none_labels": ["drawdown_high"]
+      }
+    },
+    {
+      "role_code": "index_tool",
+      "role_name": "Index tool",
+      "description": "Passive index or index-like tool fund.",
+      "when": {
+        "any_of": [
+          {
+            "any_group": ["passive_tool_pool"]
+          },
+          {
+            "classification": {
+              "management_style": ["passive_index"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "role_code": "low_cost",
+      "role_name": "Low cost",
+      "description": "Low fee tag is present.",
+      "when": {
+        "any_labels": ["fee_low"]
+      }
+    },
+    {
+      "role_code": "style_quality_growth",
+      "role_name": "Quality growth style",
+      "description": "Formal quality growth style label is active.",
+      "when": {
+        "active_labels": ["quality_growth"]
+      }
+    },
+    {
+      "role_code": "style_deep_value",
+      "role_name": "Deep value style",
+      "description": "Formal deep value style label is active.",
+      "when": {
+        "active_labels": ["deep_value"]
+      }
+    },
+    {
+      "role_code": "style_dividend_steady",
+      "role_name": "Dividend steady style",
+      "description": "Formal dividend steady style label is active.",
+      "when": {
+        "active_labels": ["dividend_steady"]
+      }
+    },
+    {
+      "role_code": "style_high_dividend_financial",
+      "role_name": "High dividend financial style",
+      "description": "Formal high dividend financial style label is active.",
+      "when": {
+        "active_labels": ["high_dividend_financial"]
+      }
+    },
+    {
+      "role_code": "style_consumer_quality",
+      "role_name": "Consumer quality style",
+      "description": "Formal consumer quality style label is active.",
+      "when": {
+        "active_labels": ["consumer_quality"]
+      }
+    }
+  ]
+}

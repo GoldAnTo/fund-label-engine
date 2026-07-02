@@ -354,6 +354,63 @@ def test_get_run_summary_aggregates_counts_and_distributions(seeded_run) -> None
     assert reason_dist["return_window_insufficient"] > 0
 
 
+def test_get_portfolio_matrix_derives_combination_roles(seeded_run) -> None:
+    db, run_id = seeded_run
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "DELETE FROM fund_label_results WHERE run_id = ? AND fund_code = '000001' "
+            "AND label_code IN ("
+            "'benchmark_data_missing', "
+            "'return_window_insufficient', "
+            "'style_unlabeled_stock_factors_missing'"
+            ")",
+            (run_id,),
+        )
+        conn.executemany(
+            "INSERT INTO fund_label_results "
+            "(run_id, fund_code, label_code, label_name, category, confidence, status) "
+            "VALUES (?, '000001', ?, ?, ?, 0.8, 'active')",
+            [
+                (run_id, "alpha_positive", "Alpha 为正", "relative_benchmark"),
+                (run_id, "information_ratio_high", "信息比率较高", "relative_benchmark"),
+                (run_id, "quality_growth", "质量成长", "holding_style"),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO feature_values (run_id, fund_code, feature_code, value, source) "
+            "VALUES (?, '000001', ?, ?, 'unit-test')",
+            [
+                (run_id, "alpha_1y", "0.12"),
+                (run_id, "information_ratio_1y", "0.8"),
+                (run_id, "quality_growth_weight", "0.58"),
+            ],
+        )
+        conn.commit()
+    client = TestClient(create_app(db_path=db))
+
+    response = client.get(f"/v1/runs/{run_id}/portfolio-matrix")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == run_id
+    rows = {row["fund_code"]: row for row in payload["rows"]}
+    ready = rows["000001"]
+    assert ready["allocation_status"] == "eligible"
+    assert "active_equity_candidate" in ready["portfolio_roles"]
+    assert "satellite_alpha" in ready["portfolio_roles"]
+    assert "style_quality_growth" in ready["portfolio_roles"]
+    assert "quality_growth" in ready["style_tags"]
+    assert "alpha_positive" in ready["return_tags"]
+    assert ready["features"]["alpha_1y"] == 0.12
+    assert ready["features"]["information_ratio_1y"] == 0.8
+
+    review = rows["000002"]
+    assert review["allocation_status"] == "review_required"
+    assert "needs_review" in review["portfolio_roles"]
+    assert "data_insufficient" in review["blocking_reasons"]
+    assert "manual_review_required" in review["blocking_reasons"]
+
+
 def test_label_definitions_endpoint_returns_thresholds(seeded_run) -> None:
     db, _ = seeded_run
     client = TestClient(create_app(db_path=db))

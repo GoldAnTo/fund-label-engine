@@ -5,6 +5,19 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from app.portfolio.roles import (
+    derive_portfolio_profile,
+    load_portfolio_role_config,
+    portfolio_feature_columns,
+)
+
+
+def _number_or_text(value: str) -> float | str:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return value
+
 
 class LabelRunReader:
     """从 SQLite 读取已经落库的标签批次结果。"""
@@ -511,6 +524,148 @@ class LabelRunReader:
             "group_distribution": [dict(row) for row in group_rows],
         }
 
+    def get_portfolio_matrix(self, run_id: str) -> dict[str, Any] | None:
+        """把原子标签整理成组合构建可用的每基金一行矩阵。
+
+        该层只做派生，不写回 fund_label_results；组合角色用于筛选和解释，
+        不代表推荐或最终权重。
+        """
+        portfolio_config = load_portfolio_role_config()
+        feature_columns = sorted(portfolio_feature_columns(portfolio_config))
+
+        with self._connect() as conn:
+            run = conn.execute(
+                "SELECT run_id, run_at, rule_version, status "
+                "FROM label_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if run is None:
+                return None
+
+            labels = conn.execute(
+                "SELECT fund_code, label_code, category, status "
+                "FROM fund_label_results WHERE run_id = ? "
+                "ORDER BY fund_code, label_code",
+                (run_id,),
+            ).fetchall()
+            if feature_columns:
+                features = conn.execute(
+                    "SELECT fund_code, feature_code, value "
+                    "FROM feature_values WHERE run_id = ? "
+                    "AND feature_code IN ({}) "
+                    "ORDER BY fund_code, feature_code".format(
+                        ",".join("?" for _ in feature_columns)
+                    ),
+                    (run_id, *feature_columns),
+                ).fetchall()
+            else:
+                features = []
+            classifications = conn.execute(
+                "SELECT fund_code, dimension, classification_code "
+                "FROM fund_classification_results WHERE run_id = ? "
+                "ORDER BY fund_code, dimension",
+                (run_id,),
+            ).fetchall()
+            groups = conn.execute(
+                "SELECT fund_code, group_code, group_type "
+                "FROM fund_group_results WHERE run_id = ? "
+                "ORDER BY fund_code, group_type, group_code",
+                (run_id,),
+            ).fetchall()
+            coverage = conn.execute(
+                "SELECT fund_code, MAX(review_action) AS review_action "
+                "FROM fund_run_coverage WHERE run_id = ? GROUP BY fund_code",
+                (run_id,),
+            ).fetchall()
+
+        label_codes_by_fund: dict[str, set[str]] = {}
+        active_label_codes_by_fund: dict[str, set[str]] = {}
+        for row in labels:
+            fund_code = row["fund_code"]
+            label_code = row["label_code"]
+            label_codes_by_fund.setdefault(fund_code, set()).add(label_code)
+            if row["status"] == "active":
+                active_label_codes_by_fund.setdefault(fund_code, set()).add(
+                    label_code
+                )
+
+        features_by_fund: dict[str, dict[str, float | str]] = {}
+        for row in features:
+            features_by_fund.setdefault(row["fund_code"], {})[
+                row["feature_code"]
+            ] = _number_or_text(row["value"])
+
+        classifications_by_fund: dict[str, dict[str, str]] = {}
+        for row in classifications:
+            classifications_by_fund.setdefault(row["fund_code"], {})[
+                row["dimension"]
+            ] = row["classification_code"]
+
+        group_codes_by_fund: dict[str, set[str]] = {}
+        for row in groups:
+            group_codes_by_fund.setdefault(row["fund_code"], set()).add(
+                row["group_code"]
+            )
+
+        review_action_by_fund = {
+            row["fund_code"]: row["review_action"] for row in coverage
+        }
+        fund_codes = sorted(
+            set(label_codes_by_fund)
+            | set(features_by_fund)
+            | set(classifications_by_fund)
+            | set(group_codes_by_fund)
+        )
+
+        rows: list[dict[str, Any]] = []
+        for fund_code in fund_codes:
+            labels_for_fund = label_codes_by_fund.get(fund_code, set())
+            active_labels = active_label_codes_by_fund.get(fund_code, set())
+            groups_for_fund = group_codes_by_fund.get(fund_code, set())
+            classifications_for_fund = classifications_by_fund.get(fund_code, {})
+
+            profile = derive_portfolio_profile(
+                label_codes=labels_for_fund,
+                active_label_codes=active_labels,
+                group_codes=groups_for_fund,
+                classifications=classifications_for_fund,
+                review_action=review_action_by_fund.get(fund_code),
+                config=portfolio_config,
+            )
+
+            feature_map = features_by_fund.get(fund_code, {})
+            row = {
+                "fund_code": fund_code,
+                "allocation_status": profile["allocation_status"],
+                "portfolio_roles": profile["portfolio_roles"],
+                "style_tags": profile["style_tags"],
+                "return_tags": profile["return_tags"],
+                "risk_tags": profile["risk_tags"],
+                "data_tags": profile["data_tags"],
+                "blocking_reasons": profile["blocking_reasons"],
+                "watch_reasons": profile["watch_reasons"],
+                "label_codes": sorted(labels_for_fund),
+                "group_codes": sorted(groups_for_fund),
+                "classifications": classifications_for_fund,
+                "features": feature_map,
+            }
+            for feature_code in feature_columns:
+                row[feature_code] = feature_map.get(feature_code)
+            rows.append(row)
+
+        return {
+            "run_id": run_id,
+            "run_at": run["run_at"],
+            "rule_version": run["rule_version"],
+            "status": run["status"],
+            "portfolio_config": {
+                "version": portfolio_config.get("version"),
+                "objective": portfolio_config.get("objective"),
+            },
+            "total_count": len(rows),
+            "rows": rows,
+        }
+
     def get_coverage_report(self, run_id: str) -> dict[str, Any]:
         """P0：按 fund_type 聚合本次 run 的数据覆盖率 + 拒绝原因 top。
 
@@ -784,6 +939,9 @@ class LabelRunReader:
                 dict(r) for r in equity_style_contributions
             ],
             "failures": [dict(r) for r in failures],
+            "portfolio_matrix": (
+                self.get_portfolio_matrix(run_id) or {"rows": []}
+            )["rows"],
         }
 
     # ---------- Phase 5: 股票因子/股票级标签占位查询 ----------
