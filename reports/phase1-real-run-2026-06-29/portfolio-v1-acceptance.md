@@ -37,24 +37,24 @@ counts: {'core': 9, 'satellite': 11, 'index_tool': 8}
 | `000520` | core | core | active_equity_candidate, core_holding_candidate, defensive_anchor, satellite_alpha | 31.43% | 2.13 | 0.79 | 12.55% | -6.83% | 8.0% | 2.09% |
 | `000279` | core | core | active_equity_candidate, core_holding_candidate, defensive_anchor, satellite_alpha, style_deep_value | 10.66% | 1.10 | 0.83 | 10.92% | -8.66% | 8.0% | 2.26% |
 | `000663` | core | core | active_equity_candidate, core_holding_candidate, defensive_anchor | 10.17% | 1.90 | -0.33 | 17.11% | -15.20% | 6.0% | 0.89% |
-| `000017` | satellite | satellite | active_equity_candidate, core_holding_candidate, defensive_anchor, satellite_alpha, style_quality_growth | 295.51% | 6.71 | 5.03 | 40.16% | -14.85% | 5.0% | 1.68% |
-| `000531` | satellite | satellite | defensive_anchor, satellite_alpha, style_quality_growth | 151.38% | 6.71 | 2.59 | 38.25% | -17.60% | 5.0% | 1.00% |
-| `000404` | satellite | satellite | active_equity_candidate, core_holding_candidate, defensive_anchor, satellite_alpha, style_quality_growth | 143.42% | 5.63 | 1.89 | 38.08% | -17.15% | 5.0% | 1.85% |
-| `000522` | satellite | satellite | active_equity_candidate, satellite_alpha, style_quality_growth | 132.22% | 4.22 | 0.18 | 44.25% | -20.21% | 3.0% | 0.03% |
-| `000073` | satellite | satellite | defensive_anchor, satellite_alpha, style_quality_growth | 86.14% | 3.90 | 1.41 | 24.87% | -11.52% | 6.0% | 1.27% |
-| `000219` | satellite | satellite | defensive_anchor, satellite_alpha | 39.76% | 2.36 | 1.92 | 15.65% | -7.85% | 6.0% | 1.24% |
-| `000398` | satellite | satellite | defensive_anchor, satellite_alpha | 38.79% | 2.29 | 0.87 | 15.05% | -7.96% | 8.0% | 1.41% |
-| `000433` | satellite | satellite | defensive_anchor, low_cost, satellite_alpha | 37.58% | 1.88 | 1.70 | 18.31% | -13.19% | 8.0% | 1.58% |
-| `000573` | satellite | satellite | defensive_anchor, low_cost, satellite_alpha | 29.95% | 1.70 | 1.80 | 14.52% | -10.83% | 8.0% | 1.58% |
-| `000566` | satellite | satellite | defensive_anchor | 12.70% | 1.60 | -0.91 | 21.41% | -14.84% | 6.0% | 0.38% |
-| `000083` | satellite | satellite | active_equity_candidate | -13.09% | -1.06 | 0.20 | 13.04% | -22.47% | 3.0% | 0.03% |
-| `000368` | index_tool | index_tool | defensive_anchor, index_tool, low_cost | 45.83% | 2.81 | 0.05 | 13.78% | -5.08% | 8.0% | 0.72% |
-| `000311` | index_tool | index_tool | defensive_anchor, index_tool, low_cost, satellite_alpha | 43.17% | 2.56 | 0.34 | 14.82% | -7.33% | 8.0% | 1.37% |
-| `000312` | index_tool | index_tool | defensive_anchor, index_tool, low_cost, satellite_alpha | 40.34% | 2.27 | 0.25 | 15.64% | -9.58% | 8.0% | 1.37% |
-| `000313` | index_tool | index_tool | defensive_anchor, index_tool, satellite_alpha | 39.66% | 2.23 | 0.23 | 15.64% | -9.64% | 8.0% | 1.20% |
-| `000656` | index_tool | index_tool | defensive_anchor, index_tool, low_cost | 37.80% | 2.27 | 0.17 | 14.55% | -7.16% | 8.0% | 0.72% |
-| `000176` | index_tool | index_tool | defensive_anchor, index_tool, low_cost | 36.12% | 2.11 | 0.10 | 14.68% | -7.40% | 8.0% | 0.72% |
-| `000512` | index_tool | index_tool | defensive_anchor, index_tool, low_cost | 29.92% | 1.77 | -0.09 | 14.17% | -7.87% | 8.0% | 0.72% |
+| `000017` | satellite | satellite | active_equity_candidate, core_holding_candidate, defensive_anchor, satellite_alpha, style_quality_growth | 295.51% | 6.71 | 5.03 | 40.16% | -14.85% | 3.0% | 1.68% |
+| `000531` | satellite | satellite | defensive_anchor, satellite_alpha, style_quality_growth | 151.38% | 6.71 | 2.59 | 38.25% | -17.60% | 3.0% | 1.00% |
+| `000404` | satellite | satellite | active_equity_candidate, core_holding_candidate, defensive_anchor, satellite_alpha, style_quality_growth | 143.42% | 5.63 | 1.89 | 38.08% | -17.15% | 3.0% | 1.85% |
+| `000522` | satellite | satellite | active_equity_candidate, satellite_alpha, style_quality_growth | 132.22% | 4.22 | 0.18 | 44.25% | -20.21% | 1.0% | 0.03% |
+| `000073` | satellite | satellite | defensive_anchor, satellite_alpha, style_quality_growth | 86.14% | 3.90 | 1.41 | 24.87% | -11.52% | 5.0% | 1.27% |
+| `000219` | satellite | satellite | defensive_anchor, satellite_alpha | 39.76% | 2.36 | 1.92 | 15.65% | -7.85% | 5.0% | 1.24% |
+| `000398` | satellite | satellite | defensive_anchor, satellite_alpha | 38.79% | 2.29 | 0.87 | 15.05% | -7.96% | 5.0% | 1.41% |
+| `000433` | satellite | satellite | defensive_anchor, low_cost, satellite_alpha | 37.58% | 1.88 | 1.70 | 18.31% | -13.19% | 5.0% | 1.58% |
+| `000573` | satellite | satellite | defensive_anchor, low_cost, satellite_alpha | 29.95% | 1.70 | 1.80 | 14.52% | -10.83% | 5.0% | 1.58% |
+| `000566` | satellite | satellite | defensive_anchor | 12.70% | 1.60 | -0.91 | 21.41% | -14.84% | 5.0% | 0.38% |
+| `000083` | satellite | satellite | active_equity_candidate | -13.09% | -1.06 | 0.20 | 13.04% | -22.47% | 1.0% | 0.03% |
+| `000368` | index_tool | index_tool | defensive_anchor, index_tool, low_cost | 45.83% | 2.81 | 0.05 | 13.78% | -5.08% | 3.0% | 0.72% |
+| `000311` | index_tool | index_tool | defensive_anchor, index_tool, low_cost, satellite_alpha | 43.17% | 2.56 | 0.34 | 14.82% | -7.33% | 3.0% | 1.37% |
+| `000312` | index_tool | index_tool | defensive_anchor, index_tool, low_cost, satellite_alpha | 40.34% | 2.27 | 0.25 | 15.64% | -9.58% | 3.0% | 1.37% |
+| `000313` | index_tool | index_tool | defensive_anchor, index_tool, satellite_alpha | 39.66% | 2.23 | 0.23 | 15.64% | -9.64% | 3.0% | 1.20% |
+| `000656` | index_tool | index_tool | defensive_anchor, index_tool, low_cost | 37.80% | 2.27 | 0.17 | 14.55% | -7.16% | 3.0% | 0.72% |
+| `000176` | index_tool | index_tool | defensive_anchor, index_tool, low_cost | 36.12% | 2.11 | 0.10 | 14.68% | -7.40% | 3.0% | 0.72% |
+| `000512` | index_tool | index_tool | defensive_anchor, index_tool, low_cost | 29.92% | 1.77 | -0.09 | 14.17% | -7.87% | 3.0% | 0.72% |
 | `000059` | index_tool | index_tool | index_tool, low_cost | -9.10% | -0.62 | 0.10 | 16.62% | -22.54% | 3.0% | 0.03% |
 
 <details><summary>含 optimized weight 的扩展表（点击展开）</summary>
@@ -70,24 +70,24 @@ counts: {'core': 9, 'satellite': 11, 'index_tool': 8}
 | `000520` | core | 2.09% | 2.09% | 8.0% | ok |
 | `000279` | core | 2.26% | 2.26% | 8.0% | ok |
 | `000663` | core | 0.89% | 0.89% | 6.0% | ok |
-| `000017` | satellite | 1.68% | 1.68% | 5.0% | ok |
-| `000531` | satellite | 1.00% | 1.00% | 5.0% | ok |
-| `000404` | satellite | 1.85% | 1.85% | 5.0% | ok |
-| `000522` | satellite | 0.03% | 0.03% | 3.0% | ok |
-| `000073` | satellite | 1.27% | 1.27% | 6.0% | ok |
-| `000219` | satellite | 1.24% | 1.24% | 6.0% | ok |
-| `000398` | satellite | 1.41% | 1.41% | 8.0% | ok |
-| `000433` | satellite | 1.58% | 1.58% | 8.0% | ok |
-| `000573` | satellite | 1.58% | 1.58% | 8.0% | ok |
-| `000566` | satellite | 0.38% | 0.38% | 6.0% | ok |
-| `000083` | satellite | 0.03% | 0.03% | 3.0% | ok |
-| `000368` | index_tool | 0.72% | 0.72% | 8.0% | ok |
-| `000311` | index_tool | 1.37% | 1.37% | 8.0% | ok |
-| `000312` | index_tool | 1.37% | 1.37% | 8.0% | ok |
-| `000313` | index_tool | 1.20% | 1.20% | 8.0% | ok |
-| `000656` | index_tool | 0.72% | 0.72% | 8.0% | ok |
-| `000176` | index_tool | 0.72% | 0.72% | 8.0% | ok |
-| `000512` | index_tool | 0.72% | 0.72% | 8.0% | ok |
+| `000017` | satellite | 1.68% | 1.68% | 3.0% | ok |
+| `000531` | satellite | 1.00% | 1.00% | 3.0% | ok |
+| `000404` | satellite | 1.85% | 1.85% | 3.0% | ok |
+| `000522` | satellite | 0.03% | 0.03% | 1.0% | ok |
+| `000073` | satellite | 1.27% | 1.27% | 5.0% | ok |
+| `000219` | satellite | 1.24% | 1.24% | 5.0% | ok |
+| `000398` | satellite | 1.41% | 1.41% | 5.0% | ok |
+| `000433` | satellite | 1.58% | 1.58% | 5.0% | ok |
+| `000573` | satellite | 1.58% | 1.58% | 5.0% | ok |
+| `000566` | satellite | 0.38% | 0.38% | 5.0% | ok |
+| `000083` | satellite | 0.03% | 0.03% | 1.0% | ok |
+| `000368` | index_tool | 0.72% | 0.72% | 3.0% | ok |
+| `000311` | index_tool | 1.37% | 1.37% | 3.0% | ok |
+| `000312` | index_tool | 1.37% | 1.37% | 3.0% | ok |
+| `000313` | index_tool | 1.20% | 1.20% | 3.0% | ok |
+| `000656` | index_tool | 0.72% | 0.72% | 3.0% | ok |
+| `000176` | index_tool | 0.72% | 0.72% | 3.0% | ok |
+| `000512` | index_tool | 0.72% | 0.72% | 3.0% | ok |
 | `000059` | index_tool | 0.03% | 0.03% | 3.0% | ok |
 
 </details>
@@ -128,14 +128,14 @@ method = cap_redistribute_v1, capped_count = 0, total_weight = 100.00%
 | 17 | `000294` | 1.89% | 1.89% | 8.0% | ok | core | active_equity_candidate, core_holding_candidate, defensive_anchor, satellite_alpha | core |
 | 18 | `000309` | 1.89% | 1.89% | 8.0% | ok | core | active_equity_candidate, core_holding_candidate, defensive_anchor, satellite_alpha | core |
 | 19 | `000457` | 1.89% | 1.89% | 8.0% | ok | core | active_equity_candidate, core_holding_candidate, defensive_anchor, satellite_alpha | core |
-| 20 | `000404` | 1.85% | 1.85% | 5.0% | ok | satellite | active_equity_candidate, core_holding_candidate, defensive_anchor, satellite_alpha, style_quality_growth | satellite |
+| 20 | `000404` | 1.85% | 1.85% | 3.0% | ok | satellite | active_equity_candidate, core_holding_candidate, defensive_anchor, satellite_alpha, style_quality_growth | satellite |
 
 ## Excluded (from draft) — Reason Top
 
 | reason | count |
 | --- | ---: |
-| `benchmark_data_missing` | 54 |
-| `review_required` | 4 |
+| `benchmark_data_missing` | 50 |
+| `manual_exclude` | 4 |
 
 ## observe / review_required 现状
 
@@ -171,7 +171,7 @@ observe 主要由低 coverage（factor_coverage_weight < 0.5）+ 数据不足组
    - 哪只应该降权？哪只应该升到 core？
 
 4. **排除原因可信度**
-   - benchmark_data_missing 是主因（54 只），是项目设计选择
+   - benchmark_data_missing 是主因（50 只），是项目设计选择
    - style_factor_coverage_low 是数据覆盖问题（95 只），不阻塞本次 acceptance
 
 ## 下一步

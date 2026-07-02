@@ -82,6 +82,20 @@ def _manual_bucket(review: Any) -> str | None:
     return str(target_bucket) if target_bucket else None
 
 
+def _manual_max_weight(review: Any) -> float | None:
+    if not isinstance(review, dict):
+        return None
+    if review.get("decision") != "accept":
+        return None
+    value = review.get("max_weight_pct")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_portfolio_draft(
     matrix_rows: list[dict[str, Any]],
     config: dict[str, Any] | None = None,
@@ -93,7 +107,9 @@ def build_portfolio_draft(
     excluded: list[dict[str, Any]] = []
     for row in matrix_rows:
         fund_code = row["fund_code"]
-        manual_bucket = _manual_bucket(role_reviews.get(fund_code))
+        review = role_reviews.get(fund_code)
+        manual_bucket = _manual_bucket(review)
+        manual_max_weight = _manual_max_weight(review)
         reasons = _exclude_reasons(row, cfg, manual_bucket)
         if reasons:
             excluded_row = {"fund_code": fund_code, "reasons": reasons}
@@ -106,7 +122,7 @@ def build_portfolio_draft(
             continue
         bucket = manual_bucket if manual_bucket in {"core", "satellite", "index_tool"} else _bucket(row)
         score = _score(row, cfg)
-        max_weight = _max_weight(row, cfg)
+        max_weight = manual_max_weight if manual_max_weight is not None else _max_weight(row, cfg)
         draft_row = {
             "fund_code": fund_code,
             "bucket": bucket,

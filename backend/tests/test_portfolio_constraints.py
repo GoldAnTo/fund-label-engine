@@ -73,3 +73,32 @@ def test_build_portfolio_draft_caps_high_risk_satellite() -> None:
     assert round(sum(row["draft_weight_pct"] for row in draft["rows"]), 6) == 100
     assert draft["excluded"][0]["fund_code"] == "000003"
     assert "benchmark_data_missing" in draft["excluded"][0]["reasons"]
+
+
+def test_build_portfolio_draft_uses_manual_max_weight_pct() -> None:
+    rows = [
+        {
+            "fund_code": "000001",
+            "allocation_status": "eligible",
+            "portfolio_roles": ["core_holding_candidate", "index_tool"],
+            "return_tags": ["alpha_positive"],
+            "risk_tags": [],
+            "watch_reasons": [],
+        }
+    ]
+
+    draft = build_portfolio_draft(
+        rows,
+        role_reviews={
+            "000001": {
+                "decision": "accept",
+                "target_bucket": "index_tool",
+                "max_weight_pct": 3.0,
+            }
+        },
+    )
+
+    [row] = draft["rows"]
+    assert row["bucket"] == "index_tool"
+    assert row["manual_role_review"] == "index_tool"
+    assert row["max_weight_pct"] == 3.0
