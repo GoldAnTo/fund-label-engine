@@ -224,6 +224,7 @@ export interface RelativeEligibilityResponse {
   run_id: string;
   total_funds: number;
   ready_count: number;
+  ready_approx_count?: number;
   blocked_count: number;
   status_counts: Record<string, number>;
   benchmark_source_counts: Record<string, number>;

@@ -4,6 +4,7 @@ import { fetchRelativeEligibility, fetchRuns, RelativeEligibilityResponse } from
 
 const STATUS_LABELS: Record<string, string> = {
   relative_label_ready: "可展示",
+  relative_label_ready_approx: "可展示（近似基准）",
   benchmark_source_missing: "缺少基准收益源",
   benchmark_mapping_required: "需要确认基准映射",
   benchmark_unresolved: "基准组件未解析",
@@ -33,6 +34,7 @@ function displayText(value: string) {
     .replaceAll("benchmark_source_status=missing_source", "缺少基准收益源")
     .replaceAll("benchmark_source_status=mapping_required", "需要确认基准映射")
     .replaceAll("benchmark_source_status=unresolved", "基准组件未解析")
+    .replaceAll("relative_label_ready_approx", "可展示（近似基准）")
     .replaceAll("relative_label_ready", "可展示")
     .replaceAll("benchmark_source_missing", "缺少基准收益源")
     .replaceAll("benchmark_mapping_required", "需要确认基准映射")
@@ -43,7 +45,9 @@ function displayText(value: string) {
 }
 
 function statusClass(value: string) {
-  return value === "relative_label_ready" ? "badge-observe" : "badge-manual_review";
+  return value === "relative_label_ready" || value === "relative_label_ready_approx"
+    ? "badge-observe"
+    : "badge-manual_review";
 }
 
 function actionText(statusValue: string, component: string) {
@@ -168,6 +172,12 @@ export default function ReadyPoolPage() {
             <span>可展示</span>
             <strong>{data.ready_count}</strong>
           </div>
+          {data.ready_approx_count ? (
+            <div className="metric-tile metric-ready">
+              <span>可展示（近似基准）</span>
+              <strong>{data.ready_approx_count}</strong>
+            </div>
+          ) : null}
           <div className="metric-tile metric-blocked">
             <span>暂不可展示</span>
             <strong>{data.blocked_count}</strong>
