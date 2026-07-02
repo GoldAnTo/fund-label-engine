@@ -32,6 +32,12 @@ async function postJSON(url: string, body: unknown) {
   return res.json();
 }
 
+async function deleteJSON(url: string) {
+  const res = await fetch(`${BASE}${url}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
 export interface Run {
   run_id: string;
   run_at: string;
@@ -395,6 +401,16 @@ export async function postPortfolioRoleReview(
   payload: PortfolioRoleReviewPayload
 ): Promise<PortfolioRoleReview> {
   return postJSON(`/v1/runs/${runId}/portfolio-role-reviews`, payload);
+}
+
+export async function deletePortfolioRoleReview(
+  runId: string,
+  fundCode: string,
+  roleCode: string
+): Promise<{ deleted: boolean }> {
+  return deleteJSON(
+    `/v1/runs/${runId}/portfolio-role-reviews/${encodeURIComponent(fundCode)}/${encodeURIComponent(roleCode)}`
+  );
 }
 
 export interface RunSummary {

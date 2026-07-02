@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  deletePortfolioRoleReview,
   fetchPortfolioDraft,
   fetchPortfolioMatrix,
   fetchPortfolioRoleReviews,
@@ -158,6 +159,22 @@ export default function PortfolioWorkbenchPage() {
     }
   };
 
+  const clearReview = async (review: PortfolioRoleReview) => {
+    if (!runId) return;
+    setSavingFund(review.fund_code);
+    setError(null);
+    try {
+      await deletePortfolioRoleReview(runId, review.fund_code, review.role_code);
+      const nextDraft = await fetchPortfolioDraft(runId);
+      setReviews((current) => current.filter((item) => item.fund_code !== review.fund_code || item.role_code !== review.role_code));
+      setDraft(nextDraft);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingFund(null);
+    }
+  };
+
   const totalDraftWeight = draft?.rows.reduce((sum, row) => sum + row.draft_weight_pct, 0) ?? 0;
 
   return (
@@ -290,9 +307,13 @@ export default function PortfolioWorkbenchPage() {
                         <>
                           <strong>{draftRow.draft_weight_pct.toFixed(2)}%</strong>
                           <div className="muted">{bucketLabel(draftRow.bucket)}，上限 {draftRow.max_weight_pct.toFixed(1)}%</div>
+                          {draftRow.manual_role_review && <span className="manual-override-badge">人工覆盖：{bucketLabel(draftRow.manual_role_review)}</span>}
                         </>
                       ) : (
-                        <span className="muted">未进入草案</span>
+                        <>
+                          <span className="muted">未进入草案</span>
+                          {review?.target_bucket === "exclude" && <span className="manual-override-badge">人工覆盖：排除</span>}
+                        </>
                       )}
                     </td>
                     <td>
@@ -309,7 +330,7 @@ export default function PortfolioWorkbenchPage() {
                     <td>
                       <div className="review-controls">
                         <select
-                          value={review?.decision ?? ""}
+                          value={review?.target_bucket ?? ""}
                           onChange={(e) => saveReview(row.fund_code, e.target.value)}
                           disabled={savingFund === row.fund_code || !reviewer.trim()}
                         >
@@ -318,7 +339,18 @@ export default function PortfolioWorkbenchPage() {
                             <option key={decision.value} value={decision.value}>{decision.label}</option>
                           ))}
                         </select>
-                        {review && <span className="muted">{review.reviewer}</span>}
+                        {review && (
+                          <div className="manual-override-row">
+                            <span className="muted">{review.reviewer} 覆盖为 {bucketLabel(review.target_bucket)}</span>
+                            <button
+                              className="secondary compact-button"
+                              onClick={() => clearReview(review)}
+                              disabled={savingFund === row.fund_code}
+                            >
+                              撤销
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </td>
                   </tr>

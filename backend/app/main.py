@@ -312,6 +312,23 @@ def create_app(
                 return review
         raise HTTPException(status_code=500, detail="portfolio role review was not persisted")
 
+    @app.delete("/v1/runs/{run_id}/portfolio-role-reviews/{fund_code}/{role_code}")
+    def delete_portfolio_role_review(
+        run_id: str,
+        fund_code: str,
+        role_code: str,
+        reader: LabelRunReader = Depends(get_reader),
+        writer: LabelRunWriter = Depends(get_writer),
+    ) -> dict[str, Any]:
+        if reader.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        deleted = writer.delete_portfolio_role_review(
+            run_id=run_id,
+            fund_code=fund_code,
+            role_code=role_code,
+        )
+        return {"run_id": run_id, "fund_code": fund_code, "role_code": role_code, "deleted": deleted}
+
     @app.get("/v1/runs/{run_id}/coverage")
     def get_run_coverage(
         run_id: str,

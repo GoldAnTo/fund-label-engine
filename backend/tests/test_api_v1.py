@@ -507,6 +507,16 @@ def test_portfolio_role_reviews_api_round_trip(seeded_run) -> None:
     assert reviews[0]["role_code"] == "satellite_alpha"
     assert reviews[0]["max_weight_pct"] == 8.0
 
+    deleted = client.delete(
+        f"/v1/runs/{run_id}/portfolio-role-reviews/000001/satellite_alpha"
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+
+    listed_after_delete = client.get(f"/v1/runs/{run_id}/portfolio-role-reviews")
+    assert listed_after_delete.status_code == 200
+    assert listed_after_delete.json()["reviews"] == []
+
 
 def test_label_definitions_endpoint_returns_thresholds(seeded_run) -> None:
     db, _ = seeded_run

@@ -498,6 +498,23 @@ class LabelRunWriter:
             )
             conn.commit()
 
+    def delete_portfolio_role_review(
+        self,
+        *,
+        run_id: str,
+        fund_code: str,
+        role_code: str,
+    ) -> bool:
+        self.ensure_schema()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM portfolio_role_reviews "
+                "WHERE run_id = ? AND fund_code = ? AND role_code = ?",
+                (run_id, fund_code, role_code),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
     def finish_run(self, run_id: str, status: str = "succeeded") -> None:
         with self._connect() as conn:
             conn.execute(

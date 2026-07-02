@@ -415,6 +415,29 @@ button:disabled {
   gap: 6px;
 }
 
+.manual-override-badge {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: oklch(0.36 0.08 255);
+  background: oklch(0.94 0.035 255);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.manual-override-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.compact-button {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
 @media (max-width: 960px) {
   .portfolio-metrics,
   .portfolio-grid,
