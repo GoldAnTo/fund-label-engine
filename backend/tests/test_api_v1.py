@@ -263,6 +263,9 @@ def test_frontend_dist_is_mounted_when_provided(
     ready_pool = client.get("/ready-pool")
     assert ready_pool.status_code == 200
     assert b"id=root" in ready_pool.content
+    portfolio = client.get("/portfolio")
+    assert portfolio.status_code == 200
+    assert b"id=root" in portfolio.content
     fund_report = client.get("/runs/run-1/funds/000001")
     assert fund_report.status_code == 200
     assert b"id=root" in fund_report.content

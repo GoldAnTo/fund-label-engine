@@ -6,6 +6,7 @@ import FundReportPage from "./pages/FundReportPage";
 import ReadyPoolPage from "./pages/ReadyPoolPage";
 import SearchPage from "./pages/SearchPage";
 import ReviewQueuePage from "./pages/ReviewQueuePage";
+import PortfolioWorkbenchPage from "./pages/PortfolioWorkbenchPage";
 
 export default function App() {
   return (
@@ -22,7 +23,8 @@ export default function App() {
       </aside>
       <main className="main">
         <Routes>
-          <Route path="/" element={<Navigate to="/ready-pool" replace />} />
+          <Route path="/" element={<Navigate to="/portfolio" replace />} />
+          <Route path="/portfolio" element={<PortfolioWorkbenchPage />} />
           <Route path="/runs" element={<RunsPage />} />
           <Route path="/ready-pool" element={<ReadyPoolPage />} />
           <Route path="/runs/:runId" element={<RunDetailPage />} />

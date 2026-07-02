@@ -320,3 +320,114 @@ button:disabled {
 .metric-blocked strong {
   color: oklch(0.54 0.13 65);
 }
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: oklch(0.48 0.08 255);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.portfolio-workbench {
+  display: grid;
+  gap: 20px;
+}
+
+.portfolio-hero {
+  background: linear-gradient(135deg, oklch(0.995 0.004 255), oklch(0.965 0.018 250));
+  border: 1px solid oklch(0.88 0.025 250);
+}
+
+.portfolio-toolbar {
+  justify-content: flex-end;
+  min-width: 320px;
+}
+
+.portfolio-toolbar input {
+  width: 150px;
+}
+
+.portfolio-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.portfolio-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 20px;
+}
+
+.portfolio-panel {
+  margin-bottom: 0;
+}
+
+.portfolio-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.portfolio-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.draft-buckets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.draft-bucket {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border-radius: 10px;
+  background: oklch(0.975 0.012 255);
+  border: 1px solid oklch(0.91 0.018 255);
+}
+
+.draft-bucket span,
+.draft-bucket small {
+  color: oklch(0.48 0.025 255);
+}
+
+.draft-bucket strong {
+  color: oklch(0.28 0.06 255);
+  font-size: 24px;
+}
+
+.portfolio-table-card {
+  overflow-x: auto;
+}
+
+.portfolio-table {
+  min-width: 1050px;
+}
+
+.review-controls {
+  display: grid;
+  gap: 6px;
+}
+
+@media (max-width: 960px) {
+  .portfolio-metrics,
+  .portfolio-grid,
+  .draft-buckets {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolio-hero {
+    display: grid;
+  }
+
+  .portfolio-toolbar {
+    justify-content: flex-start;
+    min-width: 0;
+  }
+}

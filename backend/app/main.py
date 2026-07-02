@@ -907,6 +907,10 @@ def create_app(
         def serve_ready_pool() -> FileResponse:
             return _frontend_index()
 
+        @app.get("/portfolio", include_in_schema=False)
+        def serve_portfolio_route() -> FileResponse:
+            return _frontend_index()
+
         @app.get("/runs/{full_path:path}", include_in_schema=False)
         def serve_run_route(full_path: str) -> FileResponse:
             return _frontend_index()

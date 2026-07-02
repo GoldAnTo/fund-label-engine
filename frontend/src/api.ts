@@ -312,6 +312,84 @@ export async function fetchReviewQueue(runId: string): Promise<SearchResponse> {
   return json(`/v1/runs/${runId}/review-queue`);
 }
 
+export interface PortfolioMatrixRow {
+  fund_code: string;
+  allocation_status: string;
+  portfolio_roles: string[];
+  style_tags: string[];
+  return_tags: string[];
+  risk_tags: string[];
+  data_tags: string[];
+  blocking_reasons: string[];
+  watch_reasons: string[];
+  features: Record<string, number | string | null>;
+}
+
+export interface PortfolioMatrixResponse {
+  run_id: string;
+  run_at: string;
+  rule_version: string;
+  status: string;
+  total_count: number;
+  rows: PortfolioMatrixRow[];
+}
+
+export interface PortfolioDraftRow {
+  fund_code: string;
+  bucket: "core" | "satellite" | "index_tool" | string;
+  draft_weight_pct: number;
+  max_weight_pct: number;
+  score: number;
+  portfolio_roles: string[];
+  risk_tags: string[];
+}
+
+export interface PortfolioDraftResponse {
+  run_id: string;
+  run_at: string;
+  rule_version: string;
+  objective: string;
+  config_version: string;
+  rows: PortfolioDraftRow[];
+  excluded: { fund_code: string; reasons: string[] }[];
+}
+
+export interface PortfolioRoleReview {
+  run_id: string;
+  fund_code: string;
+  decision: string;
+  reviewer: string;
+  comment: string;
+  reviewed_at: string;
+}
+
+export interface PortfolioRoleReviewPayload {
+  fund_code: string;
+  decision: string;
+  reviewer: string;
+  comment?: string;
+}
+
+export async function fetchPortfolioMatrix(runId: string): Promise<PortfolioMatrixResponse> {
+  return json(`/v1/runs/${runId}/portfolio-matrix`);
+}
+
+export async function fetchPortfolioDraft(runId: string): Promise<PortfolioDraftResponse> {
+  return json(`/v1/runs/${runId}/portfolio-draft`);
+}
+
+export async function fetchPortfolioRoleReviews(runId: string): Promise<PortfolioRoleReview[]> {
+  const data: { reviews: PortfolioRoleReview[] } = await json(`/v1/runs/${runId}/portfolio-role-reviews`);
+  return data.reviews;
+}
+
+export async function postPortfolioRoleReview(
+  runId: string,
+  payload: PortfolioRoleReviewPayload
+): Promise<PortfolioRoleReview> {
+  return postJSON(`/v1/runs/${runId}/portfolio-role-reviews`, payload);
+}
+
 export interface RunSummary {
   run_id: string;
   run_at: string;
