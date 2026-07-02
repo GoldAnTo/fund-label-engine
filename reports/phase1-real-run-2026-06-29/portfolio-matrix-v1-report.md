@@ -43,6 +43,12 @@ total_count: 142
 | `active_equity_waiting_style_rule` | 66 | `000001`, `000006`, `000011`, `000020`, `000021`, `000029`, `000031`, `000063` | Active equity candidates still blocked by pending style rules. |
 | `benchmark_data_missing` | 28 | `000001`, `000011`, `000021`, `000030`, `000042`, `000056`, `000073`, `000082` | Relative labels should not be trusted for these funds until benchmark data is completed. |
 
+## Style Pending Reasons
+
+| reason | count |
+| --- | ---: |
+| `style_weight_below_formal_threshold` | 122 |
+
 ## Watch Reasons
 
 | item | count |

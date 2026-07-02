@@ -61,6 +61,8 @@ def test_render_portfolio_matrix_report_smoke(tmp_path: Path) -> None:
     assert f"run_id: `{run_id}`" in text
     assert "| `eligible` | 1 |" in text
     assert "## Role Quality Checks" in text
+    assert "## Style Pending Reasons" in text
+    assert "| reason | count |" in text
     assert "eligible_with_allocation_risk_review" in text
     assert "core_holding_candidate" in text
     assert "satellite_alpha" in text

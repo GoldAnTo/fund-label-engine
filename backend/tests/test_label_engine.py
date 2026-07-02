@@ -423,6 +423,35 @@ def test_deep_value_label_emits_from_precomputed_factor_exposures():
     assert ev.source == "fund_factor_exposures"
 
 
+def test_formal_style_label_does_not_emit_pending_rule_boundary():
+    fund = _style_fund(stock_factors=[])
+    fund = FundInput(
+        **{
+            **fund.__dict__,
+            "factor_exposures": [
+                {
+                    "factor_code": "quality_growth_weight",
+                    "exposure_value": 0.65,
+                    "coverage_weight": 0.90,
+                    "as_of_date": "2026-06-30",
+                },
+                {
+                    "factor_code": "factor_coverage_weight",
+                    "exposure_value": 0.90,
+                    "coverage_weight": 0.90,
+                    "as_of_date": "2026-06-30",
+                },
+            ],
+        }
+    )
+
+    result = LabelEngine().evaluate(fund)
+    codes = label_codes(result)
+
+    assert "quality_growth" in codes
+    assert "style_pending_rule_definition" not in codes
+
+
 def _style_history_fund(periods: list[tuple[str, float, float, float, float]]) -> FundInput:
     exposures = []
     for report_date, deep, quality, dividend, coverage in periods:

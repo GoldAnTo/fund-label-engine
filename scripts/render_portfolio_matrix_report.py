@@ -23,6 +23,21 @@ ALLOCATION_RISK_REVIEW_TAGS = CORE_RISK_REVIEW_TAGS | {
     "holding_concentration_high",
     "industry_concentration_high",
 }
+STYLE_WEIGHT_KEYS = (
+    "quality_growth_weight",
+    "deep_value_weight",
+    "dividend_steady_weight",
+)
+
+
+def _style_pending_reason(row: dict[str, Any]) -> str:
+    features = row.get("features", {})
+    has_style_weight = any(features.get(key) is not None for key in STYLE_WEIGHT_KEYS)
+    if not has_style_weight:
+        return "style_weight_missing"
+    if not row.get("style_tags"):
+        return "style_weight_below_formal_threshold"
+    return "style_label_present_but_watch_not_cleared"
 
 
 def _join(values: Any) -> str:
@@ -164,6 +179,28 @@ def _format_quality_checks(rows: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def _format_style_pending_reasons(rows: list[dict[str, Any]]) -> list[str]:
+    pending = [
+        row
+        for row in rows
+        if "style_pending_rule_definition" in row.get("watch_reasons", [])
+    ]
+    counts = Counter(_style_pending_reason(row) for row in pending)
+    lines = [
+        "## Style Pending Reasons",
+        "",
+        "| reason | count |",
+        "| --- | ---: |",
+    ]
+    if not counts:
+        lines.append("| (none) | 0 |")
+    else:
+        for reason, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            lines.append(f"| `{reason}` | {count} |")
+    lines.append("")
+    return lines
+
+
 def render_report(
     *,
     output_db: str | Path,
@@ -216,6 +253,7 @@ def render_report(
     lines += _format_count_table("Allocation Status", status_counts)
     lines += _format_count_table("Portfolio Roles", role_counts)
     lines += _format_quality_checks(rows)
+    lines += _format_style_pending_reasons(rows)
     lines += _format_count_table("Watch Reasons", watch_counts)
     lines += _format_count_table("Risk Tags", risk_counts)
     lines += _format_count_table("Blocking Reasons", blocking_counts)
