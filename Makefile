@@ -99,7 +99,7 @@ run-batch-v1: copy-source
 	    --deep-value-weight-min 0.4 \
 	    --quality-growth-weight-min 0.4
 
-refresh-benchmark: copy-source
+refresh-benchmark: copy-source seed-benchmark-approx
 	@mkdir -p $(BENCHMARK_REPORT_DIR)
 	$(PYTHON) scripts/fetch_benchmark_returns.py \
 	  --db $(SOURCE_DB) \
@@ -107,6 +107,14 @@ refresh-benchmark: copy-source
 	  --start-date $(BENCHMARK_START) \
 	  --end-date $(BENCHMARK_END) \
 	  --mapping-csv $(BENCHMARK_MAPPING_CSV)
+
+seed-benchmark-approx: copy-source
+	@echo "seeding approx bond components (approx:cbond_composite_for_*) into $(SOURCE_DB)"
+	$(PYTHON) scripts/fetch_cbond_index_returns.py \
+	  --db $(SOURCE_DB) \
+	  --start-date $(BENCHMARK_START) \
+	  --end-date $(BENCHMARK_END) \
+	  --include-approx
 
 import-authorized-benchmark-components:
 	$(PYTHON) scripts/import_benchmark_component_returns.py \

@@ -9,6 +9,7 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -700,6 +701,60 @@ def load_local_component_returns(
             conn.close()
 
 
+def upsert_component_returns(
+    conn: sqlite3.Connection,
+    component_code: str,
+    rows: list[dict[str, str | float]],
+    *,
+    source: str,
+) -> int:
+    """把成分日收益落库到 benchmark_component_returns（统一入口）。
+
+    之前 fetch_benchmark_returns 合成后只写 benchmark_returns，不写
+    benchmark_component_returns，导致一旦 source DB 被 copy-source 覆盖或
+    其他脚本清空 component_returns，就再无重合成机会。修复后：
+    所有由外部网络源拉来的成分日收益都通过本函数持久化。
+
+    - 同一 (component_code, trade_date) 二次写入覆盖为最新 source；
+    - 表不存在时自动创建（保证脚本可以从零启动）；
+    - 不负责写 synthetic: 路径（那是 calendar 派生）；
+    - 不负责写 local: 路径（因为本身就是从表里读的，循环无意义）。
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS benchmark_component_returns ("
+        "component_code TEXT, trade_date TEXT, daily_return REAL, "
+        "source TEXT, fetched_at TEXT)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_benchmark_component_returns_code_date "
+        "ON benchmark_component_returns(component_code, trade_date)"
+    )
+    written = 0
+    now = datetime.now(tz=timezone.utc).isoformat()
+    for row in rows:
+        trade_date = str(row["trade_date"])
+        daily_return = float(row["daily_return"])
+        conn.execute(
+            "INSERT INTO benchmark_component_returns"
+            "(component_code, trade_date, daily_return, source, fetched_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(component_code, trade_date) DO UPDATE SET "
+            "daily_return=excluded.daily_return, source=excluded.source, "
+            "fetched_at=excluded.fetched_at",
+            (component_code, trade_date, daily_return, source, now),
+        )
+        written += 1
+    return written
+
+
+def _ensure_component_returns_unique_index(conn: sqlite3.Connection) -> None:
+    """确保 (component_code, trade_date) 唯一约束存在，ON CONFLICT 才生效。"""
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_benchmark_component_returns_code_date "
+        "ON benchmark_component_returns(component_code, trade_date)"
+    )
+
+
 def _load_existing_component_returns(
     conn: sqlite3.Connection,
     benchmark_code: str,
@@ -736,6 +791,10 @@ def _fetch_or_reuse_component_returns(
     if local_rows:
         return local_rows
     if component.secid.startswith("local:"):
+        # 本身就是从 component_returns 读的；没数据就退到合成行兜底，不再循环 upsert
+        return _load_existing_component_returns(conn, component.benchmark_code)
+    if component.secid.startswith("synthetic:"):
+        # synthetic 没有日收益序列，不落库
         return _load_existing_component_returns(conn, component.benchmark_code)
     try:
         rows = fetch_component_returns(component.secid, start_date, end_date)
@@ -743,6 +802,18 @@ def _fetch_or_reuse_component_returns(
         print(f"WARN fetch_failed {component.secid} {component.benchmark_name}: {exc}")
         rows = []
     if rows:
+        # 关键：把网络拉来的成分日收益持久化到 component_returns，
+        # 这样下次重跑（即使该网络源抖动）也能从本地表读出历史行。
+        _ensure_component_returns_unique_index(conn)
+        upsert_component_returns(
+            conn,
+            component.benchmark_code,
+            rows,
+            source=f"eastmoney:{component.secid}"
+            if not component.secid.startswith("sina:")
+            else component.secid,
+        )
+        conn.commit()
         return rows
     reused = _load_existing_component_returns(conn, component.benchmark_code)
     if reused:

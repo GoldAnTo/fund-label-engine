@@ -1,13 +1,13 @@
 # Benchmark Gap Portfolio Report
 
-run_id: `eecc91372bc249389e43c12674eead93`
-benchmark_data_missing_count: 7
+run_id: `50f9b72de7104761869dc3e86e8a36d2`
+benchmark_data_missing_count: 54
 
 ## Required Fix Counts
 
 | required_fix | count |
 | --- | ---: |
-| `complete_benchmark_mapping` | 7 |
+| `complete_benchmark_mapping` | 54 |
 
 ## Benchmark Gap Funds
 
@@ -15,11 +15,58 @@ benchmark_data_missing_count: 7
 | --- | --- | --- | --- | --- | ---: | --- | --- | --- |
 | `000001` | `observe` | active_equity_candidate | long_term_return_strong | drawdown_high, industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
 | `000011` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000020` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
 | `000021` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000039` | `observe` |  | long_term_return_strong, sharpe_high | industry_concentration_observe, volatility_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
 | `000042` | `observe` | index_tool, low_cost | long_term_return_strong, sharpe_high | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000063` | `observe` | active_equity_candidate | long_term_return_strong, sharpe_high | drawdown_high, industry_concentration_observe, volatility_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000066` | `observe` |  | long_term_return_strong, sharpe_high | industry_concentration_high, volatility_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
 | `000082` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000117` | `observe` | active_equity_candidate, core_holding_candidate |  | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
 | `000124` | `observe` | active_equity_candidate |  | drawdown_high, holding_concentration_high, industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
-| `000368` | `observe` | index_tool, low_cost | long_term_return_strong, sharpe_high | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000127` | `observe` | active_equity_candidate, core_holding_candidate, style_dividend_steady | long_term_return_strong, sharpe_high |  | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000166` | `observe` |  | long_term_return_strong, sharpe_high | industry_concentration_high, volatility_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000167` | `observe` |  | long_term_return_strong, sharpe_high | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000173` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000195` | `observe` | low_cost | long_term_return_strong, sharpe_high | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000196` | `observe` |  | long_term_return_strong, sharpe_high | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000199` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000209` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000214` | `observe` | active_equity_candidate, core_holding_candidate, low_cost | long_term_return_strong, sharpe_high | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000242` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000251` | `observe` | active_equity_candidate, core_holding_candidate, style_deep_value, style_high_dividend_financial |  | holding_concentration_high, industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000264` | `observe` | active_equity_candidate, core_holding_candidate, defensive_anchor |  |  | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000273` | `observe` |  | long_term_return_strong, sharpe_high | drawdown_high, industry_concentration_high, volatility_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000336` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000354` | `observe` | active_equity_candidate, core_holding_candidate, style_quality_growth | long_term_return_strong, sharpe_high | holding_concentration_high, industry_concentration_high, volatility_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000408` | `observe` |  | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000409` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000411` | `observe` | active_equity_candidate, core_holding_candidate, style_quality_growth | long_term_return_strong, sharpe_high | industry_concentration_high, volatility_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000418` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000423` | `observe` | low_cost |  | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000431` | `observe` |  | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000462` | `observe` |  | long_term_return_strong, sharpe_high | industry_concentration_observe, volatility_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000471` | `observe` | active_equity_candidate, core_holding_candidate |  | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000496` | `observe` |  | long_term_return_strong, sharpe_high | industry_concentration_high, volatility_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000511` | `observe` | low_cost |  | drawdown_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000529` | `observe` | active_equity_candidate, core_holding_candidate |  | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000532` | `observe` | active_equity_candidate, core_holding_candidate |  | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000534` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000535` | `observe` |  | long_term_return_strong, sharpe_high | drawdown_high, industry_concentration_high, volatility_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000538` | `observe` |  |  | drawdown_high, holding_concentration_high, industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000551` | `observe` |  |  | drawdown_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000567` | `observe` | defensive_anchor |  |  | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000586` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000589` | `observe` |  | long_term_return_strong, sharpe_high |  | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000598` | `observe` |  | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000628` | `observe` | active_equity_candidate, core_holding_candidate, defensive_anchor |  | holding_concentration_high, industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000646` | `observe` |  | long_term_return_strong, sharpe_high | industry_concentration_high, volatility_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000652` | `observe` | active_equity_candidate, core_holding_candidate | long_term_return_strong, sharpe_high | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `000684` | `observe` |  |  | drawdown_high, holding_concentration_high, industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `100038` | `review_required` | index_tool, low_cost, needs_review |  | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `100039` | `review_required` | needs_review |  | industry_concentration_observe | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `100056` | `review_required` | needs_review |  | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
+| `100060` | `review_required` | needs_review |  | industry_concentration_high | 0 | `triggered:threshold_met` | `complete_benchmark_mapping` |  |
 
 ## Approximate Benchmark Funds
 
