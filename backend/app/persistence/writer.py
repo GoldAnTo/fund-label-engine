@@ -463,6 +463,41 @@ class LabelRunWriter:
             conn.commit()
         return review_id
 
+    def write_portfolio_role_review(
+        self,
+        *,
+        run_id: str,
+        fund_code: str,
+        role_code: str,
+        decision: str,
+        target_bucket: str,
+        max_weight_pct: float,
+        rationale: str,
+        reviewer: str,
+    ) -> None:
+        self.ensure_schema()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO portfolio_role_reviews (
+                    run_id, fund_code, role_code, decision, target_bucket,
+                    max_weight_pct, rationale, reviewer, reviewed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    run_id,
+                    fund_code,
+                    role_code,
+                    decision,
+                    target_bucket,
+                    max_weight_pct,
+                    rationale,
+                    reviewer,
+                ),
+            )
+            conn.commit()
+
     def finish_run(self, run_id: str, status: str = "succeeded") -> None:
         with self._connect() as conn:
             conn.execute(

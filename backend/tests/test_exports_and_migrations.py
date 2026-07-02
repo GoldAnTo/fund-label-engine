@@ -212,6 +212,38 @@ def test_migrations_create_equity_style_contributions_table(seeded_run) -> None:
     assert "fund_equity_style_contributions" in tables
 
 
+def test_migrations_create_portfolio_role_reviews_table(tmp_path: Path) -> None:
+    db = tmp_path / "portfolio-role-reviews.sqlite"
+    sqlite3.connect(db).executescript(
+        """
+        CREATE TABLE label_runs (run_id TEXT PRIMARY KEY);
+        CREATE TABLE label_definitions (
+            label_code TEXT, rule_version TEXT,
+            PRIMARY KEY (label_code, rule_version)
+        );
+        """
+    )
+    run_migrations(db)
+
+    with sqlite3.connect(db) as conn:
+        cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(portfolio_role_reviews)").fetchall()
+        }
+
+    assert {
+        "run_id",
+        "fund_code",
+        "role_code",
+        "decision",
+        "target_bucket",
+        "max_weight_pct",
+        "rationale",
+        "reviewer",
+        "reviewed_at",
+    }.issubset(cols)
+
+
 def test_reader_fund_report_includes_label_calculation_states(seeded_run) -> None:
     db, run_id = seeded_run
 

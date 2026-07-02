@@ -245,6 +245,28 @@ class LabelRunReader:
                 return []
         return [dict(row) for row in rows]
 
+    def list_portfolio_role_reviews(
+        self,
+        run_id: str,
+        fund_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        sql = (
+            "SELECT run_id, fund_code, role_code, decision, target_bucket, "
+            "max_weight_pct, rationale, reviewer, reviewed_at "
+            "FROM portfolio_role_reviews WHERE run_id = ?"
+        )
+        params: list[Any] = [run_id]
+        if fund_code:
+            sql += " AND fund_code = ?"
+            params.append(fund_code)
+        sql += " ORDER BY fund_code, role_code"
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(sql, params).fetchall()
+            except sqlite3.OperationalError:
+                return []
+        return [dict(row) for row in rows]
+
     def get_fund_report(self, run_id: str, fund_code: str) -> dict[str, Any] | None:
         payload = self.get_fund_labels(run_id, fund_code)
         if payload is None:
