@@ -296,6 +296,121 @@ def test_style_exposure_observe_blocks_formal_style_label():
     assert "quality_growth" not in codes
 
 
+def test_style_balanced_replaces_pending_when_two_styles_above_min():
+    fund = _style_fund(stock_factors=[])
+    fund = FundInput(
+        **{
+            **fund.__dict__,
+            "factor_exposures": [
+                {
+                    "factor_code": "deep_value_weight",
+                    "exposure_value": 0.35,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-01",
+                },
+                {
+                    "factor_code": "quality_growth_weight",
+                    "exposure_value": 0.25,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-01",
+                },
+                {
+                    "factor_code": "dividend_steady_weight",
+                    "exposure_value": 0.05,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-01",
+                },
+                {
+                    "factor_code": "factor_coverage_weight",
+                    "exposure_value": 0.80,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-01",
+                },
+            ],
+        }
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "style_balanced" in codes
+    assert "style_pending_rule_definition" not in codes
+    assert "deep_value" not in codes
+    assert "quality_growth" not in codes
+    ev = evidence_for(result, "style_balanced")[0]
+    assert ev.metric == "style_balanced_weight_count"
+
+
+def test_style_pending_retained_when_only_one_style_above_min():
+    fund = _style_fund(stock_factors=[])
+    fund = FundInput(
+        **{
+            **fund.__dict__,
+            "factor_exposures": [
+                {
+                    "factor_code": "deep_value_weight",
+                    "exposure_value": 0.35,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-01",
+                },
+                {
+                    "factor_code": "quality_growth_weight",
+                    "exposure_value": 0.10,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-01",
+                },
+                {
+                    "factor_code": "dividend_steady_weight",
+                    "exposure_value": 0.05,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-01",
+                },
+                {
+                    "factor_code": "factor_coverage_weight",
+                    "exposure_value": 0.80,
+                    "coverage_weight": 0.80,
+                    "as_of_date": "2026-06-01",
+                },
+            ],
+        }
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "style_pending_rule_definition" in codes
+    assert "style_balanced" not in codes
+
+
+def test_style_balanced_from_raw_stock_factors_replaces_pending():
+    fund = _style_fund(
+        stock_factors=[
+            {
+                "stock_code": "600519",
+                "pb": 1.2,
+                "valuation_percentile": 0.20,
+                "roe": 0.05,
+                "revenue_growth": 0.05,
+                "dividend_yield": 0.01,
+            },
+            {
+                "stock_code": "601398",
+                "pb": 8.0,
+                "valuation_percentile": 0.90,
+                "roe": 0.20,
+                "revenue_growth": 0.20,
+                "dividend_yield": 0.01,
+            },
+        ]
+    )
+
+    result = LabelEngine().evaluate(fund)
+
+    codes = label_codes(result)
+    assert "style_balanced" in codes
+    assert "style_pending_rule_definition" not in codes
+
+
 def test_factor_exposure_lookup_uses_latest_report_date_when_as_of_ties():
     fund = _style_fund(stock_factors=[])
     fund = FundInput(

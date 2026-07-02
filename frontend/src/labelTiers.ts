@@ -35,6 +35,7 @@ const OBSERVE_CODES = new Set([
   "style_stable",
   "style_drift",
   "style_recent_shift",
+  "style_balanced",
   "style_exposure_observe",
   "style_exposure_low_coverage",
 ]);

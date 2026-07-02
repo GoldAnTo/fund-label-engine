@@ -68,6 +68,8 @@ class RuleConfig:
     sector_coverage_min: float = 0.7
     style_exposure_low_coverage_threshold: float = 0.5
     style_exposure_formal_coverage_threshold: float = 0.7
+    style_balanced_weight_min: float = 0.20
+    style_balanced_min_count: int = 2
     style_stability_min_periods: int = 2
     style_drift_delta_threshold: float = 0.25
     style_recent_shift_threshold: float = 0.20
@@ -252,6 +254,10 @@ class RuleConfig:
             "sector_mapping_insufficient": {
                 "sector_coverage_min": self.sector_coverage_min,
             },
+            "style_balanced": {
+                "style_balanced_weight_min": self.style_balanced_weight_min,
+                "style_balanced_min_count": self.style_balanced_min_count,
+            },
             "style_exposure_low_coverage": {
                 "coverage_weight_max_exclusive": self.style_exposure_low_coverage_threshold,
             },
@@ -372,6 +378,13 @@ DEFAULT_LABEL_DEFINITIONS = (
         "category": "style_boundary",
         "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
         "description": "股票因子或基金级暴露存在，但高级风格标签未达阈值。",
+    },
+    {
+        "label_code": "style_balanced",
+        "label_name": "均衡风格",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "已测量风格暴露，但无单一主导风格达阈值，且至少两类风格权重均衡分布。",
     },
     {
         "label_code": "style_exposure_low_coverage",
@@ -2515,6 +2528,50 @@ class LabelEngine:
                 )
             )
 
+    def _maybe_emit_style_balanced(
+        self,
+        *,
+        labels: list[LabelResult],
+        evidence: list[EvidenceItem],
+        style_weights: dict[str, float],
+        source: str,
+    ) -> bool:
+        cfg = self._rule_config
+        balanced_count = sum(
+            1 for value in style_weights.values() if value >= cfg.style_balanced_weight_min
+        )
+        if balanced_count < cfg.style_balanced_min_count:
+            return False
+        labels.append(
+            LabelResult(
+                label_code="style_balanced",
+                label_name="均衡风格",
+                category="holding_style",
+                confidence=1.0,
+                status="observe",
+            )
+        )
+        detail = ", ".join(
+            f"{code}={value:.0%}" for code, value in style_weights.items()
+        )
+        evidence.append(
+            EvidenceItem(
+                label_code="style_balanced",
+                metric="style_balanced_weight_count",
+                value=balanced_count,
+                threshold=(
+                    f"at_least_{cfg.style_balanced_min_count}"
+                    f"_styles_ge_{cfg.style_balanced_weight_min:.0%}"
+                ),
+                source=source,
+                message=(
+                    f"无单一主导风格达阈值，但有 {balanced_count} 类风格权重 ≥ "
+                    f"{cfg.style_balanced_weight_min:.0%}，判为均衡风格。{detail}。"
+                ),
+            )
+        )
+        return True
+
     def _add_style_boundary_labels(
         self,
         fund: FundInput,
@@ -2833,6 +2890,17 @@ class LabelEngine:
                 )
 
         if not triggered:
+            if self._maybe_emit_style_balanced(
+                labels=labels,
+                evidence=evidence,
+                style_weights={
+                    "deep_value": deep_value_weight,
+                    "quality_growth": quality_weight,
+                    "dividend_steady": dividend_weight,
+                },
+                source="fund_factor_exposures",
+            ):
+                return
             labels.append(
                 LabelResult(
                     label_code="style_pending_rule_definition",
@@ -3052,6 +3120,17 @@ class LabelEngine:
             )
 
         if not triggered:
+            if self._maybe_emit_style_balanced(
+                labels=labels,
+                evidence=evidence,
+                style_weights={
+                    "deep_value": deep_value_weight,
+                    "quality_growth": quality_weight,
+                    "dividend_steady": dividend_weight,
+                },
+                source="stock_factors",
+            ):
+                return
             labels.append(
                 LabelResult(
                     label_code="style_pending_rule_definition",
