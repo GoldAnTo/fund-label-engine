@@ -10,11 +10,119 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
-from scripts.render_ready_pool_report import SAMPLE_CODES
+from scripts.render_ready_pool_report import SAMPLE_CODES, _load_label_snapshot
 
 
 def _summary_rows(md_path):
     return [line for line in Path(md_path).read_text(encoding="utf-8").splitlines() if line.startswith("| `")]
+
+
+def test_load_label_snapshot_uses_latest_succeeded_run(tmp_path):
+    db_path = tmp_path / "output.sqlite"
+    con = sqlite3.connect(db_path)
+    con.executescript(
+        """
+        CREATE TABLE label_runs (
+            run_id TEXT PRIMARY KEY,
+            run_at TEXT NOT NULL,
+            data_as_of TEXT,
+            rule_version TEXT NOT NULL,
+            status TEXT NOT NULL
+        );
+        CREATE TABLE fund_label_results (
+            run_id TEXT NOT NULL,
+            fund_code TEXT NOT NULL,
+            label_code TEXT NOT NULL,
+            label_name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            status TEXT NOT NULL
+        );
+        CREATE TABLE fund_label_evidence (
+            run_id TEXT NOT NULL,
+            fund_code TEXT NOT NULL,
+            label_code TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            value TEXT NOT NULL,
+            threshold TEXT NOT NULL,
+            source TEXT NOT NULL,
+            message TEXT NOT NULL
+        );
+        CREATE TABLE label_calculation_states (
+            run_id TEXT NOT NULL,
+            fund_code TEXT NOT NULL,
+            label_code TEXT NOT NULL,
+            label_name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            state TEXT NOT NULL,
+            reason_code TEXT NOT NULL,
+            observed TEXT NOT NULL,
+            threshold TEXT NOT NULL,
+            source TEXT NOT NULL,
+            message TEXT NOT NULL
+        );
+        CREATE TABLE fund_classification_results (
+            run_id TEXT NOT NULL,
+            fund_code TEXT NOT NULL,
+            dimension TEXT NOT NULL,
+            classification_code TEXT NOT NULL,
+            classification_name TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            reason_code TEXT NOT NULL,
+            evidence TEXT NOT NULL,
+            source TEXT NOT NULL
+        );
+        CREATE TABLE fund_group_results (
+            run_id TEXT NOT NULL,
+            fund_code TEXT NOT NULL,
+            group_code TEXT NOT NULL,
+            group_name TEXT NOT NULL,
+            group_type TEXT NOT NULL,
+            reason_code TEXT NOT NULL,
+            evidence TEXT NOT NULL,
+            source TEXT NOT NULL
+        );
+        CREATE TABLE feature_values (
+            run_id TEXT NOT NULL,
+            fund_code TEXT NOT NULL,
+            feature_code TEXT NOT NULL,
+            value TEXT NOT NULL,
+            source TEXT NOT NULL
+        );
+        """
+    )
+    con.executemany(
+        "INSERT INTO label_runs VALUES (?, ?, NULL, 'v1', ?)",
+        [
+            ("old_run", "2026-06-30T00:00:00+00:00", "succeeded"),
+            ("latest_run", "2026-07-01T00:00:00+00:00", "succeeded"),
+            ("failed_run", "2026-07-02T00:00:00+00:00", "completed_with_errors"),
+        ],
+    )
+    con.executemany(
+        "INSERT INTO fund_label_results VALUES (?, '000001', ?, ?, ?, 0.9, 'active')",
+        [
+            ("old_run", "old_label", "旧标签", "return_risk"),
+            ("latest_run", "latest_label", "新标签", "return_risk"),
+            ("failed_run", "failed_label", "失败批次标签", "return_risk"),
+        ],
+    )
+    con.executemany(
+        "INSERT INTO feature_values VALUES (?, '000001', 'alpha_1y', ?, 'unit-test')",
+        [
+            ("old_run", "0.1"),
+            ("latest_run", "0.2"),
+            ("failed_run", "0.3"),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    snap = _load_label_snapshot(db_path, "000001")
+
+    assert snap["run_id"] == "latest_run"
+    assert [row[0] for row in snap["results"]] == ["latest_label"]
+    assert [row[1] for row in snap["features"]] == ["0.2"]
 
 
 def test_sample_code_list_is_stable():

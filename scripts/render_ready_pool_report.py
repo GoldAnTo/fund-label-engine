@@ -67,49 +67,66 @@ def _load_components(source_db, code):
     return rows
 
 
+def _latest_succeeded_run_id(con):
+    row = con.execute(
+        "SELECT run_id FROM label_runs "
+        "WHERE status='succeeded' "
+        "ORDER BY run_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()
+    if row:
+        return row[0]
+    row = con.execute(
+        "SELECT run_id FROM label_runs ORDER BY run_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()
+    return row[0] if row else ""
+
+
 def _load_label_snapshot(output_db, code):
     con = sqlite3.connect(output_db)
+    run_id = _latest_succeeded_run_id(con)
     results = con.execute(
         "SELECT label_code, label_name, category, confidence, status "
-        "FROM fund_label_results WHERE fund_code=? ORDER BY category, label_code",
-        (code,),
+        "FROM fund_label_results WHERE run_id=? AND fund_code=? "
+        "ORDER BY category, label_code",
+        (run_id, code),
     ).fetchall()
     evidence = con.execute(
         "SELECT label_code, metric, value, threshold, source, message "
-        "FROM fund_label_evidence WHERE fund_code=? "
+        "FROM fund_label_evidence WHERE run_id=? AND fund_code=? "
         "ORDER BY label_code, metric",
-        (code,),
+        (run_id, code),
     ).fetchall()
     states = con.execute(
         "SELECT label_code, label_name, state, reason_code, observed, threshold, source, message "
-        "FROM label_calculation_states WHERE fund_code=? "
+        "FROM label_calculation_states WHERE run_id=? AND fund_code=? "
         "AND category='relative_benchmark' "
         "ORDER BY label_code",
-        (code,),
+        (run_id, code),
     ).fetchall()
     classification = con.execute(
         "SELECT dimension, classification_code, classification_name, confidence, reason_code, evidence "
-        "FROM fund_classification_results WHERE fund_code=? ORDER BY dimension",
-        (code,),
+        "FROM fund_classification_results WHERE run_id=? AND fund_code=? "
+        "ORDER BY dimension",
+        (run_id, code),
     ).fetchall()
     groups = con.execute(
         "SELECT group_code, group_name, group_type, reason_code, evidence "
-        "FROM fund_group_results WHERE fund_code=? ORDER BY group_type, group_code",
-        (code,),
+        "FROM fund_group_results WHERE run_id=? AND fund_code=? "
+        "ORDER BY group_type, group_code",
+        (run_id, code),
     ).fetchall()
     features = con.execute(
         "SELECT feature_code, value "
-        "FROM feature_values WHERE fund_code=? "
+        "FROM feature_values WHERE run_id=? AND fund_code=? "
         "AND feature_code IN ('annualized_return_1y','annualized_volatility_1y',"
         "'max_drawdown_1y','sharpe_ratio_1y','alpha_1y','beta_1y','excess_return_1y',"
         "'tracking_error_1y','information_ratio_1y') "
         "ORDER BY feature_code",
-        (code,),
+        (run_id, code),
     ).fetchall()
-    run_id = con.execute("SELECT run_id FROM label_runs LIMIT 1").fetchone()
     con.close()
     return {
-        "run_id": run_id[0] if run_id else "",
+        "run_id": run_id,
         "results": results,
         "evidence": evidence,
         "states": states,
