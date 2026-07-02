@@ -54,6 +54,42 @@ def _specs() -> list[CbondSpec]:
     ]
 
 
+def _approx_specs() -> list[CbondSpec]:
+    """显式近似组件（不是精确指数源）。
+
+    中债总指数 / 中国债券总指数 / 标普中国债券指数在 akshare 中债登列表内没有
+    对应精确接口。这里用真实的“中债综合财富指数（总值）”作为可审计的近似：
+    - 三者都是全市场债券总收益口径，含票息再投资，走势高度接近；
+    - 债券组件在这些基金基准里只占 15%~45%，近似误差对复合基准影响有限；
+    - source 前缀统一为 ``approx:``，审计和报告可明确区分“近似”与“精确源”。
+
+    默认不启用，必须显式 ``--include-approx`` 才灌，避免把近似误当精确源。
+    """
+    import akshare as ak
+
+    composite = lambda: ak.bond_composite_index_cbond(indicator="财富", period="总值")
+    return [
+        CbondSpec(
+            "LOCAL_CBOND_TOTAL",
+            "中债总指数（用中债综合财富指数近似）",
+            composite,
+            "approx:cbond_composite_for_cbond_total",
+        ),
+        CbondSpec(
+            "LOCAL_CHINA_BOND_TOTAL",
+            "中国债券总指数（用中债综合财富指数近似）",
+            composite,
+            "approx:cbond_composite_for_china_bond_total",
+        ),
+        CbondSpec(
+            "LOCAL_SP_CHINA_BOND",
+            "标普中国债券指数（用中债综合财富指数近似）",
+            composite,
+            "approx:cbond_composite_for_sp_china_bond",
+        ),
+    ]
+
+
 def ensure_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -120,9 +156,19 @@ def main(argv: list[str] | None = None) -> int:
         "--codes",
         help="可选，逗号分隔的 component_code 列表，仅灌这些指数；默认全部",
     )
+    parser.add_argument(
+        "--include-approx",
+        action="store_true",
+        help=(
+            "额外灌入显式近似组件（中债总/中国债券总/标普中国债券，用中债综合财富指数近似，"
+            "source 前缀 approx:）。默认关闭。"
+        ),
+    )
     args = parser.parse_args(argv)
 
     specs = _specs()
+    if args.include_approx:
+        specs = specs + _approx_specs()
     if args.codes:
         wanted = {c.strip() for c in args.codes.split(",") if c.strip()}
         specs = [s for s in specs if s.component_code in wanted]

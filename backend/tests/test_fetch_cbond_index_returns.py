@@ -12,6 +12,7 @@ import pytest
 
 from scripts.fetch_cbond_index_returns import (
     CbondSpec,
+    _approx_specs,
     _to_daily_returns,
     ensure_table,
     fetch_one,
@@ -100,3 +101,15 @@ def test_fetch_one_replaces_existing_rows(tmp_path: Path) -> None:
     assert len(rows) == 1
     assert rows[0][0] == pytest.approx(204.0 / 200.0 - 1.0)
     conn.close()
+
+
+def test_approx_specs_cover_missing_bond_components_with_approx_source() -> None:
+    specs = _approx_specs()
+    by_code = {s.component_code: s for s in specs}
+    assert set(by_code) == {
+        "LOCAL_CBOND_TOTAL",
+        "LOCAL_CHINA_BOND_TOTAL",
+        "LOCAL_SP_CHINA_BOND",
+    }
+    # 近似源必须以 approx: 前缀标注，便于审计区分精确源
+    assert all(s.source_tag.startswith("approx:") for s in specs)
