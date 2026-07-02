@@ -342,6 +342,7 @@ export interface PortfolioDraftRow {
   score: number;
   portfolio_roles: string[];
   risk_tags: string[];
+  manual_role_review?: string;
 }
 
 export interface PortfolioDraftResponse {
@@ -351,23 +352,29 @@ export interface PortfolioDraftResponse {
   objective: string;
   config_version: string;
   rows: PortfolioDraftRow[];
-  excluded: { fund_code: string; reasons: string[] }[];
+  excluded: { fund_code: string; reasons: string[]; manual_role_review?: string }[];
 }
 
 export interface PortfolioRoleReview {
   run_id: string;
   fund_code: string;
-  decision: string;
+  role_code: string;
+  decision: "accept" | "reject" | "needs_more_data" | string;
+  target_bucket: "core" | "satellite" | "index_tool" | "cash_buffer" | "exclude" | string;
+  max_weight_pct: number;
+  rationale: string;
   reviewer: string;
-  comment: string;
   reviewed_at: string;
 }
 
 export interface PortfolioRoleReviewPayload {
   fund_code: string;
-  decision: string;
-  reviewer: string;
-  comment?: string;
+  role_code: string;
+  decision: "accept" | "reject" | "needs_more_data";
+  target_bucket: "core" | "satellite" | "index_tool" | "cash_buffer" | "exclude";
+  max_weight_pct?: number;
+  rationale?: string;
+  reviewer?: string;
 }
 
 export async function fetchPortfolioMatrix(runId: string): Promise<PortfolioMatrixResponse> {

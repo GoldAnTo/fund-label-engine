@@ -14,6 +14,7 @@ export default function App() {
       <aside className="sidebar">
         <h1>基金标签工作台</h1>
         <nav>
+          <NavLink to="/portfolio">组合工作台</NavLink>
           <NavLink to="/ready-pool">可展示池</NavLink>
           <NavLink to="/review-queue">待处理队列</NavLink>
           <NavLink to="/runs">批次列表</NavLink>

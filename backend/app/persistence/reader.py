@@ -268,6 +268,17 @@ class LabelRunReader:
                 return []
         return [dict(row) for row in rows]
 
+    def _portfolio_role_review_overrides(self, run_id: str) -> dict[str, dict[str, Any]]:
+        reviews = self.list_portfolio_role_reviews(run_id)
+        overrides: dict[str, dict[str, Any]] = {}
+        for review in reviews:
+            if review["decision"] != "accept":
+                continue
+            existing = overrides.get(review["fund_code"])
+            if existing is None or review["reviewed_at"] >= existing["reviewed_at"]:
+                overrides[review["fund_code"]] = review
+        return overrides
+
     def get_fund_report(self, run_id: str, fund_code: str) -> dict[str, Any] | None:
         payload = self.get_fund_labels(run_id, fund_code)
         if payload is None:
@@ -693,7 +704,10 @@ class LabelRunReader:
         matrix = self.get_portfolio_matrix(run_id)
         if matrix is None:
             return None
-        draft = build_portfolio_draft(matrix["rows"])
+        draft = build_portfolio_draft(
+            matrix["rows"],
+            role_reviews=self._portfolio_role_review_overrides(run_id),
+        )
         return {
             "run_id": run_id,
             "run_at": matrix["run_at"],

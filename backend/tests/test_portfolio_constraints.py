@@ -1,6 +1,40 @@
 from app.portfolio.constraints import build_portfolio_draft
 
 
+def test_build_portfolio_draft_applies_manual_role_reviews() -> None:
+    rows = [
+        {
+            "fund_code": "000001",
+            "allocation_status": "eligible",
+            "portfolio_roles": ["satellite_alpha"],
+            "return_tags": ["alpha_positive"],
+            "risk_tags": [],
+            "watch_reasons": [],
+        },
+        {
+            "fund_code": "000002",
+            "allocation_status": "eligible",
+            "portfolio_roles": ["core_holding_candidate"],
+            "return_tags": ["alpha_positive"],
+            "risk_tags": [],
+            "watch_reasons": [],
+        },
+    ]
+
+    draft = build_portfolio_draft(
+        rows,
+        role_reviews={"000001": "core", "000002": "exclude"},
+    )
+
+    by_fund = {row["fund_code"]: row for row in draft["rows"]}
+    assert by_fund["000001"]["bucket"] == "core"
+    assert by_fund["000001"]["manual_role_review"] == "core"
+    assert "000002" not in by_fund
+    assert draft["excluded"] == [
+        {"fund_code": "000002", "reasons": ["manual_exclude"], "manual_role_review": "exclude"}
+    ]
+
+
 def test_build_portfolio_draft_caps_high_risk_satellite() -> None:
     rows = [
         {

@@ -428,6 +428,57 @@ def test_get_portfolio_draft_returns_weights(seeded_run) -> None:
     assert "config_version" in payload
 
 
+def test_portfolio_role_reviews_affect_draft(seeded_run) -> None:
+    db, run_id = seeded_run
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "DELETE FROM fund_label_results WHERE run_id = ? AND fund_code = '000001' "
+            "AND label_code IN ("
+            "'benchmark_data_missing', "
+            "'return_window_insufficient', "
+            "'style_unlabeled_stock_factors_missing'"
+            ")",
+            (run_id,),
+        )
+        conn.executemany(
+            "INSERT INTO fund_label_results "
+            "(run_id, fund_code, label_code, label_name, category, confidence, status) "
+            "VALUES (?, '000001', ?, ?, ?, 0.8, 'active')",
+            [
+                (run_id, "alpha_positive", "Alpha 为正", "relative_benchmark"),
+                (run_id, "information_ratio_high", "信息比率较高", "relative_benchmark"),
+            ],
+        )
+        conn.commit()
+    client = TestClient(create_app(db_path=db))
+
+    before = client.get(f"/v1/runs/{run_id}/portfolio-draft")
+    assert before.status_code == 200
+    assert any(row["fund_code"] == "000001" for row in before.json()["rows"])
+
+    created = client.post(
+        f"/v1/runs/{run_id}/portfolio-role-reviews",
+        json={
+            "fund_code": "000001",
+            "role_code": "manual_portfolio_role",
+            "decision": "accept",
+            "target_bucket": "exclude",
+            "max_weight_pct": 0,
+            "rationale": "Not suitable for current model portfolio.",
+            "reviewer": "researcher-a",
+        },
+    )
+    assert created.status_code == 200
+
+    after = client.get(f"/v1/runs/{run_id}/portfolio-draft")
+    assert after.status_code == 200
+    payload = after.json()
+    assert all(row["fund_code"] != "000001" for row in payload["rows"])
+    excluded = {row["fund_code"]: row for row in payload["excluded"]}
+    assert excluded["000001"]["reasons"] == ["manual_exclude"]
+    assert excluded["000001"]["manual_role_review"] == "exclude"
+
+
 def test_portfolio_role_reviews_api_round_trip(seeded_run) -> None:
     db, run_id = seeded_run
     client = TestClient(create_app(db_path=db))

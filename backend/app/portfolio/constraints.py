@@ -57,7 +57,13 @@ def _max_weight(row: dict[str, Any], config: dict[str, Any]) -> float:
     return min(values)
 
 
-def _exclude_reasons(row: dict[str, Any], config: dict[str, Any]) -> list[str]:
+def _exclude_reasons(
+    row: dict[str, Any],
+    config: dict[str, Any],
+    manual_bucket: str | None = None,
+) -> list[str]:
+    if manual_bucket == "exclude":
+        return ["manual_exclude"]
     blockers = set(config["hard_blockers"])
     reasons = sorted(blockers & set(row.get("watch_reasons", [])))
     if row.get("allocation_status") == "review_required":
@@ -65,34 +71,53 @@ def _exclude_reasons(row: dict[str, Any], config: dict[str, Any]) -> list[str]:
     return sorted(set(reasons))
 
 
+def _manual_bucket(review: Any) -> str | None:
+    if isinstance(review, str):
+        return review
+    if not isinstance(review, dict):
+        return None
+    if review.get("decision") != "accept":
+        return None
+    target_bucket = review.get("target_bucket")
+    return str(target_bucket) if target_bucket else None
+
+
 def build_portfolio_draft(
     matrix_rows: list[dict[str, Any]],
     config: dict[str, Any] | None = None,
+    role_reviews: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cfg = config or load_portfolio_constraints()
+    role_reviews = role_reviews or {}
     included: list[dict[str, Any]] = []
     excluded: list[dict[str, Any]] = []
     for row in matrix_rows:
-        reasons = _exclude_reasons(row, cfg)
+        fund_code = row["fund_code"]
+        manual_bucket = _manual_bucket(role_reviews.get(fund_code))
+        reasons = _exclude_reasons(row, cfg, manual_bucket)
         if reasons:
-            excluded.append({"fund_code": row["fund_code"], "reasons": reasons})
+            excluded_row = {"fund_code": fund_code, "reasons": reasons}
+            if manual_bucket:
+                excluded_row["manual_role_review"] = manual_bucket
+            excluded.append(excluded_row)
             continue
         if row.get("allocation_status") not in {"eligible", "observe"}:
-            excluded.append({"fund_code": row["fund_code"], "reasons": ["not_candidate_status"]})
+            excluded.append({"fund_code": fund_code, "reasons": ["not_candidate_status"]})
             continue
-        bucket = _bucket(row)
+        bucket = manual_bucket if manual_bucket in {"core", "satellite", "index_tool"} else _bucket(row)
         score = _score(row, cfg)
         max_weight = _max_weight(row, cfg)
-        included.append(
-            {
-                "fund_code": row["fund_code"],
-                "bucket": bucket,
-                "score": score,
-                "max_weight_pct": max_weight,
-                "portfolio_roles": row.get("portfolio_roles", []),
-                "risk_tags": row.get("risk_tags", []),
-            }
-        )
+        draft_row = {
+            "fund_code": fund_code,
+            "bucket": bucket,
+            "score": score,
+            "max_weight_pct": max_weight,
+            "portfolio_roles": row.get("portfolio_roles", []),
+            "risk_tags": row.get("risk_tags", []),
+        }
+        if manual_bucket:
+            draft_row["manual_role_review"] = manual_bucket
+        included.append(draft_row)
 
     total_score = sum(row["score"] for row in included) or 1.0
     capped = []

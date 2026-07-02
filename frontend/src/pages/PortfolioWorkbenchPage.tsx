@@ -51,7 +51,14 @@ function statusClass(status: string) {
 }
 
 function reviewMap(reviews: PortfolioRoleReview[]) {
-  return new Map(reviews.map((review) => [review.fund_code, review]));
+  const map = new Map<string, PortfolioRoleReview>();
+  reviews.forEach((review) => {
+    const existing = map.get(review.fund_code);
+    if (!existing || review.reviewed_at >= existing.reviewed_at) {
+      map.set(review.fund_code, review);
+    }
+  });
+  return map;
 }
 
 export default function PortfolioWorkbenchPage() {
@@ -124,21 +131,26 @@ export default function PortfolioWorkbenchPage() {
     });
   }, [bucketFilter, draftByFund, matrix, statusFilter]);
 
-  const saveReview = async (fundCode: string, decision: string) => {
-    if (!runId) return;
+  const saveReview = async (fundCode: string, targetBucket: string) => {
+    if (!runId || !targetBucket) return;
     setSavingFund(fundCode);
     setError(null);
     try {
       const saved = await postPortfolioRoleReview(runId, {
         fund_code: fundCode,
-        decision,
+        role_code: "manual_portfolio_role",
+        decision: "accept",
+        target_bucket: targetBucket as "core" | "satellite" | "index_tool" | "exclude",
+        max_weight_pct: 0,
+        rationale: "portfolio workbench calibration",
         reviewer,
-        comment: "portfolio workbench calibration",
       });
+      const nextDraft = await fetchPortfolioDraft(runId);
       setReviews((current) => {
-        const rest = current.filter((item) => item.fund_code !== fundCode);
+        const rest = current.filter((item) => item.fund_code !== fundCode || item.role_code !== saved.role_code);
         return [saved, ...rest];
       });
+      setDraft(nextDraft);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
