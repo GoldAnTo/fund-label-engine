@@ -156,6 +156,19 @@ def export_run_results(run_payload: dict[str, Any], fmt: str) -> tuple[bytes, st
             ],
         ),
         (
+            "portfolio_draft",
+            run_payload.get("portfolio_draft", []),
+            [
+                "fund_code",
+                "bucket",
+                "draft_weight_pct",
+                "max_weight_pct",
+                "score",
+                "portfolio_roles",
+                "risk_tags",
+            ],
+        ),
+        (
             "factor_exposures",
             run_payload.get("factor_exposures", []),
             [

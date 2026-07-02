@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from app.portfolio.constraints import build_portfolio_draft
 from app.portfolio.roles import (
     derive_portfolio_profile,
     load_portfolio_role_config,
@@ -688,6 +689,18 @@ class LabelRunReader:
             "rows": rows,
         }
 
+    def get_portfolio_draft(self, run_id: str) -> dict[str, Any] | None:
+        matrix = self.get_portfolio_matrix(run_id)
+        if matrix is None:
+            return None
+        draft = build_portfolio_draft(matrix["rows"])
+        return {
+            "run_id": run_id,
+            "run_at": matrix["run_at"],
+            "rule_version": matrix["rule_version"],
+            **draft,
+        }
+
     def get_coverage_report(self, run_id: str) -> dict[str, Any]:
         """P0：按 fund_type 聚合本次 run 的数据覆盖率 + 拒绝原因 top。
 
@@ -963,6 +976,9 @@ class LabelRunReader:
             "failures": [dict(r) for r in failures],
             "portfolio_matrix": (
                 self.get_portfolio_matrix(run_id) or {"rows": []}
+            )["rows"],
+            "portfolio_draft": (
+                self.get_portfolio_draft(run_id) or {"rows": []}
             )["rows"],
         }
 

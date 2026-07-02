@@ -411,6 +411,20 @@ def test_get_portfolio_matrix_derives_combination_roles(seeded_run) -> None:
     assert "manual_review_required" in review["blocking_reasons"]
 
 
+def test_get_portfolio_draft_returns_weights(seeded_run) -> None:
+    db, run_id = seeded_run
+    client = TestClient(create_app(db_path=db))
+
+    response = client.get(f"/v1/runs/{run_id}/portfolio-draft")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == run_id
+    assert "rows" in payload
+    assert "excluded" in payload
+    assert "config_version" in payload
+
+
 def test_portfolio_role_reviews_api_round_trip(seeded_run) -> None:
     db, run_id = seeded_run
     client = TestClient(create_app(db_path=db))
