@@ -14,14 +14,48 @@ STYLE_WEIGHT_KEYS = (
 )
 
 
+# 二级拆分阈值（与 rules.v1.json 的 style_exposure_*_coverage_threshold 对齐）
+COVERAGE_LOW = 0.5
+COVERAGE_FORMAL = 0.7
+# 风格权重：>= 0.2 视为「显著」（与 style_balanced_weight_min 对齐）
+STYLE_WEIGHT_SIGNIFICANT = 0.2
+
+
+def _to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def style_pending_reason(row: dict[str, Any]) -> str:
+    """二级拆分：让 95 → {data_missing, coverage_low, coverage_observe, exposure_imbalanced, label_conflict}。
+
+    优先级：data_missing > coverage_low > coverage_observe > exposure_imbalanced > label_conflict
+    """
     features = row.get("features", {})
-    has_style_weight = any(features.get(key) is not None for key in STYLE_WEIGHT_KEYS)
-    if not has_style_weight:
-        return "style_weight_missing"
-    if not row.get("style_tags"):
-        return "style_weight_below_formal_threshold"
-    return "style_label_present_but_watch_not_cleared"
+    weights = [_to_float(features.get(key)) for key in STYLE_WEIGHT_KEYS]
+    has_any_weight = any(w is not None for w in weights)
+
+    if not has_any_weight:
+        return "style_data_missing"
+
+    coverage = _to_float(features.get("factor_coverage_weight"))
+    if coverage is None or coverage < COVERAGE_LOW:
+        return "style_factor_coverage_low"
+    if coverage < COVERAGE_FORMAL:
+        return "style_factor_coverage_observe"
+
+    significant_count = sum(1 for w in weights if w is not None and w >= STYLE_WEIGHT_SIGNIFICANT)
+    if significant_count < 2:
+        return "style_exposure_imbalanced"
+
+    if row.get("style_tags"):
+        return "style_label_emitted_but_pending"
+
+    return "style_exposure_below_formal_threshold"
 
 
 def _join(values: Any) -> str:
