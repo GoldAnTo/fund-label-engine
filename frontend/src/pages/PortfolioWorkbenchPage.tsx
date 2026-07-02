@@ -277,6 +277,34 @@ export default function PortfolioWorkbenchPage() {
         </section>
       )}
 
+      {draft?.optimization_summary && (
+        <section className="card">
+          <h2>优化权重（正式候选）</h2>
+          <p className="muted">
+            基于 dry-run + max_weight_pct cap 后的 LP 闭式解（cap_redistribute_v1），
+            可作为正式组合候选；与 dry-run 区分对待，仍需研究员 sign-off。
+          </p>
+          <div className="metric-grid portfolio-metrics">
+            <div className="metric-tile">
+              <span>优化总权重</span>
+              <strong>{draft.optimization_summary.total_weight_pct.toFixed(1)}%</strong>
+            </div>
+            <div className="metric-tile">
+              <span>优化基金数</span>
+              <strong>{draft.optimization_summary.optimized_funds}</strong>
+            </div>
+            <div className="metric-tile metric-blocked">
+              <span>触顶 (capped)</span>
+              <strong>{draft.optimization_summary.capped_count}</strong>
+            </div>
+            <div className="metric-tile">
+              <span>方法</span>
+              <strong>{draft.optimization_summary.method}</strong>
+            </div>
+          </div>
+        </section>
+      )}
+
       {matrix && (
         <section className="card portfolio-table-card">
           <h2>基金角色复核</h2>
@@ -306,6 +334,14 @@ export default function PortfolioWorkbenchPage() {
                       {draftRow ? (
                         <>
                           <strong>{draftRow.draft_weight_pct.toFixed(2)}%</strong>
+                          {typeof draftRow.optimized_weight_pct === "number" && (
+                            <div className="muted">
+                              优化 {draftRow.optimized_weight_pct.toFixed(2)}%
+                              {draftRow.optimized_status === "capped" && (
+                                <span className="optimized-cap-badge" title="draft 超 max_weight_pct，被 LP 钉到 cap">capped</span>
+                              )}
+                            </div>
+                          )}
                           <div className="muted">{bucketLabel(draftRow.bucket)}，上限 {draftRow.max_weight_pct.toFixed(1)}%</div>
                           {draftRow.manual_role_review && <span className="manual-override-badge">人工覆盖：{bucketLabel(draftRow.manual_role_review)}</span>}
                         </>

@@ -438,6 +438,18 @@ button:disabled {
   cursor: help;
 }
 
+.optimized-cap-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: oklch(0.38 0.08 280);
+  background: oklch(0.93 0.05 280);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: help;
+}
+
 .manual-override-row {
   display: flex;
   flex-wrap: wrap;

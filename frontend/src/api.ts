@@ -346,11 +346,21 @@ export interface PortfolioDraftRow {
   fund_code: string;
   bucket: "core" | "satellite" | "index_tool" | string;
   draft_weight_pct: number;
+  optimized_weight_pct?: number;
+  optimized_status?: "ok" | "capped" | string;
+  optimization_method?: string;
   max_weight_pct: number;
   score: number;
   portfolio_roles: string[];
   risk_tags: string[];
   manual_role_review?: string;
+}
+
+export interface PortfolioOptimizationSummary {
+  total_weight_pct: number;
+  optimized_funds: number;
+  capped_count: number;
+  method: string;
 }
 
 export interface PortfolioDraftResponse {
@@ -361,6 +371,7 @@ export interface PortfolioDraftResponse {
   config_version: string;
   rows: PortfolioDraftRow[];
   excluded: { fund_code: string; reasons: string[]; manual_role_review?: string }[];
+  optimization_summary?: PortfolioOptimizationSummary;
 }
 
 export interface PortfolioRoleReview {

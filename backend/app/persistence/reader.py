@@ -708,11 +708,18 @@ class LabelRunReader:
             matrix["rows"],
             role_reviews=self._portfolio_role_review_overrides(run_id),
         )
+        # 区分 dry-run (draft_weight_pct) 与正式 (optimized_weight_pct)
+        from app.portfolio.optimize import optimize_draft, summarize_optimization
+
+        optimized_rows = optimize_draft(draft["rows"])
+        optimization_summary = summarize_optimization(optimized_rows)
         return {
             "run_id": run_id,
             "run_at": matrix["run_at"],
             "rule_version": matrix["rule_version"],
             **draft,
+            "rows": optimized_rows,
+            "optimization_summary": optimization_summary,
         }
 
     def get_coverage_report(self, run_id: str) -> dict[str, Any]:
