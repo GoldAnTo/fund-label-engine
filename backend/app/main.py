@@ -86,6 +86,16 @@ class RunRequest(BaseModel):
     rule_version: str = "v1"
 
 
+class PortfolioRoleReviewRequest(BaseModel):
+    fund_code: str
+    role_code: str
+    decision: Literal["accept", "reject", "needs_more_data"]
+    target_bucket: Literal["core", "satellite", "index_tool", "cash_buffer", "exclude"]
+    max_weight_pct: float = 0
+    rationale: str = ""
+    reviewer: str = ""
+
+
 def create_app(
     db_path: str | Path | None = None,
     source_db_path: str | Path | None = None,
@@ -255,6 +265,42 @@ def create_app(
         if payload is None:
             raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
         return payload
+
+    @app.get("/v1/runs/{run_id}/portfolio-role-reviews")
+    def list_portfolio_role_reviews(
+        run_id: str,
+        fund_code: str | None = None,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        if reader.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        reviews = reader.list_portfolio_role_reviews(run_id, fund_code=fund_code)
+        return {"run_id": run_id, "reviews": reviews}
+
+    @app.post("/v1/runs/{run_id}/portfolio-role-reviews")
+    def create_portfolio_role_review(
+        run_id: str,
+        request: PortfolioRoleReviewRequest,
+        reader: LabelRunReader = Depends(get_reader),
+        writer: LabelRunWriter = Depends(get_writer),
+    ) -> dict[str, Any]:
+        if reader.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        writer.write_portfolio_role_review(
+            run_id=run_id,
+            fund_code=request.fund_code,
+            role_code=request.role_code,
+            decision=request.decision,
+            target_bucket=request.target_bucket,
+            max_weight_pct=request.max_weight_pct,
+            rationale=request.rationale,
+            reviewer=request.reviewer,
+        )
+        reviews = reader.list_portfolio_role_reviews(run_id, fund_code=request.fund_code)
+        for review in reviews:
+            if review["role_code"] == request.role_code:
+                return review
+        raise HTTPException(status_code=500, detail="portfolio role review was not persisted")
 
     @app.get("/v1/runs/{run_id}/coverage")
     def get_run_coverage(

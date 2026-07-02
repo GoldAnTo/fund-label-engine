@@ -411,6 +411,35 @@ def test_get_portfolio_matrix_derives_combination_roles(seeded_run) -> None:
     assert "manual_review_required" in review["blocking_reasons"]
 
 
+def test_portfolio_role_reviews_api_round_trip(seeded_run) -> None:
+    db, run_id = seeded_run
+    client = TestClient(create_app(db_path=db))
+
+    created = client.post(
+        f"/v1/runs/{run_id}/portfolio-role-reviews",
+        json={
+            "fund_code": "000001",
+            "role_code": "satellite_alpha",
+            "decision": "accept",
+            "target_bucket": "satellite",
+            "max_weight_pct": 8.0,
+            "rationale": "Accept as satellite only.",
+            "reviewer": "researcher-a",
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["fund_code"] == "000001"
+    assert created.json()["target_bucket"] == "satellite"
+
+    listed = client.get(f"/v1/runs/{run_id}/portfolio-role-reviews")
+    assert listed.status_code == 200
+    reviews = listed.json()["reviews"]
+    assert len(reviews) == 1
+    assert reviews[0]["role_code"] == "satellite_alpha"
+    assert reviews[0]["max_weight_pct"] == 8.0
+
+
 def test_label_definitions_endpoint_returns_thresholds(seeded_run) -> None:
     db, _ = seeded_run
     client = TestClient(create_app(db_path=db))
