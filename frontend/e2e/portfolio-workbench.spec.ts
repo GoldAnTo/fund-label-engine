@@ -31,6 +31,7 @@ function draftPayload(manual = false) {
     rule_version: "v1",
     objective: "core_satellite_equity_pool",
     config_version: "v1",
+    mode: "research",
     rows: [
       {
         fund_code: "000001",
@@ -56,7 +57,7 @@ test("portfolio workbench shows and clears manual override", async ({ page }) =>
   await page.route(`**/v1/runs/${runId}/portfolio-matrix`, (route) =>
     route.fulfill({ json: matrixPayload })
   );
-  await page.route(`**/v1/runs/${runId}/portfolio-draft`, (route) =>
+  await page.route(`**/v1/runs/${runId}/portfolio-draft**`, (route) =>
     route.fulfill({ json: draftPayload(manualReview) })
   );
   await page.route(`**/v1/runs/${runId}/portfolio-role-reviews`, async (route) => {

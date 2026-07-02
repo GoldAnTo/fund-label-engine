@@ -102,3 +102,100 @@ def test_build_portfolio_draft_uses_manual_max_weight_pct() -> None:
     assert row["bucket"] == "index_tool"
     assert row["manual_role_review"] == "index_tool"
     assert row["max_weight_pct"] == 3.0
+
+
+def test_build_portfolio_draft_accepted_mode_requires_signoff() -> None:
+    rows = [
+        {
+            "fund_code": "000001",
+            "allocation_status": "eligible",
+            "portfolio_roles": ["core_holding_candidate"],
+            "return_tags": ["alpha_positive"],
+            "risk_tags": [],
+            "watch_reasons": [],
+        },
+        {
+            "fund_code": "000002",
+            "allocation_status": "eligible",
+            "portfolio_roles": ["core_holding_candidate"],
+            "return_tags": ["alpha_positive"],
+            "risk_tags": [],
+            "watch_reasons": [],
+        },
+    ]
+
+    draft = build_portfolio_draft(
+        rows,
+        role_reviews={
+            "000001": {
+                "decision": "accept",
+                "target_bucket": "core",
+                "max_weight_pct": 8.0,
+            }
+        },
+        mode="accepted",
+    )
+
+    assert draft["mode"] == "accepted"
+    assert [row["fund_code"] for row in draft["rows"]] == ["000001"]
+    assert draft["excluded"] == [{"fund_code": "000002", "reasons": ["not_signed_off"]}]
+
+
+def test_build_portfolio_draft_accepted_mode_excludes_manual_exclude() -> None:
+    rows = [
+        {
+            "fund_code": "000001",
+            "allocation_status": "review_required",
+            "portfolio_roles": [],
+            "return_tags": [],
+            "risk_tags": [],
+            "watch_reasons": ["benchmark_data_missing"],
+        }
+    ]
+
+    draft = build_portfolio_draft(
+        rows,
+        role_reviews={
+            "000001": {
+                "decision": "accept",
+                "target_bucket": "exclude",
+                "max_weight_pct": 0.0,
+            }
+        },
+        mode="accepted",
+    )
+
+    assert draft["rows"] == []
+    assert draft["excluded"] == [
+        {"fund_code": "000001", "reasons": ["manual_exclude"], "manual_role_review": "exclude"}
+    ]
+
+
+def test_build_portfolio_draft_accepted_mode_rejects_non_portfolio_bucket() -> None:
+    rows = [
+        {
+            "fund_code": "000001",
+            "allocation_status": "eligible",
+            "portfolio_roles": ["core_holding_candidate"],
+            "return_tags": ["alpha_positive"],
+            "risk_tags": [],
+            "watch_reasons": [],
+        }
+    ]
+
+    draft = build_portfolio_draft(
+        rows,
+        role_reviews={
+            "000001": {
+                "decision": "accept",
+                "target_bucket": "cash_buffer",
+                "max_weight_pct": 2.0,
+            }
+        },
+        mode="accepted",
+    )
+
+    assert draft["rows"] == []
+    assert draft["excluded"] == [
+        {"fund_code": "000001", "reasons": ["not_accepted_bucket"], "manual_role_review": "cash_buffer"}
+    ]

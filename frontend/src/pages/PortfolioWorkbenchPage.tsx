@@ -7,6 +7,7 @@ import {
   fetchPortfolioRoleReviews,
   fetchRuns,
   postPortfolioRoleReview,
+  type PortfolioDraftMode,
   type PortfolioDraftResponse,
   type PortfolioMatrixResponse,
   type PortfolioRoleReview,
@@ -67,6 +68,7 @@ export default function PortfolioWorkbenchPage() {
   const [runId, setRunId] = useState("");
   const [matrix, setMatrix] = useState<PortfolioMatrixResponse | null>(null);
   const [draft, setDraft] = useState<PortfolioDraftResponse | null>(null);
+  const [draftMode, setDraftMode] = useState<PortfolioDraftMode>("research");
   const [reviews, setReviews] = useState<PortfolioRoleReview[]>([]);
   const [statusFilter, setStatusFilter] = useState("all");
   const [bucketFilter, setBucketFilter] = useState("all");
@@ -90,7 +92,7 @@ export default function PortfolioWorkbenchPage() {
     setError(null);
     Promise.all([
       fetchPortfolioMatrix(runId),
-      fetchPortfolioDraft(runId),
+      fetchPortfolioDraft(runId, draftMode),
       fetchPortfolioRoleReviews(runId),
     ])
       .then(([matrixPayload, draftPayload, reviewPayload]) => {
@@ -100,7 +102,7 @@ export default function PortfolioWorkbenchPage() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [runId]);
+  }, [runId, draftMode]);
 
   const draftByFund = useMemo(() => {
     const map = new Map<string, PortfolioDraftResponse["rows"][number]>();
@@ -146,7 +148,7 @@ export default function PortfolioWorkbenchPage() {
         rationale: "portfolio workbench calibration",
         reviewer,
       });
-      const nextDraft = await fetchPortfolioDraft(runId);
+      const nextDraft = await fetchPortfolioDraft(runId, draftMode);
       setReviews((current) => {
         const rest = current.filter((item) => item.fund_code !== fundCode || item.role_code !== saved.role_code);
         return [saved, ...rest];
@@ -165,7 +167,7 @@ export default function PortfolioWorkbenchPage() {
     setError(null);
     try {
       await deletePortfolioRoleReview(runId, review.fund_code, review.role_code);
-      const nextDraft = await fetchPortfolioDraft(runId);
+      const nextDraft = await fetchPortfolioDraft(runId, draftMode);
       setReviews((current) => current.filter((item) => item.fund_code !== review.fund_code || item.role_code !== review.role_code));
       setDraft(nextDraft);
     } catch (e) {
@@ -175,7 +177,11 @@ export default function PortfolioWorkbenchPage() {
     }
   };
 
-  const totalDraftWeight = draft?.rows.reduce((sum, row) => sum + row.draft_weight_pct, 0) ?? 0;
+  const totalDraftWeight =
+    draft?.rows.reduce(
+      (sum, row) => sum + (draftMode === "accepted" ? (row.optimized_weight_pct ?? row.draft_weight_pct) : row.draft_weight_pct),
+      0,
+    ) ?? 0;
 
   return (
     <div className="portfolio-workbench">
@@ -204,6 +210,13 @@ export default function PortfolioWorkbenchPage() {
             </select>
           </label>
           <label>
+            草案模式&nbsp;
+            <select value={draftMode} onChange={(e) => setDraftMode(e.target.value as PortfolioDraftMode)}>
+              <option value="research">研究草案</option>
+              <option value="accepted">已验收组合</option>
+            </select>
+          </label>
+          <label>
             复核人&nbsp;
             <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
           </label>
@@ -216,8 +229,8 @@ export default function PortfolioWorkbenchPage() {
       {matrix && draft && (
         <div className="metric-grid portfolio-metrics">
           <div className="metric-tile"><span>基金总数</span><strong>{matrix.total_count}</strong></div>
-          <div className="metric-tile metric-ready"><span>进入草案</span><strong>{draft.rows.length}</strong></div>
-          <div className="metric-tile"><span>dry-run 权重</span><strong>{totalDraftWeight.toFixed(1)}%</strong></div>
+          <div className="metric-tile metric-ready"><span>{draftMode === "accepted" ? "已验收纳入" : "进入草案"}</span><strong>{draft.rows.length}</strong></div>
+          <div className="metric-tile"><span>{draftMode === "accepted" ? "正式权重" : "dry-run 权重"}</span><strong>{totalDraftWeight.toFixed(1)}%</strong></div>
           <div className="metric-tile metric-blocked"><span>排除</span><strong>{draft.excluded.length}</strong></div>
         </div>
       )}

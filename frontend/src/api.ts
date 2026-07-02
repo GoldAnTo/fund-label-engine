@@ -363,12 +363,15 @@ export interface PortfolioOptimizationSummary {
   method: string;
 }
 
+export type PortfolioDraftMode = "research" | "accepted";
+
 export interface PortfolioDraftResponse {
   run_id: string;
   run_at: string;
   rule_version: string;
   objective: string;
   config_version: string;
+  mode: PortfolioDraftMode;
   rows: PortfolioDraftRow[];
   excluded: { fund_code: string; reasons: string[]; manual_role_review?: string }[];
   optimization_summary?: PortfolioOptimizationSummary;
@@ -400,8 +403,8 @@ export async function fetchPortfolioMatrix(runId: string): Promise<PortfolioMatr
   return json(`/v1/runs/${runId}/portfolio-matrix`);
 }
 
-export async function fetchPortfolioDraft(runId: string): Promise<PortfolioDraftResponse> {
-  return json(`/v1/runs/${runId}/portfolio-draft`);
+export async function fetchPortfolioDraft(runId: string, mode: PortfolioDraftMode = "research"): Promise<PortfolioDraftResponse> {
+  return json(`/v1/runs/${runId}/portfolio-draft?mode=${mode}`);
 }
 
 export async function fetchPortfolioRoleReviews(runId: string): Promise<PortfolioRoleReview[]> {

@@ -301,9 +301,10 @@ def create_app(
     @app.get("/v1/runs/{run_id}/portfolio-draft")
     def get_run_portfolio_draft(
         run_id: str,
+        mode: Literal["research", "accepted"] = "research",
         reader: LabelRunReader = Depends(get_reader),
     ) -> dict[str, Any]:
-        payload = reader.get_portfolio_draft(run_id)
+        payload = reader.get_portfolio_draft(run_id, mode=mode)
         if payload is None:
             raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
         return payload

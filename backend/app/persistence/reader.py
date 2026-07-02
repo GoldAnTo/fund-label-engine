@@ -700,13 +700,14 @@ class LabelRunReader:
             "rows": rows,
         }
 
-    def get_portfolio_draft(self, run_id: str) -> dict[str, Any] | None:
+    def get_portfolio_draft(self, run_id: str, mode: str = "research") -> dict[str, Any] | None:
         matrix = self.get_portfolio_matrix(run_id)
         if matrix is None:
             return None
         draft = build_portfolio_draft(
             matrix["rows"],
             role_reviews=self._portfolio_role_review_overrides(run_id),
+            mode=mode,
         )
         # 区分 dry-run (draft_weight_pct) 与正式 (optimized_weight_pct)
         from app.portfolio.optimize import optimize_draft, summarize_optimization

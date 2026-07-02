@@ -558,6 +558,67 @@ def test_portfolio_role_reviews_api_round_trip(seeded_run) -> None:
     assert listed_after_delete.json()["reviews"] == []
 
 
+def test_portfolio_draft_accepted_mode_only_uses_signed_off_reviews(seeded_run) -> None:
+    db, run_id = seeded_run
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "DELETE FROM fund_label_results WHERE run_id = ? AND fund_code = '000001' "
+            "AND label_code IN ("
+            "'benchmark_data_missing', "
+            "'return_window_insufficient', "
+            "'style_unlabeled_stock_factors_missing'"
+            ")",
+            (run_id,),
+        )
+        conn.executemany(
+            "INSERT INTO fund_label_results "
+            "(run_id, fund_code, label_code, label_name, category, confidence, status) "
+            "VALUES (?, '000001', ?, ?, ?, 0.8, 'active')",
+            [
+                (run_id, "alpha_positive", "Alpha 为正", "relative_benchmark"),
+                (run_id, "information_ratio_high", "信息比率较高", "relative_benchmark"),
+            ],
+        )
+        conn.commit()
+    client = TestClient(create_app(db_path=db))
+
+    # research mode: endpoint accepts mode flag and returns research payload.
+    research = client.get(f"/v1/runs/{run_id}/portfolio-draft?mode=research")
+    assert research.status_code == 200
+    assert research.json()["mode"] == "research"
+
+    # accepted mode before sign-off: everything is not_signed_off.
+    accepted_empty = client.get(f"/v1/runs/{run_id}/portfolio-draft?mode=accepted")
+    assert accepted_empty.status_code == 200
+    assert accepted_empty.json()["mode"] == "accepted"
+    assert accepted_empty.json()["rows"] == []
+    assert any(
+        "not_signed_off" in row["reasons"]
+        for row in accepted_empty.json()["excluded"]
+    )
+
+    created = client.post(
+        f"/v1/runs/{run_id}/portfolio-role-reviews",
+        json={
+            "fund_code": "000001",
+            "role_code": "core",
+            "decision": "accept",
+            "target_bucket": "core",
+            "max_weight_pct": 3.0,
+            "rationale": "accept one fund",
+            "reviewer": "researcher-a",
+        },
+    )
+    assert created.status_code == 200
+
+    accepted = client.get(f"/v1/runs/{run_id}/portfolio-draft?mode=accepted")
+    assert accepted.status_code == 200
+    rows = accepted.json()["rows"]
+    assert [row["fund_code"] for row in rows] == ["000001"]
+    assert rows[0]["max_weight_pct"] == 3.0
+    assert rows[0]["manual_role_review"] == "core"
+
+
 def test_label_definitions_endpoint_returns_thresholds(seeded_run) -> None:
     db, _ = seeded_run
     client = TestClient(create_app(db_path=db))

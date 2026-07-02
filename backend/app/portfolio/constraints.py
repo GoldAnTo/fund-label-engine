@@ -57,11 +57,21 @@ def _max_weight(row: dict[str, Any], config: dict[str, Any]) -> float:
     return min(values)
 
 
+ACCEPTED_PORTFOLIO_BUCKETS = {"core", "satellite", "index_tool"}
+
+
 def _exclude_reasons(
     row: dict[str, Any],
     config: dict[str, Any],
     manual_bucket: str | None = None,
+    *,
+    accepted_only: bool = False,
+    has_accepted_review: bool = False,
 ) -> list[str]:
+    if accepted_only and not has_accepted_review:
+        return ["not_signed_off"]
+    if accepted_only and manual_bucket not in ACCEPTED_PORTFOLIO_BUCKETS and manual_bucket != "exclude":
+        return ["not_accepted_bucket"]
     if manual_bucket == "exclude":
         return ["manual_exclude"]
     blockers = set(config["hard_blockers"])
@@ -100,7 +110,12 @@ def build_portfolio_draft(
     matrix_rows: list[dict[str, Any]],
     config: dict[str, Any] | None = None,
     role_reviews: dict[str, Any] | None = None,
+    *,
+    mode: str = "research",
 ) -> dict[str, Any]:
+    if mode not in {"research", "accepted"}:
+        raise ValueError("mode must be 'research' or 'accepted'")
+    accepted_only = mode == "accepted"
     cfg = config or load_portfolio_constraints()
     role_reviews = role_reviews or {}
     included: list[dict[str, Any]] = []
@@ -110,7 +125,14 @@ def build_portfolio_draft(
         review = role_reviews.get(fund_code)
         manual_bucket = _manual_bucket(review)
         manual_max_weight = _manual_max_weight(review)
-        reasons = _exclude_reasons(row, cfg, manual_bucket)
+        has_accepted_review = manual_bucket is not None
+        reasons = _exclude_reasons(
+            row,
+            cfg,
+            manual_bucket,
+            accepted_only=accepted_only,
+            has_accepted_review=has_accepted_review,
+        )
         if reasons:
             excluded_row = {"fund_code": fund_code, "reasons": reasons}
             if manual_bucket:
@@ -149,6 +171,7 @@ def build_portfolio_draft(
     return {
         "config_version": cfg["version"],
         "objective": cfg["objective"],
+        "mode": mode,
         "rows": sorted(capped, key=lambda item: (-item["draft_weight_pct"], item["fund_code"])),
         "excluded": excluded,
     }
