@@ -91,10 +91,24 @@ class PortfolioRoleReviewRequest(BaseModel):
     fund_code: str
     role_code: str
     decision: Literal["accept", "reject", "needs_more_data"]
-    target_bucket: Literal["core", "satellite", "index_tool", "cash_buffer", "exclude"]
+    target_bucket: Literal["core", "satellite", "index_tool", "cash_buffer", "exclude", "observe"]
     max_weight_pct: float = 0
     rationale: str = ""
     reviewer: str = ""
+
+
+class PortfolioRoleReviewItem(BaseModel):
+    fund_code: str
+    role_code: str
+    decision: Literal["accept", "reject", "needs_more_data"]
+    target_bucket: Literal["core", "satellite", "index_tool", "cash_buffer", "exclude"]
+    max_weight_pct: float = 0
+    rationale: str = ""
+
+
+class PortfolioRoleReviewApplyRequest(BaseModel):
+    reviewer: str
+    items: list[PortfolioRoleReviewItem]
 
 
 def create_app(
@@ -304,6 +318,59 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
         reviews = reader.list_portfolio_role_reviews(run_id, fund_code=fund_code)
         return {"run_id": run_id, "reviews": reviews}
+
+    @app.get("/v1/runs/{run_id}/portfolio-role-reviews/suggest")
+    def suggest_portfolio_role_reviews(
+        run_id: str,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """对所有 allocation_status=review_required 的基金给出 role review 建议。
+
+        不写库；返回结构给前端展示，研究员可以一键 apply 或逐只改。
+        """
+        if reader.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        from app.portfolio.role_review_suggest import suggest_role_reviews
+
+        payload = reader.get_portfolio_matrix(run_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail=f"matrix not found: {run_id}")
+        suggestions = suggest_role_reviews(payload.get("rows", []))
+        return {"run_id": run_id, "suggestions": suggestions}
+
+    @app.post("/v1/runs/{run_id}/portfolio-role-reviews/apply-suggestions")
+    def apply_portfolio_role_review_suggestions(
+        run_id: str,
+        request: PortfolioRoleReviewApplyRequest,
+        reader: LabelRunReader = Depends(get_reader),
+        writer: LabelRunWriter = Depends(get_writer),
+    ) -> dict[str, Any]:
+        """一键 apply 建议（不修改的内容可省略 reviewer 字段会被拒绝）。"""
+        if reader.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        if not request.reviewer.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="reviewer is required to apply suggestions",
+            )
+        applied: list[str] = []
+        for item in request.items:
+            writer.write_portfolio_role_review(
+                run_id=run_id,
+                fund_code=item.fund_code,
+                role_code=item.role_code,
+                decision=item.decision,
+                target_bucket=item.target_bucket,
+                max_weight_pct=item.max_weight_pct,
+                rationale=item.rationale,
+                reviewer=request.reviewer,
+            )
+            applied.append(item.fund_code)
+        return {
+            "run_id": run_id,
+            "reviewer": request.reviewer,
+            "applied_fund_codes": applied,
+        }
 
     @app.post("/v1/runs/{run_id}/portfolio-role-reviews")
     def create_portfolio_role_review(

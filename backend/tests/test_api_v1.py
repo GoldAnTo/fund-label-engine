@@ -920,3 +920,65 @@ def test_benchmark_components_endpoint_503_without_source_db(
 
     response = client.get("/v1/runs/x/funds/000001/benchmark-components")
     assert response.status_code == 503
+
+
+def test_suggest_portfolio_role_reviews_returns_only_review_required(seeded_run):
+    db, run_id = seeded_run
+    client = TestClient(create_app(db_path=db))
+
+    response = client.get(f"/v1/runs/{run_id}/portfolio-role-reviews/suggest")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["run_id"] == run_id
+    suggestions = body["suggestions"]
+    # 000002 是 review_required（先前 seeded_run 已构造该状态）
+    funds = {s["fund_code"] for s in suggestions}
+    assert "000002" in funds
+    for s in suggestions:
+        assert s["target_bucket"] in {
+            "core",
+            "satellite",
+            "exclude",
+            "observe",
+        }
+        assert s["role_code"]
+
+
+def test_apply_portfolio_role_review_suggestions_writes_rows(seeded_run):
+    db, run_id = seeded_run
+    client = TestClient(create_app(db_path=db))
+
+    # 先取建议
+    sug = client.get(f"/v1/runs/{run_id}/portfolio-role-reviews/suggest")
+    assert sug.status_code == 200
+    items = []
+    for s in sug.json()["suggestions"][:2]:
+        items.append(
+            {
+                "fund_code": s["fund_code"],
+                "role_code": s["role_code"],
+                "decision": "accept",
+                "target_bucket": s["target_bucket"],
+                "max_weight_pct": s["recommended_max_weight_pct"],
+                "rationale": s["rationale"],
+            }
+        )
+
+    # reviewer 缺失应 400
+    no_reviewer = client.post(
+        f"/v1/runs/{run_id}/portfolio-role-reviews/apply-suggestions",
+        json={"reviewer": "", "items": items},
+    )
+    assert no_reviewer.status_code == 400
+
+    # 正常 apply
+    applied = client.post(
+        f"/v1/runs/{run_id}/portfolio-role-reviews/apply-suggestions",
+        json={"reviewer": "researcher-auto", "items": items},
+    )
+    assert applied.status_code == 200
+    assert set(applied.json()["applied_fund_codes"]) == {it["fund_code"] for it in items}
+
+    listed = client.get(f"/v1/runs/{run_id}/portfolio-role-reviews")
+    assert listed.status_code == 200
+    assert len(listed.json()["reviews"]) == len(items)
