@@ -412,6 +412,46 @@ def test_get_portfolio_matrix_derives_combination_roles(seeded_run) -> None:
     assert "needs_review" in review["portfolio_roles"]
     assert "data_insufficient" in review["blocking_reasons"]
     assert "manual_review_required" in review["blocking_reasons"]
+    # 无 benchmark 表时精度标注一律 none，字段必须存在
+    assert ready["benchmark_precision"] == "none"
+
+
+def test_portfolio_matrix_flags_approx_benchmark(seeded_run) -> None:
+    db, run_id = seeded_run
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE benchmark_components (
+                fund_code TEXT, component_order INTEGER, component_code TEXT
+            );
+            CREATE TABLE benchmark_component_returns (
+                component_code TEXT, trade_date TEXT, daily_return REAL, source TEXT
+            );
+            CREATE TABLE benchmark_returns (
+                fund_code TEXT, trade_date TEXT, daily_return REAL
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO benchmark_components(fund_code, component_order, component_code) "
+            "VALUES ('000001', 0, 'LOCAL_CBOND_TOTAL')"
+        )
+        conn.execute(
+            "INSERT INTO benchmark_component_returns(component_code, trade_date, daily_return, source) "
+            "VALUES ('LOCAL_CBOND_TOTAL', '2026-01-02', 0.0001, 'approx:cbond_composite_for_cbond_total')"
+        )
+        conn.execute(
+            "INSERT INTO benchmark_returns(fund_code, trade_date, daily_return) "
+            "VALUES ('000001', '2026-01-02', 0.001)"
+        )
+        conn.commit()
+
+    client = TestClient(create_app(db_path=db))
+    response = client.get(f"/v1/runs/{run_id}/portfolio-matrix")
+
+    assert response.status_code == 200
+    rows = {row["fund_code"]: row for row in response.json()["rows"]}
+    assert rows["000001"]["benchmark_precision"] == "approx"
 
 
 def test_get_portfolio_draft_returns_weights(seeded_run) -> None:

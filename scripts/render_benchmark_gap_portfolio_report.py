@@ -93,6 +93,7 @@ def render_report(
     output_db: str | Path,
     out_md: str | Path,
     run_id: str | None = None,
+    source_db: str | Path | None = None,
 ) -> dict[str, Any]:
     reader = LabelRunReader(output_db)
     selected_run_id = run_id or reader.latest_succeeded_run_id()
@@ -172,8 +173,36 @@ def render_report(
     else:
         lines.append("| (none) |  |  |  |  | 0 |  |  |  |")
 
+    approx_count = 0
+    if source_db is not None:
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
+        from app.benchmark_precision import benchmark_precision_by_fund
+
+        precision = benchmark_precision_by_fund(source_db)
+        approx_funds = sorted(fc for fc, p in precision.items() if p == "approx")
+        approx_count = len(approx_funds)
+        lines += [
+            "",
+            "## Approximate Benchmark Funds",
+            "",
+            "这些基金已合成出 benchmark_returns，但债券组件用的是显式近似源"
+            "（中债综合财富指数近似中债总/中国债券总/标普中国债券，source 前缀 `approx:`）。"
+            "其 Alpha/超额收益/信息比率应按“近似基准”解读，不能与精确基准同等看待。",
+            "",
+            f"approx_benchmark_count: {approx_count}",
+            "",
+            "| fund_code |",
+            "| --- |",
+        ]
+        for fund_code in approx_funds:
+            lines.append(f"| `{fund_code}` |")
+        if not approx_funds:
+            lines.append("| (none) |")
+
     Path(out_md).write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-    return {"run_id": selected_run_id, "gap_count": len(details)}
+    return {"run_id": selected_run_id, "gap_count": len(details), "approx_count": approx_count}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -181,13 +210,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-db", required=True)
     parser.add_argument("--out-md", required=True)
     parser.add_argument("--run-id")
+    parser.add_argument("--source-db", help="source DB，用于标注 approx 近似基准基金")
     args = parser.parse_args(argv)
     summary = render_report(
         output_db=args.output_db,
         out_md=args.out_md,
         run_id=args.run_id,
+        source_db=args.source_db,
     )
-    print(f"wrote {args.out_md} (run_id={summary['run_id']}, gaps={summary['gap_count']})")
+    print(
+        f"wrote {args.out_md} (run_id={summary['run_id']}, "
+        f"gaps={summary['gap_count']}, approx={summary['approx_count']})"
+    )
     return 0
 
 

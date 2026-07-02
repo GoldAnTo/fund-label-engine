@@ -319,7 +319,14 @@ export default function PortfolioWorkbenchPage() {
                     <td>
                       <div>{joinTags(row.portfolio_roles)}</div>
                       <div className="muted">风格：{joinTags(row.style_tags)}</div>
-                      <div className="muted">收益：{joinTags(row.return_tags)}</div>
+                      <div className="muted">
+                        收益：{joinTags(row.return_tags)}
+                        {row.benchmark_precision === "approx" && (
+                          <span className="approx-benchmark-badge" title="相对基准用中债综合指数近似债券组件，Alpha/超额收益按近似口径解读">
+                            近似基准
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <div>{joinTags(row.risk_tags)}</div>

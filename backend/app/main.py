@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.batch import run_batch
+from app.benchmark_precision import benchmark_precision_by_fund
 from app.exporters import (
     export_fund_report,
     export_review_queue,
@@ -256,6 +257,22 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
         return summary
 
+    def _annotate_benchmark_precision(payload: dict[str, Any]) -> None:
+        """给 matrix 每行补 benchmark_precision(exact/approx/none)。
+
+        approx 表示该基金的相对基准用了显式近似源（中债综合近似中债总等），
+        Alpha/超额收益等相对结论需按“近似基准”解读，不能与精确基准同等看待。
+        """
+        source_db = app.state.source_db_path or app.state.db_path
+        precision: dict[str, str] = {}
+        if source_db:
+            try:
+                precision = benchmark_precision_by_fund(source_db)
+            except Exception:  # noqa: BLE001 - 标注失败不应影响 matrix 主体
+                precision = {}
+        for row in payload.get("rows", []):
+            row["benchmark_precision"] = precision.get(row["fund_code"], "none")
+
     @app.get("/v1/runs/{run_id}/portfolio-matrix")
     def get_run_portfolio_matrix(
         run_id: str,
@@ -264,6 +281,7 @@ def create_app(
         payload = reader.get_portfolio_matrix(run_id)
         if payload is None:
             raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        _annotate_benchmark_precision(payload)
         return payload
 
     @app.get("/v1/runs/{run_id}/portfolio-draft")

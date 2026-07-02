@@ -329,6 +329,7 @@ export interface PortfolioMatrixRow {
   blocking_reasons: string[];
   watch_reasons: string[];
   features: Record<string, number | string | null>;
+  benchmark_precision?: "exact" | "approx" | "none";
 }
 
 export interface PortfolioMatrixResponse {
