@@ -1,0 +1,58 @@
+{
+  "version": "v1",
+  "objective": "core_satellite_equity_pool",
+  "target_buckets": {
+    "core": {
+      "target_weight_pct": 60,
+      "min_weight_pct": 45,
+      "max_weight_pct": 70
+    },
+    "satellite": {
+      "target_weight_pct": 30,
+      "min_weight_pct": 20,
+      "max_weight_pct": 45
+    },
+    "index_tool": {
+      "target_weight_pct": 10,
+      "min_weight_pct": 0,
+      "max_weight_pct": 25
+    }
+  },
+  "single_fund_caps": {
+    "default_pct": 10,
+    "core_holding_candidate_pct": 15,
+    "satellite_alpha_pct": 8,
+    "index_tool_pct": 20
+  },
+  "risk_caps": {
+    "drawdown_high": 3,
+    "volatility_high": 5,
+    "beta_high": 4,
+    "holding_concentration_high": 6,
+    "industry_concentration_high": 6,
+    "tracking_error_high": 8
+  },
+  "hard_blockers": [
+    "benchmark_data_missing",
+    "data_insufficient",
+    "manual_review_required"
+  ],
+  "score_weights": {
+    "core_holding_candidate": 20,
+    "satellite_alpha": 15,
+    "defensive_anchor": 10,
+    "low_cost": 5,
+    "style_quality_growth": 6,
+    "style_deep_value": 5,
+    "style_dividend_steady": 5,
+    "style_high_dividend_financial": 4,
+    "alpha_positive": 6,
+    "information_ratio_high": 6,
+    "excess_return_strong": 4,
+    "drawdown_high": -12,
+    "volatility_high": -8,
+    "beta_high": -8,
+    "holding_concentration_high": -5,
+    "industry_concentration_high": -5
+  }
+}
