@@ -73,6 +73,24 @@ class RuleConfig:
     style_stability_min_periods: int = 2
     style_drift_delta_threshold: float = 0.25
     style_recent_shift_threshold: float = 0.20
+    # ---- 扩展风格标签阈值（估值/规模/盈利质量） ----
+    low_valuation_pb_max: float = 3.0
+    low_valuation_pe_max: float = 20.0
+    high_valuation_pb_min: float = 8.0
+    high_valuation_pe_min: float = 40.0
+    large_cap_log10_mcap_min: float = 10.5
+    mid_cap_log10_mcap_min: float = 9.5
+    mid_cap_log10_mcap_max: float = 10.5
+    small_cap_log10_mcap_max: float = 9.5
+    high_roe_threshold: float = 0.15
+    profit_growth_strong_threshold: float = 0.30
+    # 行业主题标签阈值
+    industry_theme_weight_min: float = 0.50
+    # ---- 风格组合标签阈值 ----
+    # 组合标签需要两个以上基础风格标签同时命中
+    mixed_style_min_styles: int = 3
+    mixed_style_min_ratio: float = 0.15
+    mixed_style_max_ratio: float = 0.35
     # ---- P0: 数据充足性 gate（独立可配，便于生产逐步收紧；
     #          默认保持「只校验是否存在」的旧行为，避免破坏已有用例） ----
     gate_min_nav_samples: int = 1
@@ -276,6 +294,45 @@ class RuleConfig:
             "style_recent_shift": {
                 "latest_period_delta_min": self.style_recent_shift_threshold,
             },
+            "low_valuation": {
+                "pb_weighted_max": self.low_valuation_pb_max,
+                "pe_weighted_max": self.low_valuation_pe_max,
+            },
+            "high_valuation": {
+                "pb_weighted_min": self.high_valuation_pb_min,
+                "pe_weighted_min": self.high_valuation_pe_min,
+            },
+            "large_cap": {
+                "log10_market_cap_weighted_min": self.large_cap_log10_mcap_min,
+            },
+            "mid_cap": {
+                "log10_market_cap_weighted_min": self.mid_cap_log10_mcap_min,
+                "log10_market_cap_weighted_max": self.mid_cap_log10_mcap_max,
+            },
+            "small_cap": {
+                "log10_market_cap_weighted_max": self.small_cap_log10_mcap_max,
+            },
+            "high_roe": {
+                "roe_weighted_min": self.high_roe_threshold,
+            },
+            "profit_growth_strong": {
+                "profit_growth_weighted_min": self.profit_growth_strong_threshold,
+            },
+            "tech_focused": {
+                "industry_theme_weight_min": self.industry_theme_weight_min,
+            },
+            "finance_focused": {
+                "industry_theme_weight_min": self.industry_theme_weight_min,
+            },
+            "consumer_focused": {
+                "industry_theme_weight_min": self.industry_theme_weight_min,
+            },
+            "healthcare_focused": {
+                "industry_theme_weight_min": self.industry_theme_weight_min,
+            },
+            "cyclical_focused": {
+                "industry_theme_weight_min": self.industry_theme_weight_min,
+            },
         }
         return mapping.get(label_code, {})
 
@@ -471,6 +528,90 @@ DEFAULT_LABEL_DEFINITIONS = (
         "description": "红利贡献股票行业映射覆盖率不足，暂不做金融/消费/红利分流。",
     },
     {
+        "label_code": "low_valuation",
+        "label_name": "低估值",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "持仓加权 PB 或 PE 低于规则阈值，估值整体偏低。",
+    },
+    {
+        "label_code": "high_valuation",
+        "label_name": "高估值",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "持仓加权 PB 或 PE 高于规则阈值，估值整体偏高。",
+    },
+    {
+        "label_code": "large_cap",
+        "label_name": "大盘风格",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "持仓加权对数市值高于规则阈值，以大盘股为主。",
+    },
+    {
+        "label_code": "mid_cap",
+        "label_name": "中盘风格",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "持仓加权对数市值处于中盘区间。",
+    },
+    {
+        "label_code": "small_cap",
+        "label_name": "小盘风格",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "持仓加权对数市值低于规则阈值，以小盘股为主。",
+    },
+    {
+        "label_code": "high_roe",
+        "label_name": "高盈利质量",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "持仓加权 ROE 达到规则阈值，持仓公司盈利能力较强。",
+    },
+    {
+        "label_code": "profit_growth_strong",
+        "label_name": "利润高增长",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "持仓加权利润增速达到规则阈值，持仓公司利润增长较快。",
+    },
+    {
+        "label_code": "tech_focused",
+        "label_name": "科技主题",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "科技行业持仓权重超过规则阈值，重仓科技板块。",
+    },
+    {
+        "label_code": "finance_focused",
+        "label_name": "金融主题",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "金融行业持仓权重超过规则阈值，重仓金融板块。",
+    },
+    {
+        "label_code": "consumer_focused",
+        "label_name": "消费主题",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "消费行业持仓权重超过规则阈值，重仓消费板块。",
+    },
+    {
+        "label_code": "healthcare_focused",
+        "label_name": "医药主题",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "医药行业持仓权重超过规则阈值，重仓医药板块。",
+    },
+    {
+        "label_code": "cyclical_focused",
+        "label_name": "周期主题",
+        "category": "holding_style",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": "周期性行业持仓权重超过规则阈值，重仓周期板块。",
+    },
+    {
         "label_code": "long_term_return_strong",
         "label_name": "长期收益优秀",
         "category": "return_risk",
@@ -600,6 +741,24 @@ _STYLE_LABELS = {
     "dividend_steady",
     "high_dividend_financial",
     "consumer_quality",
+    "low_valuation",
+    "high_valuation",
+    "large_cap",
+    "mid_cap",
+    "small_cap",
+    "high_roe",
+    "profit_growth_strong",
+    "tech_focused",
+    "finance_focused",
+    "consumer_focused",
+    "healthcare_focused",
+    "cyclical_focused",
+    "value_dividend",
+    "growth_large_cap",
+    "growth_small_cap",
+    "quality_dividend",
+    "value_quality",
+    "growth_profit",
 }
 _STYLE_GROUP_BY_LABEL = {
     "deep_value": ("deep_value_group", "深度价值组"),
@@ -607,6 +766,24 @@ _STYLE_GROUP_BY_LABEL = {
     "dividend_steady": ("dividend_steady_group", "红利稳健组"),
     "high_dividend_financial": ("high_dividend_financial_group", "金融高股息组"),
     "consumer_quality": ("consumer_quality_group", "消费质量组"),
+    "low_valuation": ("low_valuation_group", "低估值组"),
+    "high_valuation": ("high_valuation_group", "高估值组"),
+    "large_cap": ("large_cap_group", "大盘组"),
+    "mid_cap": ("mid_cap_group", "中盘组"),
+    "small_cap": ("small_cap_group", "小盘组"),
+    "high_roe": ("high_roe_group", "高盈利组"),
+    "profit_growth_strong": ("profit_growth_group", "利润高增长组"),
+    "tech_focused": ("tech_group", "科技主题组"),
+    "finance_focused": ("finance_group", "金融主题组"),
+    "consumer_focused": ("consumer_theme_group", "消费主题组"),
+    "healthcare_focused": ("healthcare_group", "医药主题组"),
+    "cyclical_focused": ("cyclical_group", "周期主题组"),
+    "value_dividend": ("composite_group", "组合风格组"),
+    "growth_large_cap": ("composite_group", "组合风格组"),
+    "growth_small_cap": ("composite_group", "组合风格组"),
+    "quality_dividend": ("composite_group", "组合风格组"),
+    "value_quality": ("composite_group", "组合风格组"),
+    "growth_profit": ("composite_group", "组合风格组"),
 }
 
 
@@ -795,6 +972,7 @@ class LabelEngine:
         self._add_fee_labels(fund, labels, evidence)
         self._add_fund_size_labels(fund, labels, evidence)
         self._add_style_boundary_labels(fund, labels, evidence)
+        self._add_extended_style_labels(fund, labels, evidence)
 
         if not coverage_ok:
             # gate 未通过时，所有非 data_quality/review 类标签强制降级为 observe，
@@ -2605,6 +2783,328 @@ class LabelEngine:
         # 数据完整：把股票因子按持仓权重聚合并尝试触发深度价值/质量成长/红利稳健
         self._add_style_labels(fund, labels, evidence)
         self._add_style_stability_labels(fund, labels, evidence)
+
+    def _add_extended_style_labels(
+        self,
+        fund: FundInput,
+        labels: list[LabelResult],
+        evidence: list[EvidenceItem],
+    ) -> None:
+        """扩展风格标签：估值/规模/盈利质量/行业主题。
+
+        这些标签在原有深度价值/质量成长/红利稳健之外，利用已有但未使用的
+        因子（PE、市值、利润增速）和行业映射，补充更细粒度的风格判断。
+        """
+        if not fund.factor_exposures and not fund.stock_factors:
+            return
+
+        cfg = self._rule_config
+        exposure_by_code = self._factor_exposure_lookup(fund.factor_exposures)
+
+        def _exp_value(code: str) -> float | None:
+            row = exposure_by_code.get(code) or {}
+            val = row.get("exposure_value")
+            if val is None:
+                return None
+            return float(val)
+
+        def _exp_coverage() -> float:
+            row = exposure_by_code.get("factor_coverage_weight") or {}
+            return float(row.get("exposure_value") or 0.0)
+
+        # 如果没有预聚合暴露，从持仓股票因子现算
+        if not exposure_by_code and fund.stock_factors:
+            factor_by_stock = self._factor_lookup(fund.stock_factors)
+            coverage_weight = 0.0
+            pb_sum = pe_sum = mcap_sum = roe_sum = pg_sum = 0.0
+            pb_w = pe_w = mcap_w = roe_w = pg_w = 0.0
+            for holding in fund.stock_holdings:
+                stock_code = holding.get("stock_code")
+                weight = float(holding.get("weight") or 0.0)
+                if not stock_code or weight <= 0:
+                    continue
+                factors = factor_by_stock.get(stock_code)
+                if not factors:
+                    continue
+                coverage_weight += weight
+                pb = self._safe_float(factors.get("pb"))
+                pe = self._safe_float(factors.get("pe"))
+                mcap = self._safe_float(factors.get("log10_market_cap"))
+                roe = self._safe_float(factors.get("roe"))
+                pg = self._safe_float(factors.get("profit_growth"))
+                if pb is not None and pb > 0:
+                    pb_sum += weight * min(pb, 100.0)
+                    pb_w += weight
+                if pe is not None and pe > 0:
+                    pe_sum += weight * min(pe, 500.0)
+                    pe_w += weight
+                if mcap is not None:
+                    mcap_sum += weight * mcap
+                    mcap_w += weight
+                if roe is not None:
+                    roe_sum += weight * max(min(roe, 1.0), -1.0)
+                    roe_w += weight
+                if pg is not None:
+                    pg_sum += weight * max(min(pg, 10.0), -3.0)
+                    pg_w += weight
+
+            pb_weighted = pb_sum / pb_w if pb_w > 0 else None
+            pe_weighted = pe_sum / pe_w if pe_w > 0 else None
+            mcap_weighted = mcap_sum / mcap_w if mcap_w > 0 else None
+            roe_weighted = roe_sum / roe_w if roe_w > 0 else None
+            pg_weighted = pg_sum / pg_w if pg_w > 0 else None
+            coverage = coverage_weight
+        else:
+            pb_weighted = _exp_value("pb_weighted")
+            pe_weighted = _exp_value("pe_weighted")
+            mcap_weighted = _exp_value("log10_market_cap_weighted")
+            roe_weighted = _exp_value("roe_weighted")
+            pg_weighted = _exp_value("profit_growth_weighted")
+            coverage = _exp_coverage()
+
+        # 覆盖率不足时不输出扩展风格标签
+        if coverage < cfg.style_exposure_low_coverage_threshold:
+            return
+
+        source = "fund_factor_exposures" if exposure_by_code else "stock_factors"
+
+        # --- 估值标签 ---
+        if pb_weighted is not None and pe_weighted is not None:
+            if pb_weighted <= cfg.low_valuation_pb_max or pe_weighted <= cfg.low_valuation_pe_max:
+                labels.append(LabelResult(
+                    label_code="low_valuation",
+                    label_name="低估值",
+                    category="holding_style",
+                    confidence=0.7,
+                ))
+                evidence.append(EvidenceItem(
+                    label_code="low_valuation",
+                    metric="pb_weighted/pe_weighted",
+                    value=f"PB={pb_weighted:.2f}, PE={pe_weighted:.2f}",
+                    threshold=f"PB≤{cfg.low_valuation_pb_max} 或 PE≤{cfg.low_valuation_pe_max}",
+                    source=source,
+                    message=f"加权 PB={pb_weighted:.2f}，加权 PE={pe_weighted:.2f}，达到低估值阈值。",
+                ))
+            elif pb_weighted >= cfg.high_valuation_pb_min or pe_weighted >= cfg.high_valuation_pe_min:
+                labels.append(LabelResult(
+                    label_code="high_valuation",
+                    label_name="高估值",
+                    category="holding_style",
+                    confidence=0.7,
+                ))
+                evidence.append(EvidenceItem(
+                    label_code="high_valuation",
+                    metric="pb_weighted/pe_weighted",
+                    value=f"PB={pb_weighted:.2f}, PE={pe_weighted:.2f}",
+                    threshold=f"PB≥{cfg.high_valuation_pb_min} 或 PE≥{cfg.high_valuation_pe_min}",
+                    source=source,
+                    message=f"加权 PB={pb_weighted:.2f}，加权 PE={pe_weighted:.2f}，达到高估值阈值。",
+                ))
+
+        # --- 规模标签 ---
+        if mcap_weighted is not None:
+            if mcap_weighted >= cfg.large_cap_log10_mcap_min:
+                labels.append(LabelResult(
+                    label_code="large_cap",
+                    label_name="大盘风格",
+                    category="holding_style",
+                    confidence=0.7,
+                ))
+                evidence.append(EvidenceItem(
+                    label_code="large_cap",
+                    metric="log10_market_cap_weighted",
+                    value=round(mcap_weighted, 4),
+                    threshold=cfg.large_cap_log10_mcap_min,
+                    source=source,
+                    message=f"加权对数市值 {mcap_weighted:.2f}，达到大盘阈值 {cfg.large_cap_log10_mcap_min}。",
+                ))
+            elif cfg.mid_cap_log10_mcap_min <= mcap_weighted < cfg.mid_cap_log10_mcap_max:
+                labels.append(LabelResult(
+                    label_code="mid_cap",
+                    label_name="中盘风格",
+                    category="holding_style",
+                    confidence=0.7,
+                ))
+                evidence.append(EvidenceItem(
+                    label_code="mid_cap",
+                    metric="log10_market_cap_weighted",
+                    value=round(mcap_weighted, 4),
+                    threshold=f"{cfg.mid_cap_log10_mcap_min}~{cfg.mid_cap_log10_mcap_max}",
+                    source=source,
+                    message=f"加权对数市值 {mcap_weighted:.2f}，处于中盘区间。",
+                ))
+            elif mcap_weighted < cfg.small_cap_log10_mcap_max:
+                labels.append(LabelResult(
+                    label_code="small_cap",
+                    label_name="小盘风格",
+                    category="holding_style",
+                    confidence=0.7,
+                ))
+                evidence.append(EvidenceItem(
+                    label_code="small_cap",
+                    metric="log10_market_cap_weighted",
+                    value=round(mcap_weighted, 4),
+                    threshold=cfg.small_cap_log10_mcap_max,
+                    source=source,
+                    message=f"加权对数市值 {mcap_weighted:.2f}，达到小盘阈值 {cfg.small_cap_log10_mcap_max}。",
+                ))
+
+        # --- 盈利质量标签 ---
+        if roe_weighted is not None and roe_weighted >= cfg.high_roe_threshold:
+            labels.append(LabelResult(
+                label_code="high_roe",
+                label_name="高盈利质量",
+                category="holding_style",
+                confidence=0.7,
+            ))
+            evidence.append(EvidenceItem(
+                label_code="high_roe",
+                metric="roe_weighted",
+                value=round(roe_weighted, 4),
+                threshold=cfg.high_roe_threshold,
+                source=source,
+                message=f"加权 ROE={roe_weighted:.2%}，达到阈值 {cfg.high_roe_threshold:.0%}。",
+            ))
+
+        if pg_weighted is not None and pg_weighted >= cfg.profit_growth_strong_threshold:
+            labels.append(LabelResult(
+                label_code="profit_growth_strong",
+                label_name="利润高增长",
+                category="holding_style",
+                confidence=0.7,
+            ))
+            evidence.append(EvidenceItem(
+                label_code="profit_growth_strong",
+                metric="profit_growth_weighted",
+                value=round(pg_weighted, 4),
+                threshold=cfg.profit_growth_strong_threshold,
+                source=source,
+                message=f"加权利润增速={pg_weighted:.2%}，达到阈值 {cfg.profit_growth_strong_threshold:.0%}。",
+            ))
+
+        # --- 行业主题标签 ---
+        self._add_industry_theme_labels(fund, labels, evidence, source)
+
+        # --- 风格组合标签 ---
+        self._add_composite_style_labels(labels, evidence, source)
+
+    def _add_industry_theme_labels(
+        self,
+        fund: FundInput,
+        labels: list[LabelResult],
+        evidence: list[EvidenceItem],
+        source: str,
+    ) -> None:
+        """行业主题标签：统计持仓股票的行业分组权重，触发主题标签。"""
+        if not fund.stock_factors:
+            return
+
+        cfg = self._rule_config
+        # 从 fund.stock_factors 里的行业映射信息计算行业权重
+        # stock_factors 中每只股票可能携带 sector_group 信息
+        sector_weights: dict[str, float] = {}
+        total_weight = 0.0
+
+        for holding in fund.stock_holdings:
+            stock_code = holding.get("stock_code")
+            weight = float(holding.get("weight") or 0.0)
+            if not stock_code or weight <= 0:
+                continue
+            total_weight += weight
+            # 从 stock_factors 行里取 sector_group
+            sector = None
+            for sf in fund.stock_factors:
+                if str(sf.get("stock_code")) == str(stock_code):
+                    sector = sf.get("sector_group")
+                    break
+            if sector:
+                sector_weights[sector] = sector_weights.get(sector, 0.0) + weight
+
+        if total_weight <= 0:
+            return
+
+        theme_mapping = {
+            "tech": ("tech_focused", "科技主题"),
+            "financial": ("finance_focused", "金融主题"),
+            "consumer": ("consumer_focused", "消费主题"),
+            "healthcare": ("healthcare_focused", "医药主题"),
+            "cyclical": ("cyclical_focused", "周期主题"),
+        }
+
+        for sector, (label_code, label_name) in theme_mapping.items():
+            weight = sector_weights.get(sector, 0.0)
+            ratio = weight / total_weight if total_weight > 0 else 0.0
+            if ratio >= cfg.industry_theme_weight_min:
+                labels.append(LabelResult(
+                    label_code=label_code,
+                    label_name=label_name,
+                    category="holding_style",
+                    confidence=0.7,
+                ))
+                evidence.append(EvidenceItem(
+                    label_code=label_code,
+                    metric=f"{sector}_industry_weight",
+                    value=round(ratio, 4),
+                    threshold=cfg.industry_theme_weight_min,
+                    source=source,
+                    message=f"{sector} 行业持仓权重 {ratio:.0%}，达到阈值 {cfg.industry_theme_weight_min:.0%}。",
+                ))
+
+    def _add_composite_style_labels(
+        self,
+        labels: list[LabelResult],
+        evidence: list[EvidenceItem],
+        source: str,
+    ) -> None:
+        """风格组合标签：当两个以上基础风格标签同时命中时，生成组合标签。
+
+        组合标签让标签更接近投研语言，比如「价值红利」「大盘成长」。
+        """
+        # LabelResult 默认 status="active"（不传时）；基础风格标签的 active 状态
+        # 即为命中。同时排除已被本组合方法本身标记的 composite_group 标签，
+        # 避免重复触发与连锁。
+        triggered_codes = {
+            lbl.label_code
+            for lbl in labels
+            if lbl.status in ("active", "triggered")
+        }
+
+        # 定义组合标签规则
+        composite_rules: list[tuple[str, str, frozenset[str]]] = [
+            # (label_code, label_name, required_codes)
+            ("value_dividend", "价值红利", frozenset({"low_valuation", "dividend_steady"})),
+            ("growth_large_cap", "大盘成长", frozenset({"quality_growth", "large_cap"})),
+            ("growth_small_cap", "小盘成长", frozenset({"quality_growth", "small_cap"})),
+            ("quality_dividend", "高质量红利", frozenset({"high_roe", "dividend_steady"})),
+            ("value_quality", "价值质量", frozenset({"low_valuation", "high_roe"})),
+            ("growth_profit", "成长盈利", frozenset({"quality_growth", "profit_growth_strong"})),
+        ]
+
+        for label_code, label_name, required in composite_rules:
+            if required.issubset(triggered_codes):
+                labels.append(LabelResult(
+                    label_code=label_code,
+                    label_name=label_name,
+                    category="holding_style",
+                    confidence=0.65,
+                ))
+                evidence.append(EvidenceItem(
+                    label_code=label_code,
+                    metric="composite_styles",
+                    value="+".join(sorted(required)),
+                    threshold="同时命中",
+                    source=source,
+                    message=f"同时命中 {' + '.join(sorted(required))}，组合为{label_name}。",
+                ))
+
+    @staticmethod
+    def _safe_float(value: Any) -> float | None:
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _factor_lookup(

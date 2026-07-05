@@ -23,8 +23,9 @@ def _number_or_text(value: str) -> float | str:
 class LabelRunReader:
     """从 SQLite 读取已经落库的标签批次结果。"""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, source_db_path: str | Path | None = None) -> None:
         self._db_path = str(db_path)
+        self._source_db_path = str(source_db_path) if source_db_path else None
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -304,6 +305,268 @@ class LabelRunReader:
             "review_action": payload["review_action"],
         }
         return payload
+
+    def list_percentile_ranks(
+        self,
+        run_id: str,
+        fund_code: str,
+        label_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """列出某只基金在各分组下的指标百分位排名。
+
+        默认包含 'all_market'（全市场基线）+ 该基金所有命中的风格标签分组。
+        """
+        with self._connect() as conn:
+            if label_code is not None:
+                rows = conn.execute(
+                    """
+                    SELECT label_code, metric_code, metric_value,
+                           percentile, rank_value, peer_count, direction
+                    FROM fund_percentile_rank
+                    WHERE run_id = ? AND fund_code = ? AND label_code = ?
+                    ORDER BY metric_code
+                    """,
+                    (run_id, fund_code, label_code),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT label_code, metric_code, metric_value,
+                           percentile, rank_value, peer_count, direction
+                    FROM fund_percentile_rank
+                    WHERE run_id = ? AND fund_code = ?
+                    ORDER BY label_code, metric_code
+                    """,
+                    (run_id, fund_code),
+                ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_top_funds_in_group(
+        self,
+        run_id: str,
+        label_code: str,
+        metric_code: str,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """获取某分组某指标下排名前 N 的基金。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT fund_code, metric_value, percentile, rank_value, peer_count
+                FROM fund_percentile_rank
+                WHERE run_id = ? AND label_code = ? AND metric_code = ?
+                ORDER BY percentile DESC
+                LIMIT ?
+                """,
+                (run_id, label_code, metric_code, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # 竞品横评
+    # ------------------------------------------------------------------
+
+    # 对比表中要展示的核心指标（metric_code -> 中文名 + 方向）
+    # 方向: higher_better / lower_better
+    COMPARE_METRICS: list[tuple[str, str, str]] = [
+        ("annualized_return_1y", "年化收益(1y)", "higher_better"),
+        ("sharpe_ratio_1y", "夏普比率(1y)", "higher_better"),
+        ("max_drawdown_1y", "最大回撤(1y)", "lower_better"),
+        ("annualized_excess_return_1y", "超额收益(1y)", "higher_better"),
+        ("information_ratio_1y", "信息比率(1y)", "higher_better"),
+        ("roe_weighted", "加权ROE", "higher_better"),
+        ("pe_weighted", "加权PE", "lower_better"),
+        ("pb_weighted", "加权PB", "lower_better"),
+    ]
+
+    def get_compare_overview(
+        self,
+        run_id: str,
+        fund_codes: list[str],
+    ) -> dict[str, Any]:
+        """获取多只基金的对比概览：标签、风格因子、核心指标、分位数。
+
+        返回结构:
+        {
+          "run_id": ...,
+          "funds": [
+            {
+              "fund_code": ...,
+              "labels": [{label_code, label_name, status, category}],
+              "factor_exposures": [{factor_code, exposure_value, ...}],
+              "metrics": {metric_code: value},          # 从 evidence / factor_exposures 取
+              "percentiles": {                           # 按 all_market 分组
+                metric_code: {percentile, rank_value, peer_count}
+              },
+            }
+          ],
+          "metric_defs": [{metric_code, name, direction}],
+        }
+        """
+        if not fund_codes:
+            return {"run_id": run_id, "funds": [], "metric_defs": []}
+
+        metric_defs = [
+            {"metric_code": c, "name": n, "direction": d}
+            for c, n, d in self.COMPARE_METRICS
+        ]
+
+        funds_payload: list[dict[str, Any]] = []
+        for fund_code in fund_codes:
+            report = self.get_fund_report(run_id, fund_code)
+            if report is None:
+                funds_payload.append({
+                    "fund_code": fund_code,
+                    "labels": [],
+                    "factor_exposures": [],
+                    "metrics": {},
+                    "percentiles": {},
+                    "not_found": True,
+                })
+                continue
+
+            # 提取指标值
+            metrics: dict[str, Any] = {}
+            # evidence 里的指标
+            ev_metrics_map = {
+                "annualized_return_1y": "annualized_return_1y",
+                "sharpe_ratio_1y": "sharpe_ratio_1y",
+                "max_drawdown_1y": "max_drawdown_1y",
+                "annualized_excess_return_1y": "annualized_excess_return_1y",
+                "information_ratio_1y": "information_ratio_1y",
+            }
+            for ev in report.get("evidence", []):
+                key = ev_metrics_map.get(ev.get("metric"))
+                if key and key not in metrics:
+                    try:
+                        metrics[key] = float(ev["value"])
+                    except (TypeError, ValueError):
+                        pass
+            # factor_exposures 里的指标
+            for fe in report.get("factor_exposures", []):
+                fc = fe.get("factor_code")
+                if fc in ("roe_weighted", "pe_weighted", "pb_weighted"):
+                    try:
+                        metrics[fc] = float(fe["exposure_value"])
+                    except (TypeError, ValueError):
+                        pass
+
+            # 提取全市场分位数
+            percentiles: dict[str, dict[str, Any]] = {}
+            for r in self.list_percentile_ranks(run_id, fund_code, "all_market"):
+                percentiles[r["metric_code"]] = {
+                    "percentile": r["percentile"],
+                    "rank_value": r["rank_value"],
+                    "peer_count": r["peer_count"],
+                }
+
+            funds_payload.append({
+                "fund_code": fund_code,
+                "labels": [
+                    {"label_code": l["label_code"], "label_name": l["label_name"],
+                     "status": l["status"], "category": l["category"]}
+                    for l in report.get("labels", [])
+                ],
+                "factor_exposures": report.get("factor_exposures", []),
+                "metrics": metrics,
+                "percentiles": percentiles,
+            })
+
+        return {
+            "run_id": run_id,
+            "funds": funds_payload,
+            "metric_defs": metric_defs,
+        }
+
+    def get_holdings_overlap(
+        self,
+        fund_codes: list[str],
+        top_n: int = 10,
+    ) -> dict[str, Any]:
+        """计算多只基金最新一期持仓的重叠度。
+
+        返回:
+        {
+          "fund_codes": [...],
+          "pairwise_overlap": {  # 两两之间的重叠度
+            "000001|000017": {"overlap_weight": 0.32, "overlap_count": 5}
+          },
+          "common_holdings": [  # 所有基金都持有的股票
+            {stock_code, stock_name, weights: {fund_code: weight}}
+          ],
+        }
+        """
+        if len(fund_codes) < 2:
+            return {"fund_codes": fund_codes, "pairwise_overlap": {}, "common_holdings": []}
+
+        import sqlite3
+        source_db = self._source_db_path
+        if not source_db:
+            return {"fund_codes": fund_codes, "pairwise_overlap": {}, "common_holdings": [], "error": "source db not configured"}
+
+        conn = sqlite3.connect(source_db)
+        conn.row_factory = sqlite3.Row
+        try:
+            # 每只基金最新一期的前 top_n 持仓
+            holdings_by_fund: dict[str, dict[str, dict[str, Any]]] = {}
+            for fc in fund_codes:
+                rows = conn.execute(
+                    """
+                    SELECT stock_code, stock_name, net_value_ratio
+                    FROM stock_holdings
+                    WHERE fund_code = ? AND stock_code IS NOT NULL
+                      AND net_value_ratio IS NOT NULL AND net_value_ratio > 0
+                      AND report_period = (
+                        SELECT MAX(report_period) FROM stock_holdings WHERE fund_code = ?
+                      )
+                    ORDER BY net_value_ratio DESC
+                    LIMIT ?
+                    """,
+                    (fc, fc, top_n),
+                ).fetchall()
+                holdings_by_fund[fc] = {
+                    row["stock_code"]: {
+                        "stock_name": row["stock_name"],
+                        "weight": row["net_value_ratio"],
+                    }
+                    for row in rows
+                }
+        finally:
+            conn.close()
+
+        # 两两重叠度
+        pairwise: dict[str, dict[str, Any]] = {}
+        for i, fa in enumerate(fund_codes):
+            for fb in fund_codes[i + 1:]:
+                ha = holdings_by_fund.get(fa, {})
+                hb = holdings_by_fund.get(fb, {})
+                common = set(ha.keys()) & set(hb.keys())
+                overlap_weight = sum(min(ha[s]["weight"], hb[s]["weight"]) for s in common)
+                key = f"{fa}|{fb}"
+                pairwise[key] = {
+                    "overlap_weight": round(overlap_weight, 4),
+                    "overlap_count": len(common),
+                }
+
+        # 所有基金共同持有的股票
+        common_holdings: list[dict[str, Any]] = []
+        if holdings_by_fund:
+            all_sets = [set(h.keys()) for h in holdings_by_fund.values()]
+            common_codes = set.intersection(*all_sets) if all_sets else set()
+            for sc in sorted(common_codes):
+                weights = {fc: holdings_by_fund[fc][sc]["weight"] for fc in fund_codes if sc in holdings_by_fund.get(fc, {})}
+                name = next((h[sc]["stock_name"] for h in holdings_by_fund.values() if sc in h and h[sc]["stock_name"]), sc)
+                common_holdings.append({
+                    "stock_code": sc,
+                    "stock_name": name,
+                    "weights": weights,
+                })
+
+        return {
+            "fund_codes": fund_codes,
+            "pairwise_overlap": pairwise,
+            "common_holdings": common_holdings,
+        }
 
     def search_run_funds(
         self,

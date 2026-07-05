@@ -98,6 +98,23 @@ export interface FactorExposure {
   computed_at: string;
 }
 
+export interface EquityStyleContribution {
+  fund_code: string;
+  report_date: string;
+  stock_code: string;
+  stock_name: string | null;
+  weight: number;
+  style_code: string;
+  style_name: string;
+  matched: number;
+  contribution_weight: number;
+  factor_values_json: string;
+  rule_snapshot_json: string;
+  factor_as_of_date: string;
+  source: string;
+  computed_at: string;
+}
+
 export interface Review {
   review_id: string;
   run_id: string;
@@ -130,6 +147,7 @@ export interface FundReport {
   evidence: Evidence[];
   features: FeatureValue[];
   factor_exposures: FactorExposure[];
+  equity_style_contributions?: EquityStyleContribution[];
   reviews: Review[];
   calculations: Calculation[];
   summary: {
@@ -140,6 +158,7 @@ export interface FundReport {
     missing_field_count: number;
     review_count: number;
     review_action: string;
+    equity_style_contribution_count?: number;
   };
 }
 
@@ -148,6 +167,38 @@ export interface SearchResult {
   label_count: number;
   review_action: string;
   missing_field_count: number;
+}
+
+export interface PercentileRank {
+  label_code: string;
+  metric_code: string;
+  metric_value: number | null;
+  percentile: number;
+  rank_value: number;
+  peer_count: number;
+  direction: "higher_better" | "lower_better";
+}
+
+export interface FundPercentileResponse {
+  run_id: string;
+  fund_code: string;
+  label_code: string | null;
+  ranks: PercentileRank[];
+}
+
+export interface TopFundEntry {
+  fund_code: string;
+  metric_value: number | null;
+  percentile: number;
+  rank_value: number;
+  peer_count: number;
+}
+
+export interface TopFundsResponse {
+  run_id: string;
+  label_code: string;
+  metric_code: string;
+  results: TopFundEntry[];
 }
 
 export interface SearchResponse {
@@ -241,6 +292,96 @@ export async function fetchRelativeEligibility(
   status: "all" | "ready" | "blocked" = "all"
 ): Promise<RelativeEligibilityResponse> {
   return json(`/v1/runs/${runId}/relative-label-eligibility?status=${status}&limit=300`);
+}
+
+export async function fetchFundPercentile(
+  runId: string,
+  fundCode: string,
+  labelCode?: string
+): Promise<FundPercentileResponse> {
+  const q = labelCode ? `?label_code=${encodeURIComponent(labelCode)}` : "";
+  return json(`/v1/runs/${runId}/funds/${fundCode}/percentile${q}`);
+}
+
+export async function fetchTopFunds(
+  runId: string,
+  labelCode: string,
+  metricCode: string = "annualized_return_1y",
+  limit: number = 5
+): Promise<TopFundsResponse> {
+  return json(
+    `/v1/runs/${runId}/top-funds?label_code=${encodeURIComponent(labelCode)}&metric_code=${metricCode}&limit=${limit}`
+  );
+}
+
+// ---------- 竞品横评 ----------
+
+export interface CompareFundLabelsEntry {
+  label_code: string;
+  label_name: string;
+  status: string;
+  category: string;
+}
+
+export interface CompareFactorExposure {
+  factor_code: string;
+  exposure_value: number;
+  [key: string]: unknown;
+}
+
+export interface CompareFundEntry {
+  fund_code: string;
+  labels: CompareFundLabelsEntry[];
+  factor_exposures: CompareFactorExposure[];
+  metrics: Record<string, number>;
+  percentiles: Record<string, { percentile: number; rank_value: number; peer_count: number }>;
+  not_found?: boolean;
+}
+
+export interface CompareMetricDef {
+  metric_code: string;
+  name: string;
+  direction: "higher_better" | "lower_better";
+}
+
+export interface CompareResponse {
+  run_id: string;
+  funds: CompareFundEntry[];
+  metric_defs: CompareMetricDef[];
+}
+
+export interface PairwiseOverlap {
+  overlap_weight: number;
+  overlap_count: number;
+}
+
+export interface CommonHolding {
+  stock_code: string;
+  stock_name: string;
+  weights: Record<string, number>;
+}
+
+export interface HoldingsOverlapResponse {
+  fund_codes: string[];
+  pairwise_overlap: Record<string, PairwiseOverlap>;
+  common_holdings: CommonHolding[];
+  error?: string;
+}
+
+export async function fetchCompare(
+  runId: string,
+  fundCodes: string[]
+): Promise<CompareResponse> {
+  const funds = fundCodes.join(",");
+  return json(`/v1/runs/${runId}/compare?funds=${encodeURIComponent(funds)}`);
+}
+
+export async function fetchHoldingsOverlap(
+  fundCodes: string[],
+  topN: number = 10
+): Promise<HoldingsOverlapResponse> {
+  const funds = fundCodes.join(",");
+  return json(`/v1/holdings-overlap?funds=${encodeURIComponent(funds)}&top_n=${topN}`);
 }
 
 export interface WorkbenchTask {

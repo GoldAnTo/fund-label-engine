@@ -2,28 +2,80 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   deletePortfolioRoleReview,
+  fetchFundReport,
   fetchPortfolioDraft,
   fetchPortfolioMatrix,
   fetchPortfolioRoleReviews,
+  fetchRelativeEligibility,
   fetchRuns,
   postPortfolioRoleReview,
+  type FundLabel,
+  type FundReport,
   type PortfolioDraftMode,
   type PortfolioDraftResponse,
   type PortfolioMatrixResponse,
   type PortfolioRoleReview,
+  type RelativeEligibilityResponse,
 } from "../api";
+import { LabelStatusBadge, ReviewActionBadge } from "../components";
+import { labelTier, tierTitle, type LabelTier } from "../labelTiers";
 
 const STATUS_LABELS: Record<string, string> = {
-  eligible: "可进入草案",
+  eligible: "可进草案",
   observe: "观察池",
   review_required: "需复核",
   excluded: "已排除",
+};
+
+const READY_LABELS: Record<string, string> = {
+  relative_label_ready: "可展示",
+  relative_label_ready_approx: "可展示，近似基准",
+  benchmark_source_missing: "缺少基准收益源",
+  benchmark_mapping_required: "需要确认基准映射",
+  benchmark_unresolved: "基准组件未解析",
+  benchmark_missing: "未配置业绩基准",
+  nav_window_insufficient: "收益窗口不足",
 };
 
 const BUCKET_LABELS: Record<string, string> = {
   core: "核心",
   satellite: "卫星",
   index_tool: "指数工具",
+  cash_buffer: "现金缓冲",
+  exclude: "排除",
+};
+
+const TAG_LABELS: Record<string, string> = {
+  active_equity_candidate: "主动权益候选",
+  core_holding_candidate: "核心候选",
+  satellite_alpha: "卫星阿尔法",
+  defensive_anchor: "防守锚",
+  index_tool: "指数工具",
+  style_deep_value: "深度价值",
+  style_quality_growth: "质量成长",
+  style_dividend_steady: "红利稳健",
+  style_balanced: "风格均衡",
+  alpha_positive: "Alpha 为正",
+  alpha_negative: "Alpha 为负",
+  excess_return_positive: "超额收益为正",
+  excess_return_negative: "超额收益为负",
+  volatility_high: "高波动",
+  volatility_low: "低波动",
+  drawdown_high: "高回撤",
+  sharpe_high: "高夏普",
+  data_sufficient: "数据充分",
+  return_window_insufficient: "收益窗口不足",
+};
+
+const FEATURE_LABELS: Record<string, string> = {
+  annualized_return_1y: "近一年收益",
+  annualized_return_3y: "近三年收益",
+  max_drawdown_1y: "最大回撤",
+  volatility_1y: "波动率",
+  sharpe_1y: "夏普",
+  fund_size: "基金规模",
+  manager_tenure_years: "经理任职",
+  expense_ratio: "费率",
 };
 
 const REVIEW_DECISIONS = [
@@ -33,20 +85,50 @@ const REVIEW_DECISIONS = [
   { value: "exclude", label: "排除" },
 ];
 
+const DELIVERY_LANES = [
+  { title: "标签引擎", body: "覆盖率、收益风险、持仓、经理、费率、风格、相对基准标签全部有证据。" },
+  { title: "可展示池", body: "把可对外展示和暂不可展示的基金分开，明确每个阻塞原因。" },
+  { title: "Benchmark 审计", body: "检查基准组件、收益源、近似口径，避免相对标签误读。" },
+  { title: "人工复核", body: "复核队列承接边界样本，保留研究员判断和签核痕迹。" },
+  { title: "组合草案", body: "把基金映射到核心、卫星、指数工具，形成可讨论的组合雏形。" },
+];
+
+const FLOW = ["数据接入", "标签计算", "证据落库", "展示门禁", "人工签核", "组合草案"];
+
+type FundRow = PortfolioMatrixResponse["rows"][number];
+
 function statusLabel(value: string) {
   return STATUS_LABELS[value] ?? value;
+}
+
+function readyLabel(value: string | undefined) {
+  return value ? READY_LABELS[value] ?? value : "资格加载中";
 }
 
 function bucketLabel(value: string) {
   return BUCKET_LABELS[value] ?? value;
 }
 
-function joinTags(values: string[] | undefined) {
-  return values && values.length > 0 ? values.join(", ") : "-";
+function tagLabel(value: string) {
+  return TAG_LABELS[value] ?? value.replaceAll("_", " ");
 }
 
-function statusClass(status: string) {
-  if (status === "eligible") return "badge-observe";
+function featureLabel(value: string) {
+  return FEATURE_LABELS[value] ?? value.replaceAll("_", " ");
+}
+
+function displayValue(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(4);
+  return value;
+}
+
+function isReadyStatus(value: string | undefined) {
+  return value === "relative_label_ready" || value === "relative_label_ready_approx";
+}
+
+function badgeClass(status: string | undefined) {
+  if (isReadyStatus(status) || status === "eligible") return "badge-observe";
   if (status === "review_required") return "badge-manual_review";
   if (status === "excluded") return "badge-default";
   return "badge-active";
@@ -56,11 +138,41 @@ function reviewMap(reviews: PortfolioRoleReview[]) {
   const map = new Map<string, PortfolioRoleReview>();
   reviews.forEach((review) => {
     const existing = map.get(review.fund_code);
-    if (!existing || review.reviewed_at >= existing.reviewed_at) {
-      map.set(review.fund_code, review);
-    }
+    if (!existing || review.reviewed_at >= existing.reviewed_at) map.set(review.fund_code, review);
   });
   return map;
+}
+
+function tierLabels(data: FundReport | null, relativeReady: boolean) {
+  const empty: Record<LabelTier, FundLabel[]> = { style: [], relative: [], observe: [], data_only: [], other: [] };
+  if (!data) return empty;
+  data.labels.forEach((label) => empty[labelTier(label, relativeReady)].push(label));
+  return empty;
+}
+
+function evidenceForLabel(data: FundReport, labelCode: string) {
+  return data.evidence.filter((item) => item.label_code === labelCode);
+}
+
+function readableBlocker(value: string | undefined) {
+  if (!value) return "没有阻塞项";
+  return value
+    .replaceAll("benchmark_source_status=benchmark_missing", "未配置业绩基准")
+    .replaceAll("benchmark_source_status=missing_source", "缺少基准收益源")
+    .replaceAll("benchmark_source_status=mapping_required", "需要确认基准映射")
+    .replaceAll("benchmark_source_status=unresolved", "基准组件未解析")
+    .replaceAll("relative_label_ready_approx", "可展示，近似基准")
+    .replaceAll("relative_label_ready", "可展示")
+    .replaceAll("benchmark_source_missing", "缺少基准收益源")
+    .replaceAll("benchmark_mapping_required", "需要确认基准映射")
+    .replaceAll("benchmark_unresolved", "基准组件未解析")
+    .replaceAll("benchmark_missing", "未配置业绩基准")
+    .replaceAll("nav_window_insufficient", "收益窗口不足")
+    .replace(/\b[A-Z0-9_]+:/g, "");
+}
+
+function rowTags(row: FundRow) {
+  return [...row.portfolio_roles, ...row.style_tags, ...row.return_tags, ...row.risk_tags, ...row.data_tags].filter(Boolean);
 }
 
 export default function PortfolioWorkbenchPage() {
@@ -70,12 +182,17 @@ export default function PortfolioWorkbenchPage() {
   const [draft, setDraft] = useState<PortfolioDraftResponse | null>(null);
   const [draftMode, setDraftMode] = useState<PortfolioDraftMode>("research");
   const [reviews, setReviews] = useState<PortfolioRoleReview[]>([]);
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [bucketFilter, setBucketFilter] = useState("all");
+  const [eligibility, setEligibility] = useState<RelativeEligibilityResponse | null>(null);
+  const [selectedFund, setSelectedFund] = useState("");
+  const [selectedReport, setSelectedReport] = useState<FundReport | null>(null);
+  const [query, setQuery] = useState("");
+  const [scopeFilter, setScopeFilter] = useState("all");
   const [reviewer, setReviewer] = useState("researcher-a");
   const [savingFund, setSavingFund] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
 
   useEffect(() => {
     fetchRuns()
@@ -94,15 +211,37 @@ export default function PortfolioWorkbenchPage() {
       fetchPortfolioMatrix(runId),
       fetchPortfolioDraft(runId, draftMode),
       fetchPortfolioRoleReviews(runId),
+      fetchRelativeEligibility(runId, "all"),
     ])
-      .then(([matrixPayload, draftPayload, reviewPayload]) => {
+      .then(([matrixPayload, draftPayload, reviewPayload, eligibilityPayload]) => {
         setMatrix(matrixPayload);
         setDraft(draftPayload);
         setReviews(reviewPayload);
+        setEligibility(eligibilityPayload);
+        setSelectedFund((current) => {
+          if (current && matrixPayload.rows.some((row) => row.fund_code === current)) return current;
+          return draftPayload.rows[0]?.fund_code ?? matrixPayload.rows[0]?.fund_code ?? "";
+        });
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [runId, draftMode]);
+
+  useEffect(() => {
+    if (!runId || !selectedFund) {
+      setSelectedReport(null);
+      return;
+    }
+    setReportLoading(true);
+    setReportError(null);
+    fetchFundReport(runId, selectedFund)
+      .then(setSelectedReport)
+      .catch((e) => {
+        setSelectedReport(null);
+        setReportError(e.message);
+      })
+      .finally(() => setReportLoading(false));
+  }, [runId, selectedFund]);
 
   const draftByFund = useMemo(() => {
     const map = new Map<string, PortfolioDraftResponse["rows"][number]>();
@@ -111,6 +250,19 @@ export default function PortfolioWorkbenchPage() {
   }, [draft]);
 
   const reviewsByFund = useMemo(() => reviewMap(reviews), [reviews]);
+
+  const eligibilityByFund = useMemo(() => {
+    const map = new Map<string, RelativeEligibilityResponse["results"][number]>();
+    eligibility?.results.forEach((row) => map.set(row.fund_code, row));
+    return map;
+  }, [eligibility]);
+
+  const selectedMatrixRow = matrix?.rows.find((row) => row.fund_code === selectedFund) ?? null;
+  const selectedEligibility = selectedFund ? eligibilityByFund.get(selectedFund) ?? null : null;
+  const selectedDraftRow = selectedFund ? draftByFund.get(selectedFund) ?? null : null;
+  const selectedReview = selectedFund ? reviewsByFund.get(selectedFund) ?? null : null;
+  const relativeReady = isReadyStatus(selectedEligibility?.relative_label_status);
+  const groupedLabels = useMemo(() => tierLabels(selectedReport, relativeReady), [selectedReport, relativeReady]);
 
   const statusCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -125,14 +277,20 @@ export default function PortfolioWorkbenchPage() {
   }, [draft]);
 
   const filteredRows = useMemo(() => {
-    const rows = matrix?.rows ?? [];
-    return rows.filter((row) => {
-      if (statusFilter !== "all" && row.allocation_status !== statusFilter) return false;
+    const text = query.trim().toLowerCase();
+    return (matrix?.rows ?? []).filter((row) => {
+      const ready = eligibilityByFund.get(row.fund_code);
       const draftRow = draftByFund.get(row.fund_code);
-      if (bucketFilter !== "all" && draftRow?.bucket !== bucketFilter) return false;
+      const tags = rowTags(row);
+      const searchable = [row.fund_code, ready?.fund_name ?? "", ...tags.map(tagLabel)].join(" ").toLowerCase();
+      if (text && !searchable.includes(text)) return false;
+      if (scopeFilter === "ready" && !isReadyStatus(ready?.relative_label_status)) return false;
+      if (scopeFilter === "blocked" && isReadyStatus(ready?.relative_label_status)) return false;
+      if (scopeFilter === "draft" && !draftRow) return false;
+      if (scopeFilter === "review" && row.allocation_status !== "review_required") return false;
       return true;
     });
-  }, [bucketFilter, draftByFund, matrix, statusFilter]);
+  }, [draftByFund, eligibilityByFund, matrix, query, scopeFilter]);
 
   const saveReview = async (fundCode: string, targetBucket: string) => {
     if (!runId || !targetBucket) return;
@@ -149,10 +307,7 @@ export default function PortfolioWorkbenchPage() {
         reviewer,
       });
       const nextDraft = await fetchPortfolioDraft(runId, draftMode);
-      setReviews((current) => {
-        const rest = current.filter((item) => item.fund_code !== fundCode || item.role_code !== saved.role_code);
-        return [saved, ...rest];
-      });
+      setReviews((current) => [saved, ...current.filter((item) => item.fund_code !== fundCode || item.role_code !== saved.role_code)]);
       setDraft(nextDraft);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -177,48 +332,49 @@ export default function PortfolioWorkbenchPage() {
     }
   };
 
-  const totalDraftWeight =
-    draft?.rows.reduce(
-      (sum, row) => sum + (draftMode === "accepted" ? (row.optimized_weight_pct ?? row.draft_weight_pct) : row.draft_weight_pct),
-      0,
-    ) ?? 0;
+  const totalFunds = matrix?.total_count ?? 0;
+  const readyCount = eligibility?.ready_count ?? 0;
+  const blockedCount = eligibility?.blocked_count ?? 0;
+  const reviewRequiredCount = statusCounts.get("review_required") ?? 0;
+  const acceptedCount = draftMode === "accepted" ? draft?.rows.length ?? 0 : reviews.length;
+  const selectedName = selectedEligibility?.fund_name;
+  const selectedTags = selectedMatrixRow ? rowTags(selectedMatrixRow) : [];
+  const evidencePreview = selectedReport?.evidence.slice(0, 8) ?? [];
+  const featurePreview = selectedReport?.features.slice(0, 8) ?? [];
+  const currentRun = runs.find((run) => run.run_id === runId);
 
   return (
-    <div className="portfolio-workbench">
-      <section className="card workbench-hero portfolio-hero">
-        <div>
-          <p className="eyebrow">Core Satellite Portfolio</p>
-          <h2>组合工作台</h2>
-          <p className="muted">
-            把 eligible、观察池、人工角色复核和 dry-run 权重放在同一页，先校准判断，再进入组合草案。
+    <div className="executive-room">
+      <section className="executive-hero">
+        <div className="hero-story">
+          <p className="eyebrow">Executive overview</p>
+          <h1>从标签引擎，到可审计的基金研究与组合工作台</h1>
+          <p>
+            这不是单点标签页面，而是一条完整生产线：批量计算基金标签，解释为什么命中，审计 Benchmark，筛出可展示池，交给研究员复核，最后形成核心、卫星、指数工具组合草案。
           </p>
-          {draft && (
-            <p className="muted">
-              目标：{draft.objective}，配置版本：{draft.config_version}
-            </p>
-          )}
+          <div className="hero-actions">
+            <a href="#fund-map">查看基金地图</a>
+            {runId && <Link to={`/runs/${runId}`}>查看批次明细</Link>}
+          </div>
         </div>
-        <div className="toolbar portfolio-toolbar">
+        <div className="run-control-tower">
+          <span>当前演示批次</span>
+          <strong>{runId ? `${runId.slice(0, 8)}…` : "待选择"}</strong>
+          {currentRun && <small>{currentRun.run_at}</small>}
           <label>
-            批次&nbsp;
+            批次
             <select value={runId} onChange={(e) => setRunId(e.target.value)}>
               {runs.map((run) => (
-                <option key={run.run_id} value={run.run_id}>
-                  {run.run_id.slice(0, 8)}… ({run.run_at})
-                </option>
+                <option key={run.run_id} value={run.run_id}>{run.run_id.slice(0, 8)}…</option>
               ))}
             </select>
           </label>
           <label>
-            草案模式&nbsp;
+            组合口径
             <select value={draftMode} onChange={(e) => setDraftMode(e.target.value as PortfolioDraftMode)}>
               <option value="research">研究草案</option>
               <option value="accepted">已验收组合</option>
             </select>
-          </label>
-          <label>
-            复核人&nbsp;
-            <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
           </label>
         </div>
       </section>
@@ -226,197 +382,233 @@ export default function PortfolioWorkbenchPage() {
       {error && <div className="error">{error}</div>}
       {loading && <p>加载中...</p>}
 
-      {matrix && draft && (
-        <div className="metric-grid portfolio-metrics">
-          <div className="metric-tile"><span>基金总数</span><strong>{matrix.total_count}</strong></div>
-          <div className="metric-tile metric-ready"><span>{draftMode === "accepted" ? "已验收纳入" : "进入草案"}</span><strong>{draft.rows.length}</strong></div>
-          <div className="metric-tile"><span>{draftMode === "accepted" ? "正式权重" : "dry-run 权重"}</span><strong>{totalDraftWeight.toFixed(1)}%</strong></div>
-          <div className="metric-tile metric-blocked"><span>排除</span><strong>{draft.excluded.length}</strong></div>
-        </div>
-      )}
+      <section className="board-metrics" aria-label="项目成果指标">
+        <article>
+          <span>已处理基金</span>
+          <strong>{totalFunds}</strong>
+          <p>从原始基金数据进入统一标签生产线。</p>
+        </article>
+        <article>
+          <span>可展示池</span>
+          <strong>{readyCount}</strong>
+          <p>{blockedCount} 只基金仍有数据或基准门禁。</p>
+        </article>
+        <article>
+          <span>组合草案</span>
+          <strong>{draft?.rows.length ?? 0}</strong>
+          <p>已映射到核心、卫星、指数工具等角色。</p>
+        </article>
+        <article>
+          <span>人工签核</span>
+          <strong>{acceptedCount}</strong>
+          <p>{reviewRequiredCount} 只需要研究员继续复核。</p>
+        </article>
+      </section>
 
-      {matrix && draft && (
-        <section className="portfolio-grid">
-          <div className="card portfolio-panel">
-            <h2>校准队列</h2>
-            <p className="muted">按组合可用性分层，优先看 eligible 和 observe 中高价值基金。</p>
-            <div className="portfolio-filter-row">
-              <label>
-                状态&nbsp;
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                  <option value="all">全部</option>
-                  {[...statusCounts.keys()].map((status) => (
-                    <option key={status} value={status}>{statusLabel(status)}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                角色桶&nbsp;
-                <select value={bucketFilter} onChange={(e) => setBucketFilter(e.target.value)}>
-                  <option value="all">全部</option>
-                  {[...bucketCounts.keys()].map((bucket) => (
-                    <option key={bucket} value={bucket}>{bucketLabel(bucket)}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="portfolio-status-strip">
-              {[...statusCounts.entries()].map(([status, count]) => (
-                <span key={status} className={`badge ${statusClass(status)}`}>
-                  {statusLabel(status)} {count}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div className="card portfolio-panel">
-            <h2>草案权重</h2>
-            <p className="muted">权重是 dry-run 输出，用于检查约束和角色分布，不代表最终投资建议。</p>
-            <div className="draft-buckets">
-              {[...bucketCounts.entries()].map(([bucket, count]) => {
-                const weight = draft.rows
-                  .filter((row) => row.bucket === bucket)
-                  .reduce((sum, row) => sum + row.draft_weight_pct, 0);
-                return (
-                  <div key={bucket} className="draft-bucket">
-                    <span>{bucketLabel(bucket)}</span>
-                    <strong>{weight.toFixed(1)}%</strong>
-                    <small>{count} 只</small>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {draft?.optimization_summary && (
-        <section className="card">
-          <h2>优化权重（正式候选）</h2>
-          <p className="muted">
-            基于 dry-run + max_weight_pct cap 后的 LP 闭式解（cap_redistribute_v1），
-            可作为正式组合候选；与 dry-run 区分对待，仍需研究员 sign-off。
+      <section className="strategy-panel">
+        <div className="strategy-copy">
+          <p className="eyebrow">What has been built</p>
+          <h2>现在交付的是研究基础设施，不是一个标签小工具</h2>
+          <p>
+            高管最关心三件事：覆盖多少基金，结论能不能解释，能不能进入业务流程。这个页面把三件事合在一起展示。
           </p>
-          <div className="metric-grid portfolio-metrics">
-            <div className="metric-tile">
-              <span>优化总权重</span>
-              <strong>{draft.optimization_summary.total_weight_pct.toFixed(1)}%</strong>
-            </div>
-            <div className="metric-tile">
-              <span>优化基金数</span>
-              <strong>{draft.optimization_summary.optimized_funds}</strong>
-            </div>
-            <div className="metric-tile metric-blocked">
-              <span>触顶 (capped)</span>
-              <strong>{draft.optimization_summary.capped_count}</strong>
-            </div>
-            <div className="metric-tile">
-              <span>方法</span>
-              <strong>{draft.optimization_summary.method}</strong>
-            </div>
-          </div>
-        </section>
-      )}
+        </div>
+        <div className="delivery-lanes">
+          {DELIVERY_LANES.map((lane, index) => (
+            <article key={lane.title}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <h3>{lane.title}</h3>
+              <p>{lane.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
 
-      {matrix && (
-        <section className="card portfolio-table-card">
-          <h2>基金角色复核</h2>
-          <table className="portfolio-table">
-            <thead>
-              <tr>
-                <th>基金</th>
-                <th>状态</th>
-                <th>草案</th>
-                <th>角色 / 标签</th>
-                <th>风险和阻塞</th>
-                <th>人工判断</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRows.map((row) => {
-                const draftRow = draftByFund.get(row.fund_code);
-                const review = reviewsByFund.get(row.fund_code);
-                return (
-                  <tr key={row.fund_code}>
-                    <td>
-                      <code>{row.fund_code}</code>
-                      <div><Link to={`/runs/${runId}/funds/${row.fund_code}`}>查看报告 →</Link></div>
-                    </td>
-                    <td><span className={`badge ${statusClass(row.allocation_status)}`}>{statusLabel(row.allocation_status)}</span></td>
-                    <td>
-                      {draftRow ? (
-                        <>
-                          <strong>{draftRow.draft_weight_pct.toFixed(2)}%</strong>
-                          {typeof draftRow.optimized_weight_pct === "number" && (
-                            <div className="muted">
-                              优化 {draftRow.optimized_weight_pct.toFixed(2)}%
-                              {draftRow.optimized_status === "capped" && (
-                                <span className="optimized-cap-badge" title="draft 超 max_weight_pct，被 LP 钉到 cap">capped</span>
-                              )}
-                            </div>
-                          )}
-                          <div className="muted">{bucketLabel(draftRow.bucket)}，上限 {draftRow.max_weight_pct.toFixed(1)}%</div>
-                          {draftRow.manual_role_review && <span className="manual-override-badge">人工覆盖：{bucketLabel(draftRow.manual_role_review)}</span>}
-                        </>
-                      ) : (
-                        <>
-                          <span className="muted">未进入草案</span>
-                          {review?.target_bucket === "exclude" && <span className="manual-override-badge">人工覆盖：排除</span>}
-                        </>
-                      )}
-                    </td>
-                    <td>
-                      <div>{joinTags(row.portfolio_roles)}</div>
-                      <div className="muted">风格：{joinTags(row.style_tags)}</div>
-                      <div className="muted">
-                        收益：{joinTags(row.return_tags)}
-                        {row.benchmark_precision === "approx" && (
-                          <span className="approx-benchmark-badge" title="相对基准用中债综合指数近似债券组件，Alpha/超额收益按近似口径解读">
-                            近似基准
-                          </span>
-                        )}
+      <section className="operating-flow" aria-label="业务闭环">
+        <div>
+          <p className="eyebrow">Operating model</p>
+          <h2>从数据到组合的闭环</h2>
+        </div>
+        <ol>
+          {FLOW.map((item) => <li key={item}>{item}</li>)}
+        </ol>
+      </section>
+
+      <section className="portfolio-snapshot">
+        <div className="snapshot-copy">
+          <p className="eyebrow">Portfolio layer</p>
+          <h2>组合层已经能看出结构，而不只是散点标签</h2>
+          <p>当前草案把基金放入角色桶，帮助投研团队讨论核心仓、卫星增强和指数工具的边界。</p>
+        </div>
+        <div className="bucket-stage">
+          {[...bucketCounts.entries()].map(([bucket, count]) => {
+            const weight = draft?.rows
+              .filter((row) => row.bucket === bucket)
+              .reduce((sum, row) => sum + row.draft_weight_pct, 0) ?? 0;
+            return (
+              <article key={bucket}>
+                <span>{bucketLabel(bucket)}</span>
+                <strong>{count} 只</strong>
+                <small>{weight.toFixed(1)}% 草案权重</small>
+              </article>
+            );
+          })}
+          {bucketCounts.size === 0 && <p className="muted">暂无组合草案。</p>}
+        </div>
+      </section>
+
+      <section className="fund-command" id="fund-map">
+        <div className="fund-command-head">
+          <div>
+            <p className="eyebrow">Fund drilldown</p>
+            <h2>基金地图：点一只基金，马上看到标签和证据</h2>
+          </div>
+          <div className="fund-filters">
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索基金、名称、标签" />
+            <select value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value)}>
+              <option value="all">全部</option>
+              <option value="ready">可展示</option>
+              <option value="blocked">暂不可展示</option>
+              <option value="draft">已进草案</option>
+              <option value="review">需复核</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="fund-command-grid">
+          <div className="fund-wall">
+            {filteredRows.map((row) => {
+              const ready = eligibilityByFund.get(row.fund_code);
+              const draftRow = draftByFund.get(row.fund_code);
+              const tags = rowTags(row).slice(0, 4);
+              return (
+                <button
+                  key={row.fund_code}
+                  className={`fund-tile ${selectedFund === row.fund_code ? "is-selected" : ""}`}
+                  onClick={() => setSelectedFund(row.fund_code)}
+                >
+                  <span className="fund-tile-code">{row.fund_code}</span>
+                  {ready?.fund_name && <span className="fund-tile-name">{ready.fund_name}</span>}
+                  <span className={`badge ${badgeClass(ready?.relative_label_status)}`}>{readyLabel(ready?.relative_label_status)}</span>
+                  <span className="mini-tags">{tags.map((tag) => <i key={tag}>{tagLabel(tag)}</i>)}</span>
+                  {draftRow && <b>{bucketLabel(draftRow.bucket)}，{draftRow.draft_weight_pct.toFixed(1)}%</b>}
+                </button>
+              );
+            })}
+            {filteredRows.length === 0 && <p className="muted">没有命中的基金。</p>}
+          </div>
+
+          <aside className="fund-inspector">
+            {!selectedFund && <p className="muted">选择一只基金查看详情。</p>}
+            {selectedFund && (
+              <>
+                <div className="inspector-title">
+                  <div>
+                    <span>当前基金</span>
+                    <h3>{selectedFund}</h3>
+                    {selectedName && <p>{selectedName}</p>}
+                  </div>
+                  {selectedReport && <ReviewActionBadge value={selectedReport.review_action} />}
+                </div>
+
+                {reportError && <div className="error">{reportError}</div>}
+                {reportLoading && <p>基金详情加载中...</p>}
+
+                <div className="inspector-badges">
+                  {selectedMatrixRow && <span className={`badge ${badgeClass(selectedMatrixRow.allocation_status)}`}>{statusLabel(selectedMatrixRow.allocation_status)}</span>}
+                  <span className={`badge ${badgeClass(selectedEligibility?.relative_label_status)}`}>{readyLabel(selectedEligibility?.relative_label_status)}</span>
+                  {selectedDraftRow && <span className="badge badge-active">{bucketLabel(selectedDraftRow.bucket)}</span>}
+                </div>
+
+                {selectedMatrixRow && (
+                  <div className="executive-tags">
+                    {selectedTags.slice(0, 12).map((tag) => <span key={tag}>{tagLabel(tag)}</span>)}
+                  </div>
+                )}
+
+                <div className="inspector-stats">
+                  <div><span>标签</span><strong>{selectedReport?.summary.label_count ?? "-"}</strong></div>
+                  <div><span>证据</span><strong>{selectedReport?.summary.evidence_count ?? "-"}</strong></div>
+                  <div><span>缺失</span><strong>{selectedReport?.summary.missing_field_count ?? "-"}</strong></div>
+                </div>
+
+                {selectedEligibility && !relativeReady && (
+                  <div className="decision-warning">
+                    <strong>暂不可展示原因</strong>
+                    <p>{readableBlocker(selectedEligibility.blocking_components || selectedEligibility.blocking_reason)}</p>
+                  </div>
+                )}
+
+                <div className="label-columns-exec">
+                  {(["style", "relative", "observe"] as LabelTier[]).map((tier) => (
+                    <section key={tier}>
+                      <h4>{tierTitle(tier)}</h4>
+                      {groupedLabels[tier].slice(0, 5).map((label) => {
+                        const evidence = selectedReport ? evidenceForLabel(selectedReport, label.label_code) : [];
+                        return (
+                          <article key={label.label_code}>
+                            <div><strong>{label.label_name}</strong><LabelStatusBadge value={label.status} /></div>
+                            {evidence[0] && <p>{evidence[0].message}</p>}
+                          </article>
+                        );
+                      })}
+                      {groupedLabels[tier].length === 0 && <p className="muted">暂无</p>}
+                    </section>
+                  ))}
+                </div>
+
+                <div className="proof-and-data">
+                  <section>
+                    <h4>为什么这样打标签</h4>
+                    {evidencePreview.map((item, index) => (
+                      <article key={`${item.label_code}-${index}`}>
+                        <strong>{item.message || item.label_code}</strong>
+                        <small>{item.metric} = {item.value}，阈值 {item.threshold}</small>
+                      </article>
+                    ))}
+                    {evidencePreview.length === 0 && <p className="muted">暂无证据。</p>}
+                  </section>
+                  <section>
+                    <h4>关键数据</h4>
+                    {featurePreview.map((feature) => (
+                      <div key={feature.feature_code}>
+                        <span>{featureLabel(feature.feature_code)}</span>
+                        <strong>{displayValue(feature.value)}</strong>
                       </div>
-                    </td>
-                    <td>
-                      <div>{joinTags(row.risk_tags)}</div>
-                      {(row.blocking_reasons.length > 0 || row.watch_reasons.length > 0) && (
-                        <div className="muted">{joinTags([...row.blocking_reasons, ...row.watch_reasons])}</div>
-                      )}
-                    </td>
-                    <td>
-                      <div className="review-controls">
-                        <select
-                          value={review?.target_bucket ?? ""}
-                          onChange={(e) => saveReview(row.fund_code, e.target.value)}
-                          disabled={savingFund === row.fund_code || !reviewer.trim()}
-                        >
-                          <option value="">待确认</option>
-                          {REVIEW_DECISIONS.map((decision) => (
-                            <option key={decision.value} value={decision.value}>{decision.label}</option>
-                          ))}
-                        </select>
-                        {review && (
-                          <div className="manual-override-row">
-                            <span className="muted">{review.reviewer} 覆盖为 {bucketLabel(review.target_bucket)}</span>
-                            <button
-                              className="secondary compact-button"
-                              onClick={() => clearReview(review)}
-                              disabled={savingFund === row.fund_code}
-                            >
-                              撤销
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {filteredRows.length === 0 && <p className="muted">没有命中的基金。</p>}
-        </section>
-      )}
+                    ))}
+                  </section>
+                </div>
+
+                <div className="review-strip">
+                  <label>
+                    复核人
+                    <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
+                  </label>
+                  <label>
+                    角色判断
+                    <select
+                      value={selectedReview?.target_bucket ?? ""}
+                      onChange={(e) => saveReview(selectedFund, e.target.value)}
+                      disabled={savingFund === selectedFund || !reviewer.trim()}
+                    >
+                      <option value="">待确认</option>
+                      {REVIEW_DECISIONS.map((decision) => <option key={decision.value} value={decision.value}>{decision.label}</option>)}
+                    </select>
+                  </label>
+                  {selectedReview && (
+                    <>
+                      <span className="manual-override-badge">人工覆盖：{bucketLabel(selectedReview.target_bucket)}</span>
+                      <button className="secondary" onClick={() => clearReview(selectedReview)} disabled={savingFund === selectedFund}>撤销</button>
+                    </>
+                  )}
+                </div>
+
+                <Link className="full-report-link" to={`/runs/${runId}/funds/${selectedFund}`}>进入完整基金报告</Link>
+              </>
+            )}
+          </aside>
+        </div>
+      </section>
     </div>
   );
 }

@@ -3,38 +3,26 @@ import { useParams } from "react-router-dom";
 import {
   downloadFile,
   fetchBenchmarkComponents,
+  fetchFundPercentile,
   fetchFundReport,
   fetchRelativeEligibility,
   postReview,
+  type EquityStyleContribution,
   type Evidence,
   type FundLabel,
+  type PercentileRank,
 } from "../api";
 import {
   LabelStatusBadge,
   ReviewActionBadge,
-  labelStatusLabel,
   reviewActionLabel,
   useAsync,
 } from "../components";
-import { labelTier, tierTitle, type LabelTier } from "../labelTiers";
-
-const ELIGIBILITY_LABELS: Record<string, string> = {
-  relative_label_ready: "可展示",
-  benchmark_source_missing: "缺少基准收益源",
-  benchmark_mapping_required: "需要确认基准映射",
-  benchmark_unresolved: "基准组件未解析",
-  benchmark_missing: "未配置业绩基准",
-  nav_window_insufficient: "收益窗口不足",
-};
-
-const STYLE_WEIGHT_CODES = [
-  "deep_value_weight",
-  "quality_growth_weight",
-  "dividend_steady_weight",
-] as const;
-function eligibilityLabel(value: string) {
-  return ELIGIBILITY_LABELS[value] ?? value;
-}
+import { labelTier, shouldDisplayTier, type LabelTier } from "../labelTiers";
+import {
+  styleName as styleCodeToName,
+  styleTagClass,
+} from "../styleConfig";
 
 function cleanBlocker(value: string) {
   return value
@@ -51,65 +39,176 @@ function cleanBlocker(value: string) {
     .replace(/\b[A-Z0-9_]+:/g, "");
 }
 
-function componentStatusLabel(value: string) {
-  const labels: Record<string, string> = {
-    resolved: "已解析",
-    unresolved: "未解析",
-    missing_source: "缺少收益源",
-    mapping_required: "需要映射",
-  };
-  return labels[value] ?? value;
-}
-
 function evidenceForLabel(data: { evidence: Evidence[] }, labelCode: string) {
   return data.evidence.filter((e) => e.label_code === labelCode);
 }
 
-const STYLE_LABELS: Record<string, string> = {
-  deep_value_weight: "深度价值",
-  quality_growth_weight: "质量成长",
-  dividend_steady_weight: "红利稳健",
-};
-
-interface StylePeriod {
-  period: string;
-  coverage: number;
-  dominantStyle: string;
-  dominantValue: number;
-  weights: Record<string, number>;
+function parseJson(str: string): Record<string, unknown> | null {
+  try { return JSON.parse(str); } catch { return null; }
 }
 
-function deriveStylePeriods(
-  exposures: { report_date: string; factor_code: string; exposure_value: number }[]
-): StylePeriod[] {
-  const byPeriod: Record<string, Record<string, number>> = {};
-  for (const row of exposures) {
-    const period = row.report_date;
-    if (!period) continue;
-    if (
-      row.factor_code === "factor_coverage_weight" ||
-      STYLE_WEIGHT_CODES.includes(row.factor_code as (typeof STYLE_WEIGHT_CODES)[number])
-    ) {
-      (byPeriod[period] ||= {})[row.factor_code] = Number(row.exposure_value) || 0;
-    }
+// 百分位条组件
+function PercentileBar({ percentile }: { percentile: number }) {
+  const pct = Math.max(0, Math.min(1, percentile));
+  const fillPct = (pct * 100).toFixed(0);
+  // 颜色梯度：低 0.3 用蓝灰，0.3-0.7 用蓝，0.7+ 用绿
+  const color = pct >= 0.7 ? "var(--pos)" : pct >= 0.3 ? "var(--accent)" : "var(--text-3)";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 110 }}>
+      <div style={{
+        flex: 1, height: 6, borderRadius: 3, background: "var(--surface-2)",
+        overflow: "hidden", border: "1px solid var(--border)",
+      }}>
+        <div style={{ width: `${fillPct}%`, height: "100%", background: color }} />
+      </div>
+      <span style={{ fontSize: 11, color: "var(--text-2)", minWidth: 30, textAlign: "right" }}>
+        {fillPct}%
+      </span>
+    </div>
+  );
+}
+
+// 百分位排名面板
+function PercentilePanel({ ranks, fundStyleTags }: { ranks: PercentileRank[]; fundStyleTags: string[] }) {
+  const [selectedGroup, setSelectedGroup] = useState<string>("all_market");
+
+  if (ranks.length === 0) {
+    return <p className="muted">暂无分位数据</p>;
   }
-  const periods: StylePeriod[] = [];
-  for (const [period, values] of Object.entries(byPeriod)) {
-    const coverage = values["factor_coverage_weight"] ?? 0;
-    const weights: Record<string, number> = {};
-    let dominantStyle = "-";
-    let dominantValue = -1;
-    for (const code of STYLE_WEIGHT_CODES) {
-      const v = values[code] ?? 0;
-      weights[code] = v;
-      if (v > dominantValue) {
-        dominantValue = v;
-        dominantStyle = STYLE_LABELS[code];
-      }
-    }
-    periods.push({ period, coverage, dominantStyle, dominantValue, weights });
+
+  // 收集所有有数据的分组
+  const availableGroups = Array.from(new Set(ranks.map((r) => r.label_code)));
+  // 优先级排序：all_market 在前，然后是基础数据类，然后风格标签
+  const labelOrder = (code: string) => {
+    if (code === "all_market") return 0;
+    if (["data_sufficient", "equity_position_high"].includes(code)) return 1;
+    return 2;
+  };
+  const sortedGroups = availableGroups.sort((a, b) => {
+    const oa = labelOrder(a);
+    const ob = labelOrder(b);
+    if (oa !== ob) return oa - ob;
+    return a.localeCompare(b);
+  });
+
+  // 指标中文名
+  const metricName: Record<string, string> = {
+    annualized_return_1y: "年化收益",
+    sharpe_ratio_1y: "夏普比率",
+    max_drawdown_1y: "最大回撤",
+    annualized_excess_return_1y: "超额收益",
+    information_ratio_1y: "信息比率",
+    roe_weighted: "加权 ROE",
+    pe_weighted: "加权 PE",
+    pb_weighted: "加权 PB",
+  };
+
+  const filteredRanks = selectedGroup === "all_market"
+    ? ranks.filter((r) => r.label_code === "all_market")
+    : ranks.filter((r) => r.label_code === selectedGroup);
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
+        {sortedGroups.map((g) => (
+          <button
+            key={g}
+            className={`style-filter-btn ${selectedGroup === g ? "active" : ""}`}
+            onClick={() => setSelectedGroup(g)}
+            style={{ fontSize: 11 }}
+          >
+            {g === "all_market" ? "全市场" : styleCodeToName(g)}
+            {g !== "all_market" && fundStyleTags.includes(g) && " ★"}
+          </button>
+        ))}
+      </div>
+      <p className="muted" style={{ marginBottom: 8, fontSize: 12 }}>
+        ★ = 该基金命中的风格标签。百分位 1.0 = 同类第一，0.0 = 同类最末。
+      </p>
+      <table>
+        <thead>
+          <tr><th>指标</th><th>指标值</th><th>同类排名</th><th>分位</th></tr>
+        </thead>
+        <tbody>
+          {filteredRanks.map((r) => {
+            const displayName = metricName[r.metric_code] ?? r.metric_code;
+            const arrow = r.direction === "higher_better" ? "↑ 越大越好" : "↓ 越小越好";
+            return (
+              <tr key={r.metric_code}>
+                <td>
+                  <strong>{displayName}</strong>
+                  <div className="muted" style={{ fontSize: 11 }}>{r.metric_code}</div>
+                </td>
+                <td className="num">
+                  {r.metric_value !== null ? Number(r.metric_value).toFixed(4) : "-"}
+                  <div className="muted" style={{ fontSize: 11 }}>{arrow}</div>
+                </td>
+                <td className="num">
+                  {r.rank_value} / {r.peer_count}
+                </td>
+                <td>
+                  <PercentileBar percentile={r.percentile} />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// 下钻面板：展示某风格标签的贡献股票明细
+function DrillDownPanel({ contributions, styleCode }: { contributions: EquityStyleContribution[]; styleCode: string }) {
+  const rows = contributions
+    .filter((c) => c.style_code === styleCode)
+    .sort((a, b) => b.contribution_weight - a.contribution_weight);
+
+  if (rows.length === 0) {
+    return <p className="muted">暂无贡献明细数据。</p>;
   }
-  return periods.sort((a, b) => a.period.localeCompare(b.period));
+
+  const totalWeight = rows.reduce((sum, r) => sum + r.contribution_weight, 0);
+  const matchedCount = rows.filter((r) => r.matched === 1).length;
+
+  return (
+    <div className="drill-panel">
+      <div className="muted" style={{ marginBottom: 8 }}>
+        共 {rows.length} 只持仓股票，{matchedCount} 只命中，贡献权重合计 {(totalWeight * 100).toFixed(1)}%
+      </div>
+      <table className="drill-table">
+        <thead>
+          <tr>
+            <th>股票</th><th className="num">持仓权重</th><th className="num">贡献权重</th>
+            <th>命中</th><th>因子值</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const fv = parseJson(r.factor_values_json);
+            const factorStr = fv
+              ? Object.entries(fv)
+                  .filter(([, v]) => v !== null && v !== undefined)
+                  .map(([k, v]) => `${k}=${typeof v === "number" ? v.toFixed(2) : v}`)
+                  .join("  ")
+              : "-";
+            return (
+              <tr key={`${r.stock_code}-${r.style_code}`}>
+                <td>
+                  <strong>{r.stock_code}</strong>
+                  {r.stock_name && <div className="muted">{r.stock_name}</div>}
+                </td>
+                <td className="num">{(r.weight * 100).toFixed(1)}%</td>
+                <td className="num">{(r.contribution_weight * 100).toFixed(1)}%</td>
+                <td>{r.matched === 1 ? <span className="drill-hit">命中</span> : <span className="drill-miss">未命中</span>}</td>
+                <td className="muted" style={{ fontSize: 11 }}>{factorStr}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export default function FundReportPage() {
@@ -123,22 +222,34 @@ export default function FundReportPage() {
     () => fetchBenchmarkComponents(runId, fundCode),
     [runId, fundCode]
   );
-  const stylePeriods = useMemo(
-    () => (data ? deriveStylePeriods(data.factor_exposures) : []),
-    [data]
+  const { data: eligibility } = useAsync(
+    () => fetchRelativeEligibility(runId, "all"),
+    [runId]
   );
-  const stabilityLabels = useMemo<FundLabel[]>(() => {
-    if (!data) return [];
-    const codes = new Set([
-      "style_stable",
-      "style_drift",
-      "style_recent_shift",
-      "style_exposure_low_coverage",
-      "style_exposure_scope_not_applicable",
-      "style_exposure_observe",
-    ]);
-    return data.labels.filter((l) => codes.has(l.label_code));
-  }, [data]);
+  const { data: percentile } = useAsync(
+    () => fetchFundPercentile(runId, fundCode),
+    [runId, fundCode]
+  );
+  const eligibilityRow = eligibility?.results.find((row) => row.fund_code === fundCode) ?? null;
+  const relativeReady = eligibilityRow?.relative_label_status === "relative_label_ready";
+
+  const [drillCode, setDrillCode] = useState<string | null>(null);
+  const [activeLabel, setActiveLabel] = useState<string | null>(null);
+  const [reviewer, setReviewer] = useState("researcher");
+  const [decision, setDecision] = useState("confirm");
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const tieredLabels = useMemo<Record<LabelTier, FundLabel[]>>(() => {
+    const empty: Record<LabelTier, FundLabel[]> = { style: [], relative: [], observe: [], data_only: [], other: [] };
+    if (!data) return empty;
+    for (const label of data.labels) {
+      empty[labelTier(label, relativeReady)].push(label);
+    }
+    return empty;
+  }, [data, relativeReady]);
+
   const unresolvedCalculations = useMemo(() => {
     if (!data?.calculations) return [];
     return data.calculations.filter(
@@ -146,32 +257,10 @@ export default function FundReportPage() {
     );
   }, [data]);
 
-  const { data: eligibility } = useAsync(
-    () => fetchRelativeEligibility(runId, "all"),
-    [runId]
-  );
-  const eligibilityRow = eligibility?.results.find((row) => row.fund_code === fundCode) ?? null;
-  const relativeReady = eligibilityRow?.relative_label_status === "relative_label_ready";
-  const tieredLabels = useMemo<Record<LabelTier, FundLabel[]>>(() => {
-    const empty: Record<LabelTier, FundLabel[]> = { official: [], observe: [], calibration: [], other: [] };
-    if (!data) return empty;
-    for (const label of data.labels) {
-      empty[labelTier(label, relativeReady)].push(label);
-    }
-    return empty;
-  }, [data, relativeReady]);
-  const blockingCalculations = useMemo(() => unresolvedCalculations.slice(0, 12), [unresolvedCalculations]);
-
-  const [activeLabel, setActiveLabel] = useState<string | null>(null);
-  const [reviewer, setReviewer] = useState("researcher");
-  const [decision, setDecision] = useState("confirm");
-  const [comment, setComment] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const factorCoverage = data?.factor_exposures.find(
-    (f) => f.factor_code === "factor_coverage_weight"
-  );
+  const factorCoverage = data?.factor_exposures.find((f) => f.factor_code === "factor_coverage_weight");
   const factorCoverageValue = factorCoverage ? Number(factorCoverage.exposure_value) : null;
+
+  const contributions = data?.equity_style_contributions ?? [];
 
   const submit = async () => {
     if (!activeLabel) return;
@@ -191,195 +280,194 @@ export default function FundReportPage() {
 
   return (
     <div>
-      <div className="card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2>
-            基金报告 <code>{fundCode}</code>{" "}
-            {data && <ReviewActionBadge value={data.review_action} />}
-          </h2>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={() =>
-                downloadFile(
-                  `/v1/runs/${runId}/funds/${fundCode}/export?format=xlsx`,
-                  `fund_${fundCode}.xlsx`
-                )
-              }
-            >
-              导出 XLSX
-            </button>
-            <button
-              onClick={() =>
-                downloadFile(
-                  `/v1/runs/${runId}/funds/${fundCode}/export?format=csv`,
-                  `fund_${fundCode}.zip`
-                )
-              }
-            >
-              导出 CSV 压缩包
-            </button>
-          </div>
-        </div>
-        <p className="muted">批次编号：<code>{runId}</code></p>
-        {data && <div className="display-gate">
-          <span className={relativeReady ? "badge badge-observe" : "badge badge-manual_review"}>
-            {relativeReady ? "展示资格：可展示" : "展示资格：暂不可展示"}
-          </span>
-          <span>
-            {eligibilityRow
-              ? eligibilityLabel(eligibilityRow.relative_label_status)
-              : "展示资格加载中"}
-          </span>
-          {eligibilityRow && eligibilityRow.relative_label_status !== "relative_label_ready" && (
-            <span className="muted">{cleanBlocker(eligibilityRow.blocking_components || eligibilityRow.blocking_reason || "-")}</span>
+      {/* 报告头 */}
+      <div className="report-head">
+        <h1>
+          {fundCode}
+          {data && <ReviewActionBadge value={data.review_action} />}
+        </h1>
+        <div className="fund-meta">
+          <span>批次 {runId.slice(0, 8)}</span>
+          {eligibilityRow && (
+            <span className={relativeReady ? "" : "muted"}>
+              {relativeReady ? "可展示" : "暂不可展示"}
+            </span>
           )}
-        </div>}
-        {loading && <p>加载中...</p>}
-        {error && <div className="error">{error}</div>}
-        {data && (
-          <>
-            <h3>汇总</h3>
-            <dl className="kv">
-              <dt>标签数</dt><dd>{data.summary.label_count}</dd>
-              <dt>特征数</dt><dd>{data.summary.feature_count}</dd>
-              <dt>因子暴露</dt><dd>{data.summary.factor_exposure_count ?? data.factor_exposures.length}</dd>
-              <dt>因子覆盖</dt>
-              <dd>
-                {factorCoverageValue === null
-                  ? "未计算"
-                  : `${(factorCoverageValue * 100).toFixed(1)}%`}
-              </dd>
-              <dt>证据条数</dt><dd>{data.summary.evidence_count}</dd>
-              <dt>缺失字段数</dt><dd>{data.summary.missing_field_count}</dd>
-              <dt>已有复核</dt><dd>{data.summary.review_count}</dd>
-            </dl>
-            <h3>展示分层</h3>
-            <dl className="kv">
-              <dt>正式结论</dt><dd>{tieredLabels.official.length}</dd>
-              <dt>观察信号</dt><dd>{tieredLabels.observe.length}</dd>
-              <dt>待校准信号</dt><dd>{tieredLabels.calibration.length}</dd>
-              <dt>阻断原因</dt><dd>{(eligibilityRow?.relative_label_status !== "relative_label_ready" ? 1 : 0) + blockingCalculations.length}</dd>
-            </dl>
-            {data.missing_fields.length > 0 && (
-              <>
-                <h3>缺失字段</h3>
-                <p>{data.missing_fields.join("、")}</p>
-              </>
-            )}
-          </>
-        )}
+          {factorCoverageValue !== null && (
+            <span className="muted">因子覆盖率 {(factorCoverageValue * 100).toFixed(1)}%</span>
+          )}
+          {contributions.length > 0 && (
+            <span className="muted">下钻明细 {contributions.length} 条</span>
+          )}
+        </div>
       </div>
 
-      {bench && (() => {
-        const gap = bench.unresolved_count > 0 || !bench.has_benchmark_returns;
-        return (
-          <div className="card">
-            <h2>
-              展示资格证据
-              {gap ? (
-                <span className="pill pill-gap">基准有缺口</span>
-              ) : (
-                <span className="pill pill-ok">基准已就绪</span>
-              )}
-            </h2>
-            {eligibilityRow && (
-              <dl className="kv">
-                <dt>相对标签状态</dt><dd>{eligibilityLabel(eligibilityRow.relative_label_status)}</dd>
-                <dt>基准源状态</dt><dd>{eligibilityLabel(eligibilityRow.benchmark_source_status)}</dd>
-                <dt>净值样本</dt><dd>{eligibilityRow.nav_sample_count}</dd>
-                <dt>基准样本</dt><dd>{eligibilityRow.benchmark_sample_count}</dd>
-              </dl>
-            )}
-            {gap ? (
-              <div className="alert alert-warn">
-                {bench.unresolved_count > 0
-                  ? `${bench.unresolved_count} 个组件未解析或无日收益源；`
-                  : ""}
-                {!bench.has_benchmark_returns
-                  ? "未能合成基准日收益，相对基准类标签无法计算。"
-                  : ""}
-              </div>
-            ) : (
-              <div className="alert alert-ok">
-                基准收益已合成（{bench.benchmark_returns_count} 行），全部组件已解析且有收益源。
-              </div>
-            )}
-            {bench.components.length > 0 && (
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th><th>组件</th><th>权重</th><th>状态</th><th>收益源</th><th>原因</th><th>原文</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bench.components.map((c) => (
-                    <tr key={c.component_order}>
-                      <td>{c.component_order}</td>
-                      <td>
-                        <strong>{c.component_name}</strong>
-                        {c.component_code && (
-                          <div className="muted"><code>{c.component_code}</code></div>
-                        )}
-                      </td>
-                      <td>{c.weight !== null ? `${(c.weight * 100).toFixed(1)}%` : "-"}</td>
-                      <td>{componentStatusLabel(c.status)}</td>
-                      <td>
-                        {c.status === "resolved" && c.reason === "synthetic"
-                          ? "合成"
-                          : c.has_returns
-                          ? "有"
-                          : <span style={{ color: "#b91c1c" }}>无</span>}
-                      </td>
-                      <td className="muted">{c.reason || "-"}</td>
-                      <td className="muted">{c.source_text}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        );
-      })()}
+      {/* 工具栏 */}
+      <div className="toolbar">
+        <button className="secondary" onClick={() =>
+          downloadFile(`/v1/runs/${runId}/funds/${fundCode}/export?format=xlsx`, `fund_${fundCode}.xlsx`)
+        }>导出 XLSX</button>
+        <button className="secondary" onClick={() =>
+          downloadFile(`/v1/runs/${runId}/funds/${fundCode}/export?format=csv`, `fund_${fundCode}.zip`)
+        }>导出 CSV</button>
+      </div>
 
-      {data && stylePeriods.length > 0 && (
-        <div className="card">
-          <h2>风格稳定性证据</h2>
-          <p className="muted">
-            多期基金级因子暴露序列，按报告期排列。覆盖率 ≥70% 的期次参与稳定性判定。
+      {loading && <p>加载中...</p>}
+      {error && <div className="alert alert-warn">{error}</div>}
+
+      {/* 展示门禁 */}
+      {data && (
+        <div className={`alert ${relativeReady ? "alert-ok" : "alert-warn"}`}>
+          <strong>{relativeReady ? "展示资格：可展示" : "展示资格：暂不可展示"}</strong>
+          {eligibilityRow && !relativeReady && (
+            <span> — {cleanBlocker(eligibilityRow.blocking_components || eligibilityRow.blocking_reason || "")}</span>
+          )}
+        </div>
+      )}
+
+      {/* 风格标签（核心展示区）— 含下钻 */}
+      {data && tieredLabels.style.length > 0 && (
+        <div className="report-section">
+          <h2>风格标签</h2>
+          <p className="muted" style={{ marginTop: -4, marginBottom: 10 }}>
+            点击「下钻」查看每只持仓股票对该风格的贡献明细
           </p>
-          {stabilityLabels.length > 0 && (
-            <div style={{ marginBottom: 12 }}>
-              {stabilityLabels.map((l) => {
-                const ev = data.evidence.filter((e) => e.label_code === l.label_code);
-                return (
-                  <div key={l.label_code} style={{ marginBottom: 6 }}>
-                    <strong>{l.label_name}</strong>{" "}
-                    <span className="muted"><code>{l.label_code}</code></span>
-                    {ev[0] && <div className="muted">{ev[0].message}</div>}
+          <div className="style-labels-grid">
+            {tieredLabels.style.map((label) => {
+              const ev = evidenceForLabel(data, label.label_code);
+              const hasDrill = contributions.some((c) => c.style_code === label.label_code);
+              return (
+                <div className="style-label-item" key={label.label_code}>
+                  <span className={styleTagClass(label.label_code)}>{label.label_name}</span>
+                  {ev[0] && <div className="label-evidence">{ev[0].message}</div>}
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {hasDrill && (
+                      <button
+                        className="drill-toggle"
+                        onClick={() => setDrillCode(drillCode === label.label_code ? null : label.label_code)}
+                      >
+                        {drillCode === label.label_code ? "收起" : "下钻"}
+                      </button>
+                    )}
+                    <button className="secondary compact-button" onClick={() => setActiveLabel(label.label_code)}>
+                      复核
+                    </button>
                   </div>
-                );
-              })}
+                </div>
+              );
+            })}
+          </div>
+          {drillCode && <DrillDownPanel contributions={contributions} styleCode={drillCode} />}
+        </div>
+      )}
+
+      {/* 相对基准标签 */}
+      {data && tieredLabels.relative.length > 0 && (
+        <div className="report-section">
+          <h2>相对基准</h2>
+          <div className="style-labels-grid">
+            {tieredLabels.relative.map((label) => {
+              const ev = evidenceForLabel(data, label.label_code);
+              return (
+                <div className="style-label-item" key={label.label_code}>
+                  <span className="style-tag">{label.label_name}</span>
+                  {ev[0] && <div className="label-evidence">{ev[0].message}</div>}
+                  <button className="secondary compact-button" onClick={() => setActiveLabel(label.label_code)}>
+                    复核
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 风格观察 */}
+      {data && tieredLabels.observe.length > 0 && (
+        <div className="report-section">
+          <h2>风格观察</h2>
+          <div className="tier-list">
+            {tieredLabels.observe.map((label) => {
+              const ev = evidenceForLabel(data, label.label_code);
+              return (
+                <div className="tier-item" key={label.label_code}>
+                  <strong>{label.label_name}</strong>
+                  <span className="muted"><code>{label.label_code}</code></span>
+                  {ev[0] && <div className="muted">{ev[0].message}</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 基准解析 */}
+      {bench && (
+        <div className="report-section">
+          <h2>基准解析</h2>
+          {bench.has_benchmark_returns ? (
+            <div className="alert alert-ok">
+              基准收益已合成（{bench.benchmark_returns_count} 行），全部组件已解析。
+            </div>
+          ) : (
+            <div className="alert alert-warn">
+              未能合成基准日收益，相对基准类标签无法计算。
+              {bench.unresolved_count > 0 && ` ${bench.unresolved_count} 个组件未解析。`}
             </div>
           )}
+          {bench.components.length > 0 && (
+            <table>
+              <thead>
+                <tr><th>#</th><th>组件</th><th className="num">权重</th><th>状态</th><th>收益源</th></tr>
+              </thead>
+              <tbody>
+                {bench.components.map((c) => (
+                  <tr key={c.component_order}>
+                    <td>{c.component_order}</td>
+                    <td>
+                      <strong>{c.component_name}</strong>
+                      {c.component_code && <div className="muted">{c.component_code}</div>}
+                    </td>
+                    <td className="num">{c.weight !== null ? `${(c.weight * 100).toFixed(1)}%` : "-"}</td>
+                    <td>{c.status === "resolved" ? "已解析" : c.status === "missing_source" ? "缺收益源" : c.status}</td>
+                    <td>{c.has_returns ? "有" : "无"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* 同类分位排名 */}
+      {percentile && percentile.ranks.length > 0 && (
+        <div className="report-section">
+          <h2>同类分位排名</h2>
+          <p className="muted" style={{ marginBottom: 8, fontSize: 12 }}>
+            在不同风格组中的相对位置（百分位 1.0 = 同类第一）
+          </p>
+          <PercentilePanel
+            ranks={percentile.ranks}
+            fundStyleTags={data?.labels.filter((l) => l.status === "active").map((l) => l.label_code) ?? []}
+          />
+        </div>
+      )}
+
+      {/* 因子暴露 */}
+      {data && data.factor_exposures.length > 0 && (
+        <div className="report-section">
+          <h2>因子暴露</h2>
           <table>
             <thead>
-              <tr>
-                <th>报告期</th><th>覆盖率</th><th>主导风格</th><th>深度价值</th><th>质量成长</th><th>红利稳健</th>
-              </tr>
+              <tr><th>因子</th><th className="num">暴露值</th><th className="num">覆盖权重</th><th>股票覆盖</th></tr>
             </thead>
             <tbody>
-              {stylePeriods.map((p) => (
-                <tr key={p.period}>
-                  <td><code>{p.period}</code></td>
-                  <td>
-                    <span style={{ color: p.coverage >= 0.7 ? "#065f46" : "#b45309" }}>
-                      {(p.coverage * 100).toFixed(1)}%
-                    </span>
-                  </td>
-                  <td>{p.coverage >= 0.7 ? p.dominantStyle : <span className="muted">未达标</span>}</td>
-                  <td>{(p.weights["deep_value_weight"] * 100).toFixed(1)}%</td>
-                  <td>{(p.weights["quality_growth_weight"] * 100).toFixed(1)}%</td>
-                  <td>{(p.weights["dividend_steady_weight"] * 100).toFixed(1)}%</td>
+              {data.factor_exposures.map((f) => (
+                <tr key={`${f.report_date}-${f.factor_code}`}>
+                  <td><code>{f.factor_code}</code></td>
+                  <td className="num">{Number(f.exposure_value).toFixed(4)}</td>
+                  <td className="num">{(Number(f.coverage_weight) * 100).toFixed(1)}%</td>
+                  <td>{f.covered_stock_count}/{f.stock_count}</td>
                 </tr>
               ))}
             </tbody>
@@ -387,56 +475,59 @@ export default function FundReportPage() {
         </div>
       )}
 
+      {/* 标签详情 */}
       {data && (
-        <div className="tier-grid">
-          {(["official", "observe", "calibration"] as LabelTier[]).map((tier) => (
-            <div className="card tier-card" key={tier}>
-              <h2>{tierTitle(tier)}</h2>
-              {tier === "official" && <p className="muted">可作为 Phase1 v1 展示结论。</p>}
-              {tier === "observe" && <p className="muted">有业务参考价值，但语义必须保持观察。</p>}
-              {tier === "calibration" && <p className="muted">技术上已产出，仍需样本或阈值校准。</p>}
-              {tieredLabels[tier].length > 0 ? (
-                <div className="tier-list">
-                  {tieredLabels[tier].map((label) => {
-                    const ev = evidenceForLabel(data, label.label_code);
-                    return (
-                      <div className="tier-item" key={label.label_code}>
+        <div className="report-section">
+          <h2>标签详情</h2>
+          <table>
+            <thead>
+              <tr><th>标签</th><th>状态</th><th>证据</th><th></th></tr>
+            </thead>
+            <tbody>
+              {data.labels
+                .filter((label) => shouldDisplayTier(labelTier(label, relativeReady)))
+                .map((label) => {
+                  const ev = data.evidence.filter((e) => e.label_code === label.label_code);
+                  return (
+                    <tr key={label.label_code}>
+                      <td>
                         <strong>{label.label_name}</strong>
-                        <span className="muted"><code>{label.label_code}</code></span>
-                        {ev[0] && <div className="muted">{ev[0].message}</div>}
-                        <button className="secondary" onClick={() => setActiveLabel(label.label_code)}>复核</button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="muted">暂无</p>
-              )}
-            </div>
-          ))}
+                        <div className="muted">{label.label_code}</div>
+                      </td>
+                      <td><LabelStatusBadge value={label.status} /></td>
+                      <td>
+                        {ev.map((e, i) => (
+                          <div key={i} className="muted" style={{ marginBottom: 2 }}>{e.message}</div>
+                        ))}
+                      </td>
+                      <td>
+                        <button className="secondary compact-button" onClick={() => setActiveLabel(label.label_code)}>
+                          复核
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
         </div>
       )}
 
+      {/* 未触发原因 */}
       {data && unresolvedCalculations.length > 0 && (
-        <div className="card">
-          <h2>标签计算原因（未触发）</h2>
-          <p className="muted">列出未达“已命中”状态且有具体原因码的标签计算，便于定位数据或阈值缺口。</p>
+        <div className="report-section">
+          <h2>未触发标签原因</h2>
           <table>
             <thead>
-              <tr><th>标签</th><th>状态</th><th>原因码</th><th>观测值</th><th>阈值</th><th>说明</th></tr>
+              <tr><th>标签</th><th>原因</th><th>观测值</th><th>阈值</th></tr>
             </thead>
             <tbody>
               {unresolvedCalculations.map((c) => (
                 <tr key={c.label_code}>
-                  <td>
-                    <strong>{c.label_name}</strong>
-                    <div className="muted"><code>{c.label_code}</code></div>
-                  </td>
-                  <td>{labelStatusLabel(c.state)}</td>
-                  <td><code>{c.reason_code}</code></td>
-                  <td>{c.observed ?? "-"}</td>
-                  <td>{c.threshold ?? "-"}</td>
+                  <td><strong>{c.label_name}</strong></td>
                   <td className="muted">{c.message}</td>
+                  <td className="num">{c.observed ?? "-"}</td>
+                  <td className="num">{c.threshold ?? "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -444,101 +535,9 @@ export default function FundReportPage() {
         </div>
       )}
 
-      {data && (
-        <div className="card">
-          <h2>标签与证据</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>标签</th><th>分类</th><th>状态</th><th>置信</th><th>证据</th><th>复核</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.labels.map((label) => {
-                const ev = data.evidence.filter((e) => e.label_code === label.label_code);
-                return (
-                  <tr key={label.label_code}>
-                    <td>
-                      <strong>{label.label_name}</strong>
-                      <div className="muted"><code>{label.label_code}</code></div>
-                    </td>
-                    <td>{label.category}</td>
-                    <td><LabelStatusBadge value={label.status} /></td>
-                    <td>{(label.confidence * 100).toFixed(0)}%</td>
-                    <td>
-                      {ev.map((e, i) => (
-                        <div key={i} style={{ marginBottom: 4 }}>
-                          <div style={{ fontSize: 13 }}>{e.message}</div>
-                          <div className="muted">
-                            {e.metric} = {e.value} (阈值 {e.threshold}, 来源 {e.source})
-                          </div>
-                        </div>
-                      ))}
-                    </td>
-                    <td>
-                      <button
-                        className="secondary"
-                        onClick={() => setActiveLabel(label.label_code)}
-                      >
-                        复核…
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {data && data.factor_exposures.length > 0 && (
-        <div className="card">
-          <h2>基金级因子暴露</h2>
-          <p className="muted">基于持仓和股票因子预聚合，覆盖率表示可用因子覆盖的持仓权重。</p>
-          <table>
-            <thead>
-              <tr>
-                <th>因子</th><th>暴露值</th><th>覆盖权重</th><th>持仓权重</th><th>股票覆盖</th><th>日期</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.factor_exposures.map((f) => (
-                <tr key={`${f.report_date}-${f.factor_code}-${f.as_of_date}`}>
-                  <td><code>{f.factor_code}</code></td>
-                  <td>{Number(f.exposure_value).toFixed(4)}</td>
-                  <td>{(Number(f.coverage_weight) * 100).toFixed(1)}%</td>
-                  <td>{(Number(f.holding_total_weight) * 100).toFixed(1)}%</td>
-                  <td>{f.covered_stock_count}/{f.stock_count}</td>
-                  <td className="muted">{f.report_date} / {f.as_of_date}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {data && data.features.length > 0 && (
-        <div className="card">
-          <h2>特征值</h2>
-          <table>
-            <thead>
-              <tr><th>特征</th><th>值</th><th>来源</th></tr>
-            </thead>
-            <tbody>
-              {data.features.map((f) => (
-                <tr key={f.feature_code}>
-                  <td><code>{f.feature_code}</code></td>
-                  <td>{f.value}</td>
-                  <td className="muted">{f.source}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
+      {/* 历史复核 */}
       {data && data.reviews.length > 0 && (
-        <div className="card">
+        <div className="report-section">
           <h2>历史复核</h2>
           <table>
             <thead>
@@ -547,7 +546,7 @@ export default function FundReportPage() {
             <tbody>
               {data.reviews.map((r) => (
                 <tr key={r.review_id}>
-                  <td><code>{r.label_code}</code></td>
+                  <td>{r.label_code}</td>
                   <td>{reviewActionLabel(r.decision)}</td>
                   <td>{r.reviewer}</td>
                   <td>{r.comment}</td>
@@ -558,14 +557,14 @@ export default function FundReportPage() {
         </div>
       )}
 
+      {/* 复核弹层 */}
       {activeLabel && (
         <div className="card">
-          <h2>提交复核</h2>
-          <p className="muted">标签 <code>{activeLabel}</code></p>
-          {submitError && <div className="error">{submitError}</div>}
+          <h2>提交复核 — {activeLabel}</h2>
+          {submitError && <div className="alert alert-warn">{submitError}</div>}
           <div className="toolbar">
             <label>
-              决定&nbsp;
+              决定
               <select value={decision} onChange={(e) => setDecision(e.target.value)}>
                 <option value="confirm">确认</option>
                 <option value="reject">驳回</option>
@@ -573,7 +572,7 @@ export default function FundReportPage() {
               </select>
             </label>
             <label>
-              复核人&nbsp;
+              复核人
               <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
             </label>
           </div>
@@ -588,9 +587,7 @@ export default function FundReportPage() {
             <button onClick={submit} disabled={submitting}>
               {submitting ? "提交中…" : "提交"}
             </button>
-            <button className="secondary" onClick={() => setActiveLabel(null)}>
-              取消
-            </button>
+            <button className="secondary" onClick={() => setActiveLabel(null)}>取消</button>
           </div>
         </div>
       )}

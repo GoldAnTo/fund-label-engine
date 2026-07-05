@@ -70,6 +70,9 @@ copy-source:
 	@mkdir -p $(dir $(SOURCE_DB))
 	sqlite3 $(FUND_DATA_CACHE) "PRAGMA wal_checkpoint(TRUNCATE);"
 	cp $(FUND_DATA_CACHE) $(SOURCE_DB)
+	@echo "Importing stock_industry_map from $(FACTOR_DB) into $(SOURCE_DB)..."
+	@sqlite3 $(SOURCE_DB) "DROP TABLE IF EXISTS stock_industry_map"
+	@sqlite3 $(FACTOR_DB) ".dump stock_industry_map" | sqlite3 $(SOURCE_DB)
 
 run-batch: copy-source
 	@rm -f $(OUTPUT_DB)
@@ -98,6 +101,9 @@ run-batch-v1: copy-source
 	    --min-holding-total-weight 0.5 \
 	    --deep-value-weight-min 0.4 \
 	    --quality-growth-weight-min 0.4
+	@echo "Importing stock_industry_map from $(FACTOR_DB) into $(OUTPUT_DB)..."
+	@sqlite3 $(OUTPUT_DB) "DROP TABLE IF EXISTS stock_industry_map"
+	@sqlite3 $(FACTOR_DB) ".dump stock_industry_map" | sqlite3 $(OUTPUT_DB)
 
 refresh-benchmark: copy-source seed-benchmark-approx
 	@mkdir -p $(BENCHMARK_REPORT_DIR)

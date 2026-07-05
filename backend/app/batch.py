@@ -315,6 +315,185 @@ def _compute_dividend_sector_exposures(
     )
 
 
+def _apply_cross_sectional_percentiles(
+    repo: Any,
+    fund_codes: list[str],
+    rule_config: RuleConfig,
+) -> RuleConfig:
+    """预扫描所有基金的加权因子值，计算横截面分位数阈值。
+
+    直接用 SQL 从 source.db 计算每只基金的加权 PB/PE/ROE/利润增速/市值，
+    不依赖跑批后的 fund_factor_exposures 表（该表在跑批时才写入）。
+
+    将 RuleConfig 中的绝对值阈值替换为分位数阈值：
+    - 高估值: PB/PE 排名前 30%（即第 70 百分位）
+    - 低估值: PB/PE 排名后 30%（即第 30 百分位）
+    - 大盘: 市值排名前 50%（即第 50 百分位）
+    - 中盘: 市值排名 30%~70%
+    - 小盘: 市值排名后 30%（即第 30 百分位）
+    - 高盈利: ROE 排名前 30%（即第 70 百分位）
+    - 利润高增长: 利润增速排名前 35%（即第 65 百分位）
+
+    如果基金数太少（<10）或数据不足，保持原阈值不变。
+    """
+    if len(fund_codes) < 10:
+        return rule_config
+
+    # 用 repo 的 _connect() 来获取已 attach factor_db 的连接
+    conn = repo._connect()
+    try:
+        # 检查必要的表/视图是否存在（包括 temp view）
+        tables = {
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view') "
+                "UNION SELECT name FROM sqlite_temp_master WHERE type='view'"
+            ).fetchall()
+        }
+        if "stock_holdings" not in tables or "stock_factor_values" not in tables:
+            return rule_config
+
+        # 每只基金最新一期的持仓
+        placeholders = ",".join("?" for _ in fund_codes)
+        rows = conn.execute(
+            f"""
+            WITH latest_holdings AS (
+                SELECT h.fund_code, h.stock_code, h.net_value_ratio AS weight,
+                       (SELECT MAX(report_period) FROM stock_holdings
+                        WHERE fund_code = h.fund_code) AS latest_period
+                FROM stock_holdings h
+                WHERE h.fund_code IN ({placeholders})
+                  AND h.stock_code IS NOT NULL
+                  AND h.net_value_ratio IS NOT NULL AND h.net_value_ratio > 0
+            ),
+            latest_factors AS (
+                SELECT sf.stock_code, sf.factor_code, sf.factor_value
+                FROM stock_factor_values sf
+                WHERE sf.factor_code IN ('pb','pe','roe','profit_growth','log10_market_cap')
+                  AND sf.as_of_date = (
+                    SELECT MAX(as_of_date) FROM stock_factor_values sf2
+                    WHERE sf2.stock_code = sf.stock_code AND sf2.factor_code = sf.factor_code
+                  )
+            ),
+            -- 清洗后的因子：PB/PE 负值剔除，ROE/增速截断
+            clean_factors AS (
+                SELECT stock_code, factor_code,
+                    CASE
+                        WHEN factor_code IN ('pb','pe') AND (factor_value <= 0 OR factor_value > 2000) THEN NULL
+                        WHEN factor_code = 'roe' THEN MIN(MAX(factor_value, -0.5), 0.5)
+                        WHEN factor_code = 'profit_growth' THEN MIN(MAX(factor_value, -1.0), 3.0)
+                        ELSE factor_value
+                    END AS clean_value
+                FROM latest_factors
+            )
+            SELECT
+                lh.fund_code,
+                SUM(CASE WHEN cf.factor_code = 'pb' THEN cf.clean_value * lh.weight END)
+                    / NULLIF(SUM(CASE WHEN cf.factor_code = 'pb' AND cf.clean_value IS NOT NULL THEN lh.weight END), 0) AS pb_weighted,
+                SUM(CASE WHEN cf.factor_code = 'pe' THEN cf.clean_value * lh.weight END)
+                    / NULLIF(SUM(CASE WHEN cf.factor_code = 'pe' AND cf.clean_value IS NOT NULL THEN lh.weight END), 0) AS pe_weighted,
+                SUM(CASE WHEN cf.factor_code = 'roe' THEN cf.clean_value * lh.weight END)
+                    / NULLIF(SUM(CASE WHEN cf.factor_code = 'roe' AND cf.clean_value IS NOT NULL THEN lh.weight END), 0) AS roe_weighted,
+                SUM(CASE WHEN cf.factor_code = 'profit_growth' THEN cf.clean_value * lh.weight END)
+                    / NULLIF(SUM(CASE WHEN cf.factor_code = 'profit_growth' AND cf.clean_value IS NOT NULL THEN lh.weight END), 0) AS pg_weighted,
+                SUM(CASE WHEN cf.factor_code = 'log10_market_cap' THEN cf.clean_value * lh.weight END)
+                    / NULLIF(SUM(CASE WHEN cf.factor_code = 'log10_market_cap' AND cf.clean_value IS NOT NULL THEN lh.weight END), 0) AS mcap_weighted
+            FROM latest_holdings lh
+            LEFT JOIN clean_factors cf ON cf.stock_code = lh.stock_code
+            GROUP BY lh.fund_code
+            """,
+            fund_codes,
+        ).fetchall()
+    finally:
+        conn.close()
+
+    # 收集各因子的值列表
+    pb_values: list[float] = []
+    pe_values: list[float] = []
+    roe_values: list[float] = []
+    pg_values: list[float] = []
+    mcap_values: list[float] = []
+    for row in rows:
+        pb = row["pb_weighted"]
+        pe = row["pe_weighted"]
+        roe = row["roe_weighted"]
+        pg = row["pg_weighted"]
+        mcap = row["mcap_weighted"]
+        if pb is not None and pb > 0:
+            pb_values.append(float(pb))
+        if pe is not None and pe > 0:
+            pe_values.append(float(pe))
+        if roe is not None:
+            roe_values.append(float(roe))
+        if pg is not None:
+            pg_values.append(float(pg))
+        if mcap is not None:
+            mcap_values.append(float(mcap))
+
+    def percentile(sorted_vals: list[float], pct: float) -> float | None:
+        """计算分位数。pct=0.7 表示第 70 百分位。"""
+        if len(sorted_vals) < 5:
+            return None
+        k = int(round(pct * (len(sorted_vals) - 1)))
+        return sorted_vals[k]
+
+    updates: dict[str, float] = {}
+
+    # 高估值: PB/PE 第 70 百分位（即排名前 30%）
+    if pb_values:
+        pb_p70 = percentile(sorted(pb_values), 0.70)
+        if pb_p70 is not None and pb_p70 > 0:
+            updates["high_valuation_pb_min"] = pb_p70
+    if pe_values:
+        pe_p70 = percentile(sorted(pe_values), 0.70)
+        if pe_p70 is not None and pe_p70 > 0:
+            updates["high_valuation_pe_min"] = pe_p70
+
+    # 低估值: PB/PE 第 30 百分位（即排名后 30%）
+    if pb_values:
+        pb_p30 = percentile(sorted(pb_values), 0.30)
+        if pb_p30 is not None and pb_p30 > 0:
+            updates["low_valuation_pb_max"] = pb_p30
+    if pe_values:
+        pe_p30 = percentile(sorted(pe_values), 0.30)
+        if pe_p30 is not None and pe_p30 > 0:
+            updates["low_valuation_pe_max"] = pe_p30
+
+    # 规模: 市值分位数
+    if mcap_values:
+        mcap_sorted = sorted(mcap_values)
+        mcap_p50 = percentile(mcap_sorted, 0.50)
+        mcap_p30 = percentile(mcap_sorted, 0.30)
+        mcap_p70 = percentile(mcap_sorted, 0.70)
+        if mcap_p50 is not None:
+            updates["large_cap_log10_mcap_min"] = mcap_p50
+        if mcap_p30 is not None and mcap_p70 is not None:
+            updates["mid_cap_log10_mcap_min"] = mcap_p30
+            updates["mid_cap_log10_mcap_max"] = mcap_p70
+        if mcap_p30 is not None:
+            updates["small_cap_log10_mcap_max"] = mcap_p30
+
+    # 高盈利: ROE 第 70 百分位
+    if roe_values:
+        roe_p70 = percentile(sorted(roe_values), 0.70)
+        if roe_p70 is not None:
+            updates["high_roe_threshold"] = roe_p70
+
+    # 利润高增长: 利润增速第 65 百分位
+    if pg_values:
+        pg_p65 = percentile(sorted(pg_values), 0.65)
+        if pg_p65 is not None:
+            updates["profit_growth_strong_threshold"] = pg_p65
+
+    if not updates:
+        return rule_config
+
+    sys.stderr.write(f"[cross_section] {len(updates)} percentile thresholds applied:\n")
+    for k, v in updates.items():
+        sys.stderr.write(f"  {k} = {v:.4f}\n")
+
+    return replace(rule_config, **updates)
+
+
 def run_batch(
     db_path: str | Path | None = None,
     rule_version: str = "v1",
@@ -373,6 +552,15 @@ def run_batch(
     run_id = writer.start_run(rule_snapshot=rule_config)
 
     fund_codes = repo.list_supported_fund_codes()
+
+    # ---- 横截面分位数预扫描 ----
+    # 先加载所有基金的 factor_exposures，计算横截面分位数阈值，
+    # 替换 RuleConfig 中的绝对值阈值为分位数阈值，让风格标签的触发率稳定。
+    rule_config = _apply_cross_sectional_percentiles(
+        repo, fund_codes, rule_config
+    )
+    engine = LabelEngine(rule_config)
+
     processed = 0
     failure_count = 0
     for fund_code in fund_codes:
@@ -436,6 +624,22 @@ def run_batch(
             failure_count += 1
 
     final_status = "succeeded" if failure_count == 0 else "completed_with_errors"
+
+    # 计算同类分位数（必须在所有标签落库后做）
+    try:
+        from app.persistence.percentile import compute_percentile_ranks, write_percentile_ranks
+        with sqlite3.connect(writer._db_path) as pct_conn:
+            pct_records = compute_percentile_ranks(pct_conn, run_id)
+            write_count = write_percentile_ranks(pct_conn, pct_records)
+            pct_conn.commit()
+            sys.stderr.write(
+                f"[percentile] {write_count} rank rows for run {run_id}\n"
+            )
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(
+            f"[percentile] compute failed for run {run_id}: {exc}\n"
+        )
+
     writer.finish_run(run_id, status=final_status)
     return run_id, processed
 

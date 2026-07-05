@@ -210,6 +210,7 @@ class FundDataRepository:
             )
 
             from app.data_access.stock_factors import load_stock_factors
+            from app.data_access.stock_industries import load_stock_industry_map
 
             stock_codes = [
                 row["stock_code"] for row in stock_holdings if row.get("stock_code")
@@ -218,6 +219,14 @@ class FundDataRepository:
             # 因子横截面通常比持仓报告期更新；用持仓日期会让全部因子查不到（一份基金
             # 季报通常 60~120 天前发布，因子已经更新）。
             stock_factors = load_stock_factors(conn, stock_codes, None)
+            # 加载行业映射并合并到 stock_factors 行的 sector_group 字段，
+            # 让行业主题标签能直接从 fund.stock_factors 拿到行业归属。
+            industry_map = load_stock_industry_map(conn, stock_codes, None)
+            for sf in stock_factors:
+                ind = industry_map.get(sf.get("stock_code"))
+                if ind:
+                    sf["sector_group"] = ind.get("sector_group")
+                    sf["industry_name"] = ind.get("industry_name")
             factor_exposures = self._load_factor_exposures(
                 conn,
                 fund_code,

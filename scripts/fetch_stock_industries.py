@@ -23,7 +23,16 @@ import sqlite3
 from pathlib import Path
 
 DEFAULT_DB = Path(__file__).resolve().parents[1] / "data" / "stock_factors.sqlite"
-VALID_SECTOR_GROUPS = {"financial", "energy_utility", "consumer", "other"}
+VALID_SECTOR_GROUPS = {
+    "financial",
+    "energy_utility",
+    "consumer",
+    "tech",
+    "healthcare",
+    "cyclical",
+    "infrastructure",
+    "other",
+}
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS stock_industry_map (
@@ -31,7 +40,16 @@ CREATE TABLE IF NOT EXISTS stock_industry_map (
     industry_code TEXT NOT NULL,
     industry_name TEXT NOT NULL,
     sector_group TEXT NOT NULL CHECK (
-        sector_group IN ('financial', 'energy_utility', 'consumer', 'other')
+        sector_group IN (
+            'financial',
+            'energy_utility',
+            'consumer',
+            'tech',
+            'healthcare',
+            'cyclical',
+            'infrastructure',
+            'other'
+        )
     ),
     source TEXT NOT NULL,
     as_of_date TEXT NOT NULL,

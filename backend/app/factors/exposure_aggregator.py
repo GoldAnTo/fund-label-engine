@@ -61,13 +61,19 @@ def aggregate_factor_exposures(
 
     rows: list[FundFactorExposure] = []
 
-    for factor_code, source_field in (
-        ("pb_weighted", "pb"),
-        ("roe_weighted", "roe"),
-        ("revenue_growth_weighted", "revenue_growth"),
-        ("profit_growth_weighted", "profit_growth"),
-        ("dividend_yield_weighted", "dividend_yield"),
-        ("valuation_percentile_weighted", "valuation_percentile"),
+    # 加权因子聚合配置：
+    # - source_field: 从 stock_factor_values 表读取的因子字段名
+    # - skip_negative: 是否跳过负值（PE 负数代表亏损，参与平均会扭曲结果）
+    # - clip_min/clip_max: 极端值截断区间，防止离群值拉偏加权均值
+    for factor_code, source_field, skip_negative, clip_min, clip_max in (
+        ("pb_weighted", "pb", True, -10.0, 100.0),
+        ("pe_weighted", "pe", True, -500.0, 500.0),
+        ("roe_weighted", "roe", False, -1.0, 1.0),
+        ("revenue_growth_weighted", "revenue_growth", False, -1.0, 3.0),
+        ("profit_growth_weighted", "profit_growth", False, -3.0, 10.0),
+        ("dividend_yield_weighted", "dividend_yield", False, 0.0, 0.5),
+        ("valuation_percentile_weighted", "valuation_percentile", False, 0.0, 1.0),
+        ("log10_market_cap_weighted", "log10_market_cap", False, 7.0, 13.0),
     ):
         weighted_sum = 0.0
         denominator = 0.0
@@ -75,6 +81,12 @@ def aggregate_factor_exposures(
             value = _as_float((factor_by_stock.get(stock_code) or {}).get(source_field))
             if value is None:
                 continue
+            if skip_negative and value <= 0:
+                continue
+            if clip_min is not None and value < clip_min:
+                value = clip_min
+            if clip_max is not None and value > clip_max:
+                value = clip_max
             weighted_sum += weight * value
             denominator += weight
         if denominator <= 0:
@@ -190,11 +202,13 @@ def _has_any_factor(row: dict[str, Any] | None) -> bool:
         _as_float(row.get(field)) is not None
         for field in (
             "pb",
+            "pe",
             "roe",
             "revenue_growth",
             "profit_growth",
             "dividend_yield",
             "valuation_percentile",
+            "log10_market_cap",
         )
     )
 

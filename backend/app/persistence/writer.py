@@ -71,6 +71,21 @@ SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS fund_percentile_rank (
+        run_id TEXT NOT NULL,
+        fund_code TEXT NOT NULL,
+        label_code TEXT NOT NULL,
+        metric_code TEXT NOT NULL,
+        metric_value REAL,
+        percentile REAL NOT NULL,
+        rank_value INTEGER NOT NULL,
+        peer_count INTEGER NOT NULL,
+        direction TEXT NOT NULL DEFAULT 'higher_better',
+        computed_at TEXT NOT NULL,
+        PRIMARY KEY (run_id, fund_code, label_code, metric_code)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS fund_run_coverage (
         run_id TEXT NOT NULL,
         fund_code TEXT NOT NULL,

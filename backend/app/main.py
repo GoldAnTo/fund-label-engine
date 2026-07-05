@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any, Literal
+
+# 把项目根目录加入 sys.path，使 scripts 模块可被 import
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -144,7 +150,7 @@ def create_app(
                 status_code=503,
                 detail="Database path is not configured. Set FLE_OUTPUT_DB/FLE_DB_PATH or pass db_path to create_app().",
             )
-        return LabelRunReader(path)
+        return LabelRunReader(path, app.state.source_db_path)
 
     def get_writer() -> LabelRunWriter:
         path = app.state.output_db_path or app.state.db_path
@@ -479,6 +485,74 @@ def create_app(
                 detail=f"fund {fund_code} not found in run {run_id}",
             )
         return payload
+
+    @app.get("/v1/runs/{run_id}/funds/{fund_code}/percentile")
+    def get_run_fund_percentile(
+        run_id: str,
+        fund_code: str,
+        label_code: str | None = None,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """返回某只基金在指定分组下的指标百分位排名。
+
+        - ``label_code`` 可选；不传则返回该基金所有分组（全市场+所有命中的风格标签）。
+        - 返回值: ``{fund_code, run_id, ranks: [{label_code, metric_code, ...}]}``
+        """
+        ranks = reader.list_percentile_ranks(run_id, fund_code, label_code)
+        return {
+            "run_id": run_id,
+            "fund_code": fund_code,
+            "label_code": label_code,
+            "ranks": ranks,
+        }
+
+    @app.get("/v1/runs/{run_id}/top-funds")
+    def get_run_top_funds(
+        run_id: str,
+        label_code: str,
+        metric_code: str = "annualized_return_1y",
+        limit: int = 5,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """返回某风格标签分组下某指标排名前 N 的基金。"""
+        rows = reader.get_top_funds_in_group(run_id, label_code, metric_code, limit)
+        return {
+            "run_id": run_id,
+            "label_code": label_code,
+            "metric_code": metric_code,
+            "results": rows,
+        }
+
+    @app.get("/v1/runs/{run_id}/compare")
+    def get_run_compare(
+        run_id: str,
+        funds: str,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """竞品横评：多只基金的标签、因子、指标、分位数并排对比。
+
+        - ``funds``: 逗号分隔的基金代码，最多 6 只。
+        """
+        fund_codes = [c.strip() for c in funds.split(",") if c.strip()]
+        if not fund_codes:
+            raise HTTPException(status_code=400, detail="funds 参数不能为空")
+        if len(fund_codes) > 6:
+            raise HTTPException(status_code=400, detail="最多支持 6 只基金对比")
+        return reader.get_compare_overview(run_id, fund_codes)
+
+    @app.get("/v1/holdings-overlap")
+    def get_holdings_overlap(
+        funds: str,
+        top_n: int = 10,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """持仓重叠度：多只基金最新一期前 N 持仓的重叠情况。"""
+        fund_codes = [c.strip() for c in funds.split(",") if c.strip()]
+        if len(fund_codes) < 2:
+            raise HTTPException(status_code=400, detail="至少需要 2 只基金")
+        if len(fund_codes) > 6:
+            raise HTTPException(status_code=400, detail="最多支持 6 只基金")
+        return reader.get_holdings_overlap(fund_codes, top_n)
 
     @app.get("/v1/runs/{run_id}/funds/{fund_code}/benchmark-components")
     def get_run_fund_benchmark_components(

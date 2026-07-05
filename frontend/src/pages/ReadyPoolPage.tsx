@@ -1,47 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchRelativeEligibility, fetchRuns, RelativeEligibilityResponse } from "../api";
+import {
+  fetchRelativeEligibility,
+  fetchRuns,
+  fetchRunSummary,
+  fetchPortfolioMatrix,
+  fetchTopFunds,
+  type RelativeEligibilityResponse,
+  type RunSummary,
+  type PortfolioMatrixResponse,
+  type TopFundsResponse,
+} from "../api";
+import { STYLE_GROUPS, ALL_STYLE_CODES, styleTagClass, styleName } from "../styleConfig";
 
 const STATUS_LABELS: Record<string, string> = {
   relative_label_ready: "可展示",
-  relative_label_ready_approx: "可展示（近似基准）",
-  benchmark_source_missing: "缺少基准收益源",
-  benchmark_mapping_required: "需要确认基准映射",
-  benchmark_unresolved: "基准组件未解析",
-  benchmark_missing: "未配置业绩基准",
+  relative_label_ready_approx: "可展示（近似）",
+  benchmark_source_missing: "缺基准源",
+  benchmark_mapping_required: "需确认映射",
+  benchmark_unresolved: "组件未解析",
+  benchmark_missing: "未配置基准",
   nav_window_insufficient: "收益窗口不足",
-};
-
-const SOURCE_STATUS_LABELS: Record<string, string> = {
-  ready: "基准已就绪",
-  missing_source: "缺少收益源",
-  mapping_required: "需要映射",
-  unresolved: "未解析",
-  benchmark_missing: "无业绩基准",
 };
 
 function statusLabel(value: string) {
   return STATUS_LABELS[value] ?? value;
-}
-
-function sourceStatusLabel(value: string) {
-  return SOURCE_STATUS_LABELS[value] ?? value;
-}
-
-function displayText(value: string) {
-  return value
-    .replaceAll("benchmark_source_status=benchmark_missing", "未配置业绩基准")
-    .replaceAll("benchmark_source_status=missing_source", "缺少基准收益源")
-    .replaceAll("benchmark_source_status=mapping_required", "需要确认基准映射")
-    .replaceAll("benchmark_source_status=unresolved", "基准组件未解析")
-    .replaceAll("relative_label_ready_approx", "可展示（近似基准）")
-    .replaceAll("relative_label_ready", "可展示")
-    .replaceAll("benchmark_source_missing", "缺少基准收益源")
-    .replaceAll("benchmark_mapping_required", "需要确认基准映射")
-    .replaceAll("benchmark_unresolved", "基准组件未解析")
-    .replaceAll("benchmark_missing", "未配置业绩基准")
-    .replaceAll("nav_window_insufficient", "收益窗口不足")
-    .replace(/\b[A-Z0-9_]+:/g, "");
 }
 
 function statusClass(value: string) {
@@ -50,39 +33,14 @@ function statusClass(value: string) {
     : "badge-manual_review";
 }
 
-function actionText(statusValue: string, component: string) {
-  if (statusValue === "benchmark_source_missing") return `补齐 ${displayText(component)} 的基准日收益源`;
-  if (statusValue === "benchmark_mapping_required") return `确认 ${displayText(component)} 的精确指数映射`;
-  if (statusValue === "benchmark_unresolved") return `补解析规则或明确不支持 ${displayText(component)}`;
-  if (statusValue === "benchmark_missing") return "补充基金业绩基准配置";
-  if (statusValue === "nav_window_insufficient") return "补齐净值窗口后再展示相对基准标签";
-  return "保持观察";
-}
-
-function csvEscape(value: string | number) {
-  const text = String(value ?? "");
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
-function downloadCsv(fileName: string, rows: (string | number)[][]) {
-  const csv = rows.map((row) => row.map(csvEscape).join(",")).join("\n");
-  const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(a.href);
-}
-
 export default function ReadyPoolPage() {
   const [runs, setRuns] = useState<{ run_id: string; run_at: string }[]>([]);
   const [runId, setRunId] = useState("");
-  const [status, setStatus] = useState<"all" | "ready" | "blocked">("all");
-  const [data, setData] = useState<RelativeEligibilityResponse | null>(null);
+  const [eligibility, setEligibility] = useState<RelativeEligibilityResponse | null>(null);
+  const [summary, setSummary] = useState<RunSummary | null>(null);
+  const [matrix, setMatrix] = useState<PortfolioMatrixResponse | null>(null);
+  const [topFundsByStyle, setTopFundsByStyle] = useState<Record<string, TopFundsResponse>>({});
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     fetchRuns()
@@ -95,187 +53,253 @@ export default function ReadyPoolPage() {
 
   useEffect(() => {
     if (!runId) return;
-    setLoading(true);
     setError(null);
-    fetchRelativeEligibility(runId, status)
-      .then(setData)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [runId, status]);
+    Promise.all([
+      fetchRelativeEligibility(runId, "all"),
+      fetchRunSummary(runId),
+      fetchPortfolioMatrix(runId),
+    ])
+      .then(([elig, summ, mat]) => {
+        setEligibility(elig);
+        setSummary(summ);
+        setMatrix(mat);
+      })
+      .catch((e) => setError(e.message));
 
-  const currentRun = runs.find((run) => run.run_id === runId);
-  const blockedRows = useMemo(
-    () => data?.results.filter((row) => row.relative_label_status !== "relative_label_ready") ?? [],
-    [data]
-  );
+    // 拉取 4 个代表性风格标签的 TOP 5 基金（按年化收益）
+    const topStyles = ["quality_growth", "large_cap", "high_valuation", "low_valuation"];
+    const requests = topStyles.map((s) =>
+      fetchTopFunds(runId, s, "annualized_return_1y", 5)
+        .then((resp) => [s, resp] as const)
+        .catch(() => [s, null] as const)
+    );
+    Promise.all(requests).then((results) => {
+      const map: Record<string, TopFundsResponse> = {};
+      for (const [s, resp] of results) {
+        if (resp) map[s] = resp;
+      }
+      setTopFundsByStyle(map);
+    });
+  }, [runId]);
 
-  const handleExportBlocked = () => {
-    if (!data) return;
-    downloadCsv(`ready_pool_blocked_${data.run_id.slice(0, 12)}.csv`, [
-      ["基金代码", "基金名称", "暂不可展示原因", "基准源状态", "净值样本", "基准样本", "阻塞组件", "建议动作"],
-      ...blockedRows.map((row) => [
-        row.fund_code,
-        row.fund_name,
-        statusLabel(row.relative_label_status),
-        sourceStatusLabel(row.benchmark_source_status),
-        row.nav_sample_count,
-        row.benchmark_sample_count,
-        displayText(row.blocking_components || row.blocking_reason || "-"),
-        actionText(row.relative_label_status, row.blocking_components || row.blocking_reason || ""),
-      ]),
-    ]);
-  };
+  const styleDistribution = useMemo(() => {
+    if (!summary) return [];
+    return summary.label_distribution
+      .filter((d) => ALL_STYLE_CODES.has(d.label_code) && d.label_code !== "style_pending_rule_definition")
+      .sort((a, b) => b.fund_count - a.fund_count);
+  }, [summary]);
+
+  const fundStyleMap = useMemo(() => {
+    if (!matrix) return new Map<string, string[]>();
+    const m = new Map<string, string[]>();
+    for (const row of matrix.rows) {
+      m.set(row.fund_code, (row.style_tags || []).filter((t) => ALL_STYLE_CODES.has(t) && t !== "style_pending_rule_definition"));
+    }
+    return m;
+  }, [matrix]);
+
+  const totalFunds = eligibility?.total_funds ?? 142;
+  const fundsWithStyle = Array.from(fundStyleMap.values()).filter((tags) => tags.length > 0).length;
+  const fundsNoStyle = totalFunds - fundsWithStyle;
+
+  // 按风格分组统计
+  const groupStats = useMemo(() => {
+    return STYLE_GROUPS.map((group) => {
+      const count = new Set<string>();
+      for (const tags of fundStyleMap.values()) {
+        if (tags.some((t) => group.codes.includes(t))) {
+          for (const fund of fundStyleMap.keys()) {
+            const t = fundStyleMap.get(fund) || [];
+            if (t.some((c) => group.codes.includes(c))) count.add(fund);
+          }
+        }
+      }
+      return { ...group, fundCount: count.size };
+    });
+  }, [fundStyleMap]);
 
   return (
     <div>
-      <div className="card workbench-hero">
-        <div>
-          <h2>Phase1 v1 可展示池工作台</h2>
-          <p className="muted">
-            默认服务正式清单，先判断哪些基金能展示相对基准标签，再把暂不可展示原因转成数据和映射任务。
-          </p>
-          {currentRun && <p className="muted">最新批次时间：{currentRun.run_at}</p>}
-          <button className="secondary" onClick={handleExportBlocked} disabled={!data || blockedRows.length === 0}>
-            导出暂不可展示清单
-          </button>
-        </div>
-        <div className="toolbar">
-          <label>
-            批次&nbsp;
-            <select value={runId} onChange={(e) => setRunId(e.target.value)}>
-              {runs.map((run) => (
-                <option key={run.run_id} value={run.run_id}>
-                  {run.run_id.slice(0, 8)}… ({run.run_at})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            状态&nbsp;
-            <select value={status} onChange={(e) => setStatus(e.target.value as "all" | "ready" | "blocked")}>
-              <option value="all">全部</option>
-              <option value="ready">仅看可展示</option>
-              <option value="blocked">仅看暂不可展示</option>
-            </select>
-          </label>
-        </div>
-        {error && <div className="error">{error}</div>}
+      <div className="page-head">
+        <h1>风格总览</h1>
+        <p>{totalFunds} 只权益基金的风格标签分布和展示池状态</p>
       </div>
 
-      {data && (
+      <div className="toolbar">
+        <label>
+          批次
+          <select value={runId} onChange={(e) => setRunId(e.target.value)}>
+            {runs.map((r) => (
+              <option key={r.run_id} value={r.run_id}>
+                {r.run_id.slice(0, 8)}… ({r.run_at})
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {error && <div className="alert alert-warn">{error}</div>}
+
+      {/* 核心指标 */}
+      {eligibility && (
         <div className="metric-grid">
-          <div className="metric-tile">
-            <span>正式清单</span>
-            <strong>{data.total_funds}</strong>
-          </div>
-          <div className="metric-tile metric-ready">
-            <span>可展示</span>
-            <strong>{data.ready_count}</strong>
-          </div>
-          {data.ready_approx_count ? (
-            <div className="metric-tile metric-ready">
-              <span>可展示（近似基准）</span>
-              <strong>{data.ready_approx_count}</strong>
-            </div>
-          ) : null}
-          <div className="metric-tile metric-blocked">
-            <span>暂不可展示</span>
-            <strong>{data.blocked_count}</strong>
-          </div>
+          <div className="metric-tile"><span>正式清单</span><strong>{eligibility.total_funds}</strong></div>
+          <div className="metric-tile"><span>可展示</span><strong>{eligibility.ready_count}</strong></div>
+          <div className="metric-tile"><span>暂不可展示</span><strong>{eligibility.blocked_count}</strong></div>
+          <div className="metric-tile"><span>有风格标签</span><strong>{fundsWithStyle}</strong></div>
+          <div className="metric-tile"><span>风格未定</span><strong>{fundsNoStyle}</strong></div>
         </div>
       )}
 
-      {data && (
-        <div className="card">
-          <h2>暂不可展示结构</h2>
-          <table>
-            <thead>
-              <tr><th>状态</th><th>基金数</th></tr>
-            </thead>
-            <tbody>
-              {Object.entries(data.status_counts).map(([key, count]) => (
-                <tr key={key}>
-                  <td><span className={`badge ${statusClass(key)}`}>{statusLabel(key)}</span></td>
-                  <td>{count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {data && data.blocker_groups.length > 0 && (
-        <div className="card">
-          <h2>主要阻塞项</h2>
-          <p className="muted">按门禁原因和基准组件聚合，优先处理影响基金数最多的缺口。</p>
-          <table>
-            <thead>
-              <tr>
-                <th>门禁原因</th>
-                <th>组件 / 规则</th>
-                <th>基金数</th>
-                <th>样例基金</th>
-                <th>建议动作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.blocker_groups.slice(0, 12).map((group) => (
-                <tr key={group.key}>
-                  <td><span className={`badge ${statusClass(group.status)}`}>{statusLabel(group.status)}</span></td>
-                  <td className="muted">{displayText(group.component)}</td>
-                  <td>{group.count}</td>
-                  <td className="muted">{group.sample_fund_codes.join(", ")}</td>
-                  <td>{actionText(group.status, group.component)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
+      {/* 风格分布概览 */}
       <div className="card">
-        <h2>基金列表</h2>
-        {loading && <p>加载中...</p>}
-        {data && data.results.length > 0 && (
+        <h2>风格分布</h2>
+        {styleDistribution.length > 0 ? (
+          <div className="style-overview">
+            {styleDistribution.map((d) => (
+              <Link key={d.label_code} to={`/search?label_code=${d.label_code}`} className="style-card">
+                <div className="style-card-head">
+                  <strong>{d.label_name}</strong>
+                  <span>{d.fund_count}</span>
+                </div>
+                <p>{((d.fund_count / totalFunds) * 100).toFixed(0)}% 的基金</p>
+                <div className="style-card-tags">
+                  <span className={styleTagClass(d.label_code)}>{styleName(d.label_code)}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">暂无风格标签数据。请先跑批生成风格标签。</p>
+        )}
+      </div>
+
+      {/* 风格维度统计 */}
+      {groupStats.length > 0 && fundsWithStyle > 0 && (
+        <div className="card">
+          <h2>风格维度统计</h2>
+          <p className="muted">每个维度有多少只基金命中</p>
           <table>
-            <thead>
-              <tr>
-                <th>基金</th>
-                <th>相对标签状态</th>
-                <th>基准源</th>
-                <th>净值 / 基准样本</th>
-                <th>建议动作</th>
-                <th></th>
-              </tr>
-            </thead>
+            <thead><tr><th>维度</th><th>基金数</th><th>标签</th></tr></thead>
             <tbody>
-              {data.results.map((row) => (
-                <tr key={row.fund_code}>
+              {groupStats.map((g) => (
+                <tr key={g.title}>
+                  <td><strong>{g.title}</strong></td>
+                  <td className="num">{g.fundCount}</td>
                   <td>
-                    <code>{row.fund_code}</code>
-                    <div className="muted">{row.fund_name}</div>
-                  </td>
-                  <td><span className={`badge ${statusClass(row.relative_label_status)}`}>{statusLabel(row.relative_label_status)}</span></td>
-                  <td>{sourceStatusLabel(row.benchmark_source_status)}</td>
-                  <td>{row.nav_sample_count} / {row.benchmark_sample_count}</td>
-                  <td>
-                    {row.relative_label_status === "relative_label_ready"
-                      ? "保持展示，查看证据"
-                      : actionText(row.relative_label_status, row.blocking_components || row.blocking_reason || "")}
-                    {row.relative_label_status !== "relative_label_ready" && (
-                      <div className="muted">{displayText(row.blocking_components || row.blocking_reason || "-")}</div>
-                    )}
-                  </td>
-                  <td>
-                    <Link to={`/runs/${data.run_id}/funds/${row.fund_code}`}>查看报告 →</Link>
+                    <div className="style-labels-grid">
+                      {g.codes.map((code) => (
+                        <span key={code} className={styleTagClass(code)}>{styleName(code)}</span>
+                      ))}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
-        {data && data.results.length === 0 && <p className="muted">没有命中的基金。</p>}
-      </div>
+        </div>
+      )}
+
+      {/* 同类 TOP 5：按风格分组查看年化收益排名靠前的基金 */}
+      {Object.keys(topFundsByStyle).length > 0 && (
+        <div className="card">
+          <h2>同类 TOP 5</h2>
+          <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+            4 个代表性风格标签里年化收益排名前 5 的基金（点击进入诊断报告查看分位详情）。
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+            {Object.entries(topFundsByStyle).map(([styleCode, resp]) => (
+              <div key={styleCode} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: 10, background: "var(--surface-2)" }}>
+                <div style={{ marginBottom: 8 }}>
+                  <span className={`style-tag ${styleTagClass(styleCode)}`}>
+                    {styleName(styleCode)}
+                  </span>
+                  <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>
+                    同类 {resp.results[0]?.peer_count ?? 0} 只
+                  </span>
+                </div>
+                <ol style={{ margin: 0, paddingLeft: 20, fontSize: 12 }}>
+                  {resp.results.map((f) => (
+                    <li key={f.fund_code} style={{ margin: "3px 0" }}>
+                      <Link to={`/funds/${f.fund_code}?run_id=${runId}`} style={{ fontFamily: "ui-monospace, monospace" }}>
+                        {f.fund_code}
+                      </Link>
+                      <span className="muted" style={{ marginLeft: 6 }}>
+                        {f.metric_value !== null ? `${(Number(f.metric_value) * 100).toFixed(1)}%` : "-"}
+                        {" · "}第 {f.rank_value} 名
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 展示池门禁 */}
+      {eligibility && eligibility.blocked_count > 0 && (
+        <div className="card">
+          <h2>暂不可展示原因</h2>
+          <table>
+            <thead><tr><th>原因</th><th className="num">基金数</th></tr></thead>
+            <tbody>
+              {Object.entries(eligibility.status_counts)
+                .filter(([key]) => key !== "relative_label_ready" && key !== "relative_label_ready_approx")
+                .map(([key, count]) => (
+                  <tr key={key}>
+                    <td><span className={`badge ${statusClass(key)}`}>{statusLabel(key)}</span></td>
+                    <td className="num">{count}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 基金列表 */}
+      {eligibility && (
+        <div className="card">
+          <h2>基金列表</h2>
+          <table className="fund-table">
+            <thead>
+              <tr><th>基金</th><th>风格标签</th><th>展示状态</th><th></th></tr>
+            </thead>
+            <tbody>
+              {eligibility.results.map((row) => {
+                const tags = fundStyleMap.get(row.fund_code) || [];
+                return (
+                  <tr key={row.fund_code}>
+                    <td>
+                      <div className="fund-code-cell">{row.fund_code}</div>
+                      <div className="fund-name-cell">{row.fund_name}</div>
+                    </td>
+                    <td>
+                      {tags.length > 0 ? (
+                        <div className="style-labels-grid">
+                          {tags.map((code) => (
+                            <span key={code} className={styleTagClass(code)}>{styleName(code)}</span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`badge ${statusClass(row.relative_label_status)}`}>
+                        {statusLabel(row.relative_label_status)}
+                      </span>
+                    </td>
+                    <td>
+                      <Link to={`/runs/${eligibility.run_id}/funds/${row.fund_code}`}>查看</Link>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
