@@ -151,6 +151,15 @@ export default function ReadyPoolPage() {
   const fundsWithStyle = Array.from(fundStyleMap.values()).filter((tags) => tags.length > 0).length;
   const coveragePct = totalFunds > 0 ? Math.round((readyCount / totalFunds) * 100) : 0;
 
+  // 代理口径说明 banner：当大量基金因 nav_window_insufficient 被屏蔽时给出提示
+  // 当前 dea77b0f run 下 5/142 ready + 137 nav_window_insufficient
+  const showProxyCaliberBanner =
+    eligibility !== null &&
+    readyCount > 0 &&
+    blockedCount > 0 &&
+    totalFunds > 0 &&
+    readyCount / totalFunds < 0.1;
+
   // 主列表过滤
   const filteredRows = useMemo(() => {
     if (!eligibility) return [];
@@ -260,6 +269,22 @@ export default function ReadyPoolPage() {
       </div>
 
       {error && <div className="alert alert-warn">{error}</div>}
+
+      {/* 代理口径说明 banner：当大量基金因 nav_window_insufficient 被屏蔽时给出提示 */}
+      {showProxyCaliberBanner && (
+        <div className="proxy-caliber-banner is-warn">
+          <span className="caliber-icon">i</span>
+          <div className="caliber-body">
+            <span className="caliber-title">代理口径说明</span>
+            <p>
+              当前批次可展示基金占比低于 10%，主要原因为
+              <strong> nav_window_insufficient（收益窗口不足）</strong>。
+              这通常发生在新成立基金或代理净值序列较短的基金上，并非风格识别或基准配置问题。
+              后续可考虑放宽窗口阈值或引入基准代理以提升覆盖率。
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 顶部决策摘要：覆盖率 + 4 维核心指标 */}
       <div className="decision-card">
