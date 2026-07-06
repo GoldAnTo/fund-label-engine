@@ -19,6 +19,7 @@ dependencies = [
 dev = [
   "httpx>=0.28",
   "pytest>=8.2",
+  "ruff>=0.4",
 ]
 
 [tool.setuptools]
@@ -30,3 +31,36 @@ where = ["backend"]
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
 pythonpath = ["backend", "."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+  ".venv",
+  "build",
+  "data",
+  "logs",
+  "__pycache__",
+]
+
+[tool.ruff.lint]
+# 关键规则集：行长度、命名、导入、可读性
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # isort
+  "B",   # bugbear
+  "C4",  # comprehensions
+  "UP",  # pyupgrade
+]
+# 允许 noqa 的场景：测试中常用
+ignore = [
+  "E501",  # 由 formatter / line-length 控制
+  "B008",  # FastAPI 中的函数调用作为默认值是有意为之
+  "B007",  # loop 变量未使用
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/**" = ["B011"]   # 测试中 assert False 是有意的
+"**/*.py" = ["E402"]             # __future__ import 后允许

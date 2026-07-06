@@ -285,7 +285,6 @@ def main(argv=None):
                 "benchmark_sample_count": elig.get(code, {}).get("benchmark_sample_count", ""),
             }
         )
-    run_id = sections[0].split("####")[0] if False else ""
     header = [
         "# Phase1 v1 Ready Pool 验收报告",
         "",

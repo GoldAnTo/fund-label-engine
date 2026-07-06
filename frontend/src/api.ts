@@ -289,9 +289,12 @@ export interface RelativeEligibilityResponse {
 
 export async function fetchRelativeEligibility(
   runId: string,
-  status: "all" | "ready" | "blocked" = "all"
+  status: "all" | "ready" | "blocked" = "all",
+  fundCode?: string
 ): Promise<RelativeEligibilityResponse> {
-  return json(`/v1/runs/${runId}/relative-label-eligibility?status=${status}&limit=300`);
+  const params = new URLSearchParams({ status, limit: "300" });
+  if (fundCode) params.set("fund_code", fundCode);
+  return json(`/v1/runs/${runId}/relative-label-eligibility?${params}`);
 }
 
 export async function fetchFundPercentile(
@@ -729,4 +732,164 @@ export async function postReview(
     reviewer,
     comment,
   });
+}
+
+// ===================================================================
+// 标签变化检测
+// ===================================================================
+export interface LabelChange {
+  run_id: string;
+  previous_run_id: string;
+  fund_code: string;
+  label_code: string;
+  change_type: "added" | "removed" | "status_changed";
+  previous_status: string | null;
+  current_status: string | null;
+  is_risk_warning: number;
+  detected_at: string;
+}
+
+export interface LabelChangeSummary {
+  total: number;
+  risk_warnings: number;
+  by_type: Record<string, number>;
+}
+
+export interface LabelChangesResponse {
+  run_id: string;
+  summary: LabelChangeSummary;
+  count: number;
+  changes: LabelChange[];
+}
+
+export async function fetchLabelChanges(
+  runId: string,
+  opts?: { riskWarningsOnly?: boolean; fundCode?: string }
+): Promise<LabelChangesResponse> {
+  const params = new URLSearchParams();
+  if (opts?.riskWarningsOnly) params.set("risk_warnings_only", "true");
+  if (opts?.fundCode) params.set("fund_code", opts.fundCode);
+  const qs = params.toString();
+  return json(`/v1/runs/${runId}/label-changes${qs ? `?${qs}` : ""}`);
+}
+
+// ===================================================================
+// 覆盖率报告
+// ===================================================================
+export interface CoverageFieldStat {
+  field: string;
+  pass_count: number;
+  fail_count: number;
+  total: number;
+  pass_rate: number;
+}
+
+export interface CoverageByFundType {
+  fund_type: string;
+  fields: CoverageFieldStat[];
+  review_action_counts: Record<string, number>;
+}
+
+export interface CoverageRejectionReason {
+  field: string;
+  reason: string;
+  fund_count: number;
+}
+
+export interface CoverageReport {
+  run_id: string;
+  run_at: string;
+  rule_version: string;
+  status: string;
+  total_funds: number;
+  by_fund_type: CoverageByFundType[];
+  rejection_reasons_top: CoverageRejectionReason[];
+}
+
+export async function fetchCoverageReport(runId: string): Promise<CoverageReport> {
+  return json(`/v1/runs/${runId}/coverage`);
+}
+
+// ===================================================================
+// 标签定义和规则版本
+// ===================================================================
+export interface LabelDefinition {
+  label_code: string;
+  label_name: string;
+  category: string;
+  fund_types: string;
+  rule_version: string;
+  enabled: number;
+  description: string;
+  thresholds: Record<string, unknown> | null;
+}
+
+export async function fetchLabelDefinitions(
+  ruleVersion?: string
+): Promise<LabelDefinition[]> {
+  const qs = ruleVersion ? `?rule_version=${encodeURIComponent(ruleVersion)}` : "";
+  return json(`/v1/label-definitions${qs}`);
+}
+
+export interface RuleVersionInfo {
+  rule_version: string;
+  run_count: number;
+  last_run_at: string;
+}
+
+export async function fetchRuleVersions(): Promise<RuleVersionInfo[]> {
+  return json(`/v1/rule-versions`);
+}
+
+// ===================================================================
+// 组合角色建议 + 一键应用
+// ===================================================================
+export interface RoleReviewSuggestion {
+  fund_code: string;
+  role_code: string;
+  decision: string;
+  target_bucket: string;
+  recommended_max_weight_pct: number;
+  rationale: string;
+}
+
+export interface PortfolioRoleReviewSuggestions {
+  run_id: string;
+  suggestions: RoleReviewSuggestion[];
+}
+
+export async function fetchPortfolioRoleReviewSuggestions(
+  runId: string
+): Promise<PortfolioRoleReviewSuggestions> {
+  return json(`/v1/runs/${runId}/portfolio-role-reviews/suggest`);
+}
+
+export interface ApplySuggestionsItem {
+  fund_code: string;
+  role_code: string;
+  decision: string;
+  target_bucket: string;
+  max_weight_pct: number;
+  rationale: string;
+}
+
+export interface ApplySuggestionsRequest {
+  reviewer: string;
+  items: ApplySuggestionsItem[];
+}
+
+export interface ApplySuggestionsResponse {
+  run_id: string;
+  applied_count: number;
+  applied_funds: string[];
+}
+
+export async function applyPortfolioRoleReviewSuggestions(
+  runId: string,
+  payload: ApplySuggestionsRequest
+): Promise<ApplySuggestionsResponse> {
+  return postJSON(
+    `/v1/runs/${runId}/portfolio-role-reviews/apply-suggestions`,
+    payload as unknown as Record<string, unknown>
+  );
 }

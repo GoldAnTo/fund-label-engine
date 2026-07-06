@@ -14,21 +14,23 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import os
 import sqlite3
 import sys
+import uuid
 from dataclasses import asdict, replace
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
 from app.data_access import create_repository
-from app.factors.exposure_aggregator import aggregate_factor_exposures
-from app.factors.equity_contributions import build_equity_style_contributions
 from app.factors.dividend_sector_mix import aggregate_dividend_sector_mix
+from app.factors.equity_contributions import build_equity_style_contributions
+from app.factors.exposure_aggregator import aggregate_factor_exposures
 from app.label_engine import LabelEngine
 from app.label_engine.engine import FundInput, RuleConfig
+from app.logging_config import get_logger, notify_webhook
 from app.persistence import LabelRunWriter
-
 
 STYLE_LABEL_CODES = (
     "deep_value",
@@ -549,9 +551,101 @@ def run_batch(
     engine = LabelEngine(rule_config)
 
     writer.ensure_schema()
-    run_id = writer.start_run(rule_snapshot=rule_config)
+
+    # ---- 收集数据快照信息，用于审计追溯 ----
+    snapshot_id = uuid.uuid4().hex
+    source_mtime = (
+        datetime.fromtimestamp(os.path.getmtime(resolved_source), tz=UTC)
+        .isoformat(timespec="seconds")
+        if os.path.exists(resolved_source)
+        else None
+    )
+    factor_path_str = str(factor_db) if factor_db else None
+    factor_mtime = (
+        datetime.fromtimestamp(os.path.getmtime(factor_path_str), tz=UTC)
+        .isoformat(timespec="seconds")
+        if factor_path_str and os.path.exists(factor_path_str)
+        else None
+    )
+    nav_min = nav_max = None
+    fund_cnt = factor_cnt = bench_cnt = 0
+    holding_report_date = None
+    factor_as_of = None
+    try:
+        with sqlite3.connect(resolved_source) as snap_conn:
+            snap_conn.row_factory = sqlite3.Row
+            row = snap_conn.execute(
+                "SELECT MIN(nav_date) AS dmin, MAX(nav_date) AS dmax FROM nav_history"
+            ).fetchone()
+            if row and row["dmin"]:
+                nav_min, nav_max = row["dmin"], row["dmax"]
+            row = snap_conn.execute(
+                "SELECT COUNT(DISTINCT fund_code) AS cnt FROM fund_profiles"
+            ).fetchone()
+            if row:
+                fund_cnt = row["cnt"]
+            row = snap_conn.execute(
+                "SELECT COUNT(DISTINCT fund_code) AS cnt FROM benchmark_returns"
+            ).fetchone()
+            if row:
+                bench_cnt = row["cnt"]
+            try:
+                row = snap_conn.execute(
+                    "SELECT MAX(report_date) AS rd FROM stock_holdings"
+                ).fetchone()
+                if row and row["rd"]:
+                    holding_report_date = row["rd"]
+            except sqlite3.OperationalError:
+                pass
+    except sqlite3.OperationalError:
+        pass
+    if factor_path_str:
+        try:
+            with sqlite3.connect(factor_path_str) as fconn:
+                row = fconn.execute(
+                    "SELECT COUNT(DISTINCT stock_code) AS cnt FROM stock_factor_values"
+                ).fetchone()
+                if row:
+                    factor_cnt = row[0] if isinstance(row, sqlite3.Row) else row["cnt"]
+                row = fconn.execute(
+                    "SELECT MAX(as_of_date) AS ad FROM stock_factor_values"
+                ).fetchone()
+                if row:
+                    factor_as_of = row[0] if isinstance(row, sqlite3.Row) else row["ad"]
+        except sqlite3.OperationalError:
+            pass
+
+    writer.write_data_snapshot(
+        snapshot_id=snapshot_id,
+        source_db_path=resolved_source,
+        source_db_mtime=source_mtime,
+        factor_db_path=factor_path_str,
+        factor_db_mtime=factor_mtime,
+        nav_date_min=nav_min,
+        nav_date_max=nav_max,
+        fund_count=fund_cnt,
+        factor_count=factor_cnt,
+        benchmark_returns_count=bench_cnt,
+        holding_report_date=holding_report_date,
+        factor_as_of_date=factor_as_of,
+    )
+
+    run_id = writer.start_run(
+        rule_snapshot=rule_config,
+        data_snapshot_id=snapshot_id,
+    )
+
+    logger = get_logger("app.batch")
+    logger.info(
+        "batch started",
+        extra={"run_id": run_id, "snapshot_id": snapshot_id, "event": "batch_start"},
+    )
 
     fund_codes = repo.list_supported_fund_codes()
+    logger.info(
+        f"fund codes loaded: {len(fund_codes)}",
+        extra={"run_id": run_id, "event": "funds_loaded", "fund_count": len(fund_codes)},
+    )
 
     # ---- 横截面分位数预扫描 ----
     # 先加载所有基金的 factor_exposures，计算横截面分位数阈值，
@@ -622,6 +716,10 @@ def run_batch(
                 message=str(exc)[:500],
             )
             failure_count += 1
+            logger.warning(
+                f"fund evaluation failed: {fund_code} - {type(exc).__name__}: {exc}",
+                extra={"run_id": run_id, "fund_code": fund_code, "event": "fund_failure"},
+            )
 
     final_status = "succeeded" if failure_count == 0 else "completed_with_errors"
 
@@ -641,6 +739,43 @@ def run_batch(
         )
 
     writer.finish_run(run_id, status=final_status)
+
+    # ---- 标签变化检测 ----
+    from app.label_change_detection import detect_and_write_label_changes
+    from app.persistence.reader import LabelRunReader
+
+    reader = LabelRunReader(resolved_output)
+    prev_run_id = reader.latest_succeeded_run_id(exclude=run_id)
+    change_count, risk_count = detect_and_write_label_changes(
+        resolved_output, run_id, prev_run_id
+    )
+    if change_count > 0:
+        logger.info(
+            f"label changes detected: {change_count} total, {risk_count} risk warnings",
+            extra={"run_id": run_id, "event": "label_changes"},
+        )
+
+    logger.info(
+        f"batch finished: status={final_status}, processed={processed}, failures={failure_count}",
+        extra={"run_id": run_id, "event": "batch_finish", "fund_code": ""},
+    )
+
+    # 批次有失败时发送 webhook 通知
+    if failure_count > 0:
+        notify_webhook(
+            title="基金标签批次完成（有失败）",
+            detail=f"批次 {run_id[:12]}…\n状态: {final_status}\n已处理: {processed}\n失败: {failure_count}",
+            level="warning",
+        )
+
+    # 有风险预警时发送 webhook 通知
+    if risk_count > 0:
+        notify_webhook(
+            title="基金标签风险预警",
+            detail=f"批次 {run_id[:12]}…\n检测到 {risk_count} 个风险标签变化（从非触发变为触发）",
+            level="critical",
+        )
+
     return run_id, processed
 
 
@@ -806,4 +941,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    from app.logging_config import configure_logging
+
+    configure_logging()
     sys.exit(main())

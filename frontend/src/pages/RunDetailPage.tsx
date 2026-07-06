@@ -1,5 +1,11 @@
 import { Link, useParams } from "react-router-dom";
-import { downloadFile, fetchRun, fetchRunStyle, fetchRunSummary } from "../api";
+import {
+  downloadFile,
+  fetchLabelChanges,
+  fetchRun,
+  fetchRunStyle,
+  fetchRunSummary,
+} from "../api";
 import { useAsync, runStatusLabel } from "../components";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -20,6 +26,10 @@ export default function RunDetailPage() {
   const { data, error, loading } = useAsync(() => fetchRun(runId), [runId]);
   const { data: summary } = useAsync(() => fetchRunSummary(runId), [runId]);
   const { data: style } = useAsync(() => fetchRunStyle(runId), [runId]);
+  const { data: labelChanges } = useAsync(
+    () => fetchLabelChanges(runId),
+    [runId]
+  );
 
   return (
     <div>
@@ -115,6 +125,65 @@ export default function RunDetailPage() {
             未出风格：缺少股票因子 <strong>{style.boundary_counts.stock_factors_missing}</strong>；
             因子存在但未达任何阈值 <strong>{style.boundary_counts.style_pending_rule_definition}</strong>。
           </p>
+        </div>
+      )}
+
+      {labelChanges && labelChanges.summary.total > 0 && (
+        <div className="card">
+          <h2>
+            标签变化
+            {labelChanges.summary.risk_warnings > 0 && (
+              <span
+                className="badge badge-manual_review"
+                style={{ marginLeft: 8 }}
+                title="风险标签从非 active 变为 active"
+              >
+                ⚠ {labelChanges.summary.risk_warnings} 项风险预警
+              </span>
+            )}
+          </h2>
+          <p className="muted">
+            相对上一次成功批次，本次共 <strong>{labelChanges.summary.total}</strong> 个标签发生变化：
+            新增 <strong>{labelChanges.summary.by_type.added || 0}</strong>，
+            消失 <strong>{labelChanges.summary.by_type.removed || 0}</strong>，
+            状态变更 <strong>{labelChanges.summary.by_type.status_changed || 0}</strong>。
+          </p>
+          {labelChanges.changes.filter((c) => c.is_risk_warning).length > 0 && (
+            <details open style={{ marginTop: 12 }}>
+              <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                风险预警详情（{labelChanges.changes.filter((c) => c.is_risk_warning).length}）
+              </summary>
+              <table>
+                <thead>
+                  <tr>
+                    <th>基金代码</th>
+                    <th>风险标签</th>
+                    <th>状态变化</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {labelChanges.changes
+                    .filter((c) => c.is_risk_warning)
+                    .slice(0, 50)
+                    .map((c, i) => (
+                      <tr key={`${c.fund_code}-${c.label_code}-${i}`}>
+                        <td>
+                          <Link to={`/runs/${runId}/funds/${c.fund_code}`}>
+                            <code>{c.fund_code}</code>
+                          </Link>
+                        </td>
+                        <td><code>{c.label_code}</code></td>
+                        <td>
+                          <span className="muted">{c.previous_status || "无"}</span>
+                          {" → "}
+                          <strong>{c.current_status || "无"}</strong>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </details>
+          )}
         </div>
       )}
 

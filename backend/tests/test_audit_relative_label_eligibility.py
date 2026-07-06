@@ -1,11 +1,10 @@
-import csv
 import sqlite3
 from pathlib import Path
 
 from scripts.audit_relative_label_eligibility import (
     NAV_WINDOW_MIN_SAMPLES,
-    classify_relative_eligibility,
     build_eligibility_rows,
+    classify_relative_eligibility,
 )
 
 

@@ -141,7 +141,7 @@ def test_backfill_operation_fees_fetches_in_parallel_and_writes_on_main_thread(
         )
 
     def fake_fetch(code, *, timeout):
-        return f"""
+        return """
         <h4 class="t">运作费用</h4>
         <table>
           <tr><th>费用类别</th><th>费率</th></tr>

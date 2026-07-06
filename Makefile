@@ -35,7 +35,7 @@ RELATIVE_ELIGIBILITY_CSV ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.c
 RELATIVE_ELIGIBILITY_MD  ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.md
 READY_POOL_MD  ?= $(BENCHMARK_REPORT_DIR)/phase1-v1-ready-pool-sample.md
 
-.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark import-authorized-benchmark-components audit-benchmark audit-relative-eligibility render-ready-pool-report run-batch-v1-with-benchmark test
+.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark import-authorized-benchmark-components audit-benchmark audit-relative-eligibility render-ready-pool-report run-batch-v1-with-benchmark test lint lint-fix backup-db
 
 help:
 	@echo "Available targets:"
@@ -52,6 +52,9 @@ help:
 	@echo "  make run-batch-v1-with-benchmark  先补 benchmark，再跑 v1 标签"
 	@echo "  RULE_CONFIG=$(RULE_CONFIG)"
 	@echo "  make test               跑 pytest"
+	@echo "  make lint               跑 ruff 代码风格检查"
+	@echo "  make lint-fix           自动修复 ruff 问题"
+	@echo "  make backup-db          备份 $(OUTPUT_DB) 和 $(SOURCE_DB) 到 ./backups"
 
 refresh-factors:
 	$(PYTHON) scripts/fetch_stock_factors.py \
@@ -169,3 +172,17 @@ run-batch-v1-with-benchmark: refresh-benchmark audit-benchmark
 
 test:
 	cd backend && $(PYTHON) -m pytest -q
+
+lint:
+	$(PYTHON) -m ruff check backend/
+
+lint-fix:
+	$(PYTHON) -m ruff check --fix backend/
+	$(PYTHON) -m ruff format backend/
+
+# SQLite 数据库备份：默认备份 output/source，留 7 份
+backup-db:
+	$(PYTHON) scripts/backup_sqlite.py \
+	  --db $(OUTPUT_DB) --db $(SOURCE_DB) \
+	  --backup-dir ./backups \
+	  --max-backups 7

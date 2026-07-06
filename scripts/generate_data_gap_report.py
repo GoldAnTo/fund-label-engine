@@ -149,20 +149,18 @@ def main() -> None:
     w("## 3. 根因分析")
     w("")
 
-    w("### 3.1 fee_structure 单独缺失（{} 只）".format(len(only_fee)))
+    w(f"### 3.1 fee_structure 单独缺失（{len(only_fee)} 只）")
     w("")
-    w("- fee_structures 表有行：{}".format(fee_has_row))
-    w("- 其中只有 `申购费率`、缺 `运作费用`（管理费/托管费）：**{} 只**".format(
-        fee_only_subscription
-    ))
+    w(f"- fee_structures 表有行：{fee_has_row}")
+    w(f"- 其中只有 `申购费率`、缺 `运作费用`（管理费/托管费）：**{fee_only_subscription} 只**")
     w("- 根因：数据采集只抓了申购费率，未抓运作费用类。")
     w("- 修复方向：补 `运作费用` 采集（fee_type=运作费用，condition_name=管理费率/托管费率）。")
     w("")
 
-    w("### 3.2 持仓三件套缺失（{} 只）".format(len(triple)))
+    w(f"### 3.2 持仓三件套缺失（{len(triple)} 只）")
     w("")
     w("- stock_holdings + industry_allocations + equity_position 同时缺失")
-    w("- stock_holdings 表零行：{} 只".format(triple_no_holding))
+    w(f"- stock_holdings 表零行：{triple_no_holding} 只")
     w("- fund_type 分布：")
     w("")
     w("| fund_type | 数量 |")
@@ -174,12 +172,12 @@ def main() -> None:
     w("- 修复方向：补持仓采集；其中指数型股票基金（被动）可考虑走 ETF 成分股替代路径。")
     w("")
 
-    w("### 3.3 fee + 持仓双重缺失（{} 只）".format(len(dual)))
+    w(f"### 3.3 fee + 持仓双重缺失（{len(dual)} 只）")
     w("")
     w("- 同时缺运作费用和持仓数据，需两路同时修。")
     w("")
 
-    w("### 3.4 nav_returns 单独缺失（{} 只）".format(len(only_nav)))
+    w(f"### 3.4 nav_returns 单独缺失（{len(only_nav)} 只）")
     w("")
     w("- 极小量，多为混合型基金净值未采集。")
     w("")
@@ -197,7 +195,7 @@ def main() -> None:
     w("")
     remaining = len(gap_funds) - fee_only_subscription - len(triple) - len(dual) - len(only_nav)
     w(f"- 完成 P0（运作费用采集）：gap_pool {len(gap_funds)} → {len(gap_funds)-fee_only_subscription}")
-    w(f"- 完成 P0+P1：gap_pool → {len(gap_funds)-fee_only_submission-len(triple)-len(dual) if False else remaining+len(only_nav)}")
+    w(f"- 完成 P0+P1：gap_pool → {len(gap_funds)-fee_only_subscription-len(triple)-len(dual) if False else remaining+len(only_nav)}")
     w(f"- 完成 P0+P1+P2：gap_pool → ~{remaining}")
     w("")
 

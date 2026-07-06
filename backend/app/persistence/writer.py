@@ -4,14 +4,13 @@ import json
 import sqlite3
 import uuid
 from dataclasses import asdict, is_dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.label_engine.engine import DEFAULT_LABEL_DEFINITIONS, EngineResult, RuleConfig
-from app.factors.exposure_aggregator import FundFactorExposure
 from app.factors.equity_contributions import EquityStyleContribution
-
+from app.factors.exposure_aggregator import FundFactorExposure
+from app.label_engine.engine import DEFAULT_LABEL_DEFINITIONS, EngineResult, RuleConfig
 
 SCHEMA_STATEMENTS = (
     """
@@ -215,9 +214,10 @@ class LabelRunWriter:
         self,
         data_as_of: str | None = None,
         rule_snapshot: Any | None = None,
+        data_snapshot_id: str | None = None,
     ) -> str:
         run_id = uuid.uuid4().hex
-        run_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        run_at = datetime.now(UTC).isoformat(timespec="seconds")
         snapshot_json: str | None
         if rule_snapshot is None:
             snapshot_json = None
@@ -236,8 +236,8 @@ class LabelRunWriter:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO label_runs "
-                "(run_id, run_at, data_as_of, rule_version, status, rule_snapshot_json) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "(run_id, run_at, data_as_of, rule_version, status, rule_snapshot_json, data_snapshot_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     run_at,
@@ -245,10 +245,53 @@ class LabelRunWriter:
                     self._rule_version,
                     "running",
                     snapshot_json,
+                    data_snapshot_id,
                 ),
             )
             conn.commit()
         return run_id
+
+    def write_data_snapshot(
+        self,
+        snapshot_id: str,
+        source_db_path: str,
+        source_db_mtime: str | None = None,
+        factor_db_path: str | None = None,
+        factor_db_mtime: str | None = None,
+        nav_date_min: str | None = None,
+        nav_date_max: str | None = None,
+        fund_count: int = 0,
+        factor_count: int = 0,
+        benchmark_returns_count: int = 0,
+        holding_report_date: str | None = None,
+        factor_as_of_date: str | None = None,
+    ) -> None:
+        """记录数据快照信息，用于审计追溯。"""
+        self.ensure_schema()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO data_snapshots "
+                "(snapshot_id, source_db_path, source_db_mtime, factor_db_path, "
+                "factor_db_mtime, nav_date_min, nav_date_max, fund_count, "
+                "factor_count, benchmark_returns_count, holding_report_date, "
+                "factor_as_of_date) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    snapshot_id,
+                    source_db_path,
+                    source_db_mtime,
+                    factor_db_path,
+                    factor_db_mtime,
+                    nav_date_min,
+                    nav_date_max,
+                    fund_count,
+                    factor_count,
+                    benchmark_returns_count,
+                    holding_report_date,
+                    factor_as_of_date,
+                ),
+            )
+            conn.commit()
 
     def write_result(self, run_id: str, result: EngineResult) -> None:
         with self._connect() as conn:
@@ -458,7 +501,7 @@ class LabelRunWriter:
     ) -> str:
         self.ensure_schema()
         review_id = uuid.uuid4().hex
-        reviewed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        reviewed_at = datetime.now(UTC).isoformat(timespec="seconds")
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO label_reviews "
@@ -538,6 +581,38 @@ class LabelRunWriter:
             )
             conn.commit()
 
+    def write_audit_log(
+        self,
+        audit_id: str,
+        run_id: str | None,
+        actor: str,
+        action: str,
+        target_type: str,
+        target_id: str,
+        payload_json: str | None = None,
+        source_ip: str | None = None,
+    ) -> None:
+        """写入一条审计日志。"""
+        self.ensure_schema()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO audit_log "
+                "(audit_id, run_id, actor, action, target_type, target_id, "
+                "payload_json, source_ip) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    audit_id,
+                    run_id,
+                    actor,
+                    action,
+                    target_type,
+                    target_id,
+                    payload_json,
+                    source_ip,
+                ),
+            )
+            conn.commit()
+
     def write_failure(
         self,
         run_id: str,
@@ -546,7 +621,7 @@ class LabelRunWriter:
         error_type: str,
         message: str,
     ) -> None:
-        recorded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        recorded_at = datetime.now(UTC).isoformat(timespec="seconds")
         with self._connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO fund_run_failures "

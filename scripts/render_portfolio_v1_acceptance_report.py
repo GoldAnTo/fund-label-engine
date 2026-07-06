@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from app.persistence.reader import LabelRunReader
 from app.portfolio.acceptance import (
     bucket_by_status,
     classify_eligible,
@@ -19,7 +19,6 @@ from app.portfolio.acceptance import (
     top_optimized,
 )
 from app.portfolio.role_review_suggest import suggest_role_reviews
-from app.persistence.reader import LabelRunReader
 
 DEFAULT_RUN_ID = "50f9b72de7104761869dc3e86e8a36d2"
 DEFAULT_OUTPUT_DB = "/tmp/fle-run/output.sqlite"

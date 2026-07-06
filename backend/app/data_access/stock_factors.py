@@ -208,4 +208,4 @@ def _load_from_wide(
         "valuation_percentile",
         "style",
     )
-    return [dict(zip(columns, row)) for row in rows]
+    return [dict(zip(columns, row, strict=True)) for row in rows]

@@ -91,7 +91,7 @@ def render_report(
         "# Style Pending Reason Audit",
         "",
         f"run_id: `{selected_run_id}`",
-        f"style_pending_label: `style_pending_rule_definition`",
+        "style_pending_label: `style_pending_rule_definition`",
         f"style_pending_count: {len(rows)}",
         "",
         "| reason | count |",

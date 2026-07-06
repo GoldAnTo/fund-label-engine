@@ -6,7 +6,6 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-
 QUALITY_ORDER = {
     "ready": 0,
     "missing_source": 1,

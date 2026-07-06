@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from app.batch import run_batch
+
 from scripts.seed_sample_db import seed
 
 

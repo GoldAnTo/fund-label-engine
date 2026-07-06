@@ -2,9 +2,9 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from app.batch import run_batch
 from app.data_access import FundDataRepository, FundRepository
+
 from scripts.seed_sample_db import seed
 
 

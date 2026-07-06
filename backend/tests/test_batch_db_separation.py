@@ -3,14 +3,14 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.batch import (
     run_batch,
     validate_equity_factor_inputs,
     validate_equity_factor_outputs,
 )
 from app.main import create_app
+from fastapi.testclient import TestClient
+
 from scripts.seed_sample_db import seed
 
 

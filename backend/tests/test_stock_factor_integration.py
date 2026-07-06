@@ -4,8 +4,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from app.batch import run_batch
 from app.data_access import FundDataRepository, FundRepository
 from app.data_access.stock_factors import load_stock_factors

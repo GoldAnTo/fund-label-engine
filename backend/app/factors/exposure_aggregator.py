@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -57,7 +57,7 @@ def aggregate_factor_exposures(
         weight for stock_code, weight in valid_holdings if stock_code in covered_stock_codes
     )
     resolved_as_of = as_of_date or _latest_factor_date(stock_factors) or report_date
-    computed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    computed_at = datetime.now(UTC).isoformat(timespec="seconds")
 
     rows: list[FundFactorExposure] = []
 

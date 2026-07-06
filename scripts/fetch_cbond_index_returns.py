@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 
@@ -67,7 +66,8 @@ def _approx_specs() -> list[CbondSpec]:
     """
     import akshare as ak
 
-    composite = lambda: ak.bond_composite_index_cbond(indicator="财富", period="总值")
+    def composite() -> object:
+        return ak.bond_composite_index_cbond(indicator="财富", period="总值")
     return [
         CbondSpec(
             "LOCAL_CBOND_TOTAL",

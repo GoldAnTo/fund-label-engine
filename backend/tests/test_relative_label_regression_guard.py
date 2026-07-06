@@ -12,12 +12,12 @@ audit 的"relative_label_ready"判定与真实跑批 engine 是否产出相对�
 from __future__ import annotations
 
 import pytest
-
 from app.label_engine.engine import (
     RETURN_WINDOWS,
     FundInput,
     LabelEngine,
 )
+
 from scripts.audit_relative_label_eligibility import (
     NAV_WINDOW_MIN_SAMPLES,
     classify_relative_eligibility,

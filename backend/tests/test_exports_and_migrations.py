@@ -8,13 +8,12 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from openpyxl import load_workbook
-
 from app.batch import run_batch
 from app.main import create_app
 from app.persistence import LabelRunReader
 from app.persistence.migrations_runner import run_migrations
+from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 
 @pytest.fixture()
@@ -285,3 +284,33 @@ def test_reader_stock_factor_returns_rows_after_insert(seeded_run) -> None:
     assert len(rows) == 1
     assert rows[0]["factor_code"] == "pb"
     assert rows[0]["factor_value"] == 8.5
+
+
+def test_data_snapshot_recorded_after_batch(seeded_run) -> None:
+    """跑批后应记录数据快照，并通过 label_runs.data_snapshot_id 关联。"""
+    db, run_id = seeded_run
+    reader = LabelRunReader(db)
+    run = reader.get_run(run_id)
+    assert run is not None
+    snapshot_id = run.get("data_snapshot_id")
+    assert snapshot_id is not None
+
+    snapshot = reader.get_data_snapshot(snapshot_id)
+    assert snapshot is not None
+    assert snapshot["snapshot_id"] == snapshot_id
+    assert snapshot["source_db_path"] == str(db)
+    assert snapshot["fund_count"] >= 0
+    assert snapshot["created_at"] is not None
+
+
+def test_data_snapshot_exposed_in_run_detail_api(seeded_run) -> None:
+    """API /v1/runs/{run_id} 应返回 data_snapshot 字段。"""
+    db, run_id = seeded_run
+    client = TestClient(create_app(db_path=db))
+    resp = client.get(f"/v1/runs/{run_id}")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload.get("data_snapshot_id") is not None
+    snap = payload.get("data_snapshot")
+    assert snap is not None
+    assert snap["source_db_path"] == str(db)

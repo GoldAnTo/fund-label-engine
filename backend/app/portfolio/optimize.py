@@ -32,7 +32,7 @@ def optimize_draft(
     optimized = _cap_redistribute(raw, caps, total_target_pct)
 
     out: list[dict[str, Any]] = []
-    for row, opt_w, cap, raw_w in zip(draft_rows, optimized, caps, raw):
+    for row, opt_w, cap, raw_w in zip(draft_rows, optimized, caps, raw, strict=True):
         new_row = dict(row)
         new_row["optimized_weight_pct"] = round(opt_w, 4)
         # 触发了 cap：当且仅当 draft 想超 cap 且被 LP 钉回 cap

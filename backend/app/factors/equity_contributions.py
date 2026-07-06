@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -54,7 +54,7 @@ def build_equity_style_contributions(
     factor_by_stock = {
         str(row["stock_code"]): row for row in stock_factors if row.get("stock_code")
     }
-    computed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    computed_at = datetime.now(UTC).isoformat(timespec="seconds")
 
     rows: list[EquityStyleContribution] = []
     for holding in holdings:
@@ -173,15 +173,18 @@ def _evaluate_styles(factors: dict[str, Any], cfg: Any):
         {"dividend_yield": dividend_yield},
         {"dividend_yield_min": cfg.dividend_steady_yield_min},
     )
+    # 估值高低互斥：deep_value 优先级最高，high/low 互不同时触发
     yield (
         "high_valuation",
-        high_valuation_matched,
+        high_valuation_matched and not deep_value_matched,
         {"pb": pb},
         {"pb_min": cfg.high_valuation_pb_min},
     )
     yield (
         "low_valuation",
-        low_valuation_matched,
+        low_valuation_matched
+        and not deep_value_matched
+        and not high_valuation_matched,
         {"pb": pb},
         {"pb_max": cfg.low_valuation_pb_max},
     )
@@ -206,9 +209,10 @@ def _evaluate_styles(factors: dict[str, Any], cfg: Any):
         {"log10_market_cap": log10_mcap},
         {"log10_mcap_max": cfg.small_cap_log10_mcap_max},
     )
+    # high_roe 与 quality_growth 互斥：quality_growth 包含 growth 维度，优先级更高
     yield (
         "high_roe",
-        high_roe_matched,
+        high_roe_matched and not quality_growth_matched,
         {"roe": roe},
         {"roe_min": cfg.high_roe_threshold},
     )

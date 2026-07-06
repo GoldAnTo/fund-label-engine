@@ -13,6 +13,7 @@
   "drawdown_high_threshold": -0.2,
   "sharpe_high_threshold": 1.0,
   "long_term_return_threshold": 0.15,
+  "risk_free_rate": 0.015,
   "excess_return_strong_threshold": 0.05,
   "information_ratio_high_threshold": 0.5,
   "tracking_error_high_threshold": 0.08,

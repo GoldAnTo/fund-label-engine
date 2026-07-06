@@ -705,26 +705,26 @@ def test_no_style_label_when_thresholds_missed_falls_back_to_pending():
 
 def _base_fund(**overrides) -> FundInput:
     """构造一个数据齐全的基线 fund，便于按需覆盖测某个标签。"""
-    defaults = dict(
-        fund_code="000999",
-        fund_name="测试基金",
-        fund_type="股票型",
-        nav_returns=[0.001] * 60,
-        stock_holdings=[{"stock_code": "600000", "weight": 0.08}] * 10,
-        industry_allocations=[
+    defaults: dict[str, object] = {
+        "fund_code": "000999",
+        "fund_name": "测试基金",
+        "fund_type": "股票型",
+        "nav_returns": [0.001] * 60,
+        "stock_holdings": [{"stock_code": "600000", "weight": 0.08}] * 10,
+        "industry_allocations": [
             {"industry": "电子", "weight": 0.15},
             {"industry": "医药", "weight": 0.12},
             {"industry": "食品饮料", "weight": 0.10},
             {"industry": "银行", "weight": 0.08},
             {"industry": "汽车", "weight": 0.07},
         ],
-        manager_tenure_years=2.0,
-        management_fee=0.010,
-        custody_fee=0.002,
-        sales_service_fee=0.0,
-        fund_size=20.0,
-        equity_position=0.6,
-    )
+        "manager_tenure_years": 2.0,
+        "management_fee": 0.010,
+        "custody_fee": 0.002,
+        "sales_service_fee": 0.0,
+        "fund_size": 20.0,
+        "equity_position": 0.6,
+    }
     defaults.update(overrides)
     return FundInput(**defaults)
 

@@ -26,7 +26,6 @@ import sqlite3
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -36,7 +35,7 @@ class LabelRow:
     status: str
 
 
-def _latest_run_id(conn: sqlite3.Connection) -> Optional[str]:
+def _latest_run_id(conn: sqlite3.Connection) -> str | None:
     row = conn.execute(
         "SELECT run_id FROM label_runs ORDER BY run_at DESC LIMIT 1"
     ).fetchone()
@@ -46,8 +45,8 @@ def _latest_run_id(conn: sqlite3.Connection) -> Optional[str]:
 def _load_labels(
     conn: sqlite3.Connection,
     run_id: str,
-    label_filter: Optional[set[str]] = None,
-    fund_filter: Optional[set[str]] = None,
+    label_filter: set[str] | None = None,
+    fund_filter: set[str] | None = None,
 ) -> dict[tuple[str, str], str]:
     """返回 {(fund_code, label_code): status}。"""
     sql = "SELECT fund_code, label_code, status FROM fund_label_results WHERE run_id = ?"
@@ -70,10 +69,10 @@ def compare(
     before_db: str,
     after_db: str,
     report_path: str,
-    before_run: Optional[str] = None,
-    after_run: Optional[str] = None,
-    label_filter: Optional[set[str]] = None,
-    fund_filter: Optional[set[str]] = None,
+    before_run: str | None = None,
+    after_run: str | None = None,
+    label_filter: set[str] | None = None,
+    fund_filter: set[str] | None = None,
 ) -> None:
     before_conn = sqlite3.connect(before_db)
     after_conn = sqlite3.connect(after_db)

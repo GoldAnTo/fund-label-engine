@@ -76,7 +76,7 @@ def generate_report(db_path: str, run_id: str, out_path: str) -> None:
     # 按 style 聚合。多期模式下同一基金有多个报告期，标签判定基于单期，
     # 因此报告也按 (fund, report_date, style) 聚合，再对每个基金取最新报告期作为
     # 代表，避免跨期累加导致贡献权重 > 100%。
-    style_counts = {code: 0 for code in STYLE_CODES}
+    style_counts = dict.fromkeys(STYLE_CODES, 0)
     # (fund, style) -> {report_date -> 累计贡献权重}
     period_weight: dict[tuple[str, str], dict[str, float]] = defaultdict(
         lambda: defaultdict(float)
@@ -107,7 +107,7 @@ def generate_report(db_path: str, run_id: str, out_path: str) -> None:
         by_style_stock[code].extend(period_stocks[key][latest])
 
     lines: list[str] = []
-    lines.append(f"# 权益风格贡献明细报告")
+    lines.append("# 权益风格贡献明细报告")
     lines.append("")
     lines.append(f"- run_id: `{run_id}`")
     lines.append(f"- 数据库: `{db_path}`")

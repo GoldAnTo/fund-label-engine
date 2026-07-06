@@ -3,6 +3,7 @@ from pathlib import Path
 from app.batch import run_batch
 from app.persistence.reader import LabelRunReader
 from app.persistence.writer import LabelRunWriter
+
 from scripts.seed_sample_db import seed
 
 

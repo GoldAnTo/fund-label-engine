@@ -9,7 +9,7 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -730,7 +730,7 @@ def upsert_component_returns(
         "ON benchmark_component_returns(component_code, trade_date)"
     )
     written = 0
-    now = datetime.now(tz=timezone.utc).isoformat()
+    now = datetime.now(tz=UTC).isoformat()
     for row in rows:
         trade_date = str(row["trade_date"])
         daily_return = float(row["daily_return"])

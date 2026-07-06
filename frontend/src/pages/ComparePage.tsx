@@ -609,7 +609,8 @@ export default function ComparePage() {
                         // 归一化后调用 API
                         const total = newWeights.reduce((a, b) => a + b, 0);
                         if (total > 0) {
-                          fetchPortfolioRisk(fundCodes, newWeights).then(setPortfolioRisk).catch(() => {});
+                          const normalized = newWeights.map((w) => w / total);
+                          fetchPortfolioRisk(fundCodes, normalized).then(setPortfolioRisk).catch(() => {});
                         }
                       }}
                       style={{ flex: 1 }}

@@ -2,9 +2,9 @@ import sqlite3
 
 from scripts.fetch_benchmark_returns import (
     BenchmarkComponent,
-    _fetch_or_reuse_component_returns,
     _compose_returns,
     _daily_return_from_annual,
+    _fetch_or_reuse_component_returns,
     load_local_component_returns,
     parse_benchmark_components,
     resolve_benchmark,

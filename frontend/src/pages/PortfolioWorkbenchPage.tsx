@@ -1,21 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  applyPortfolioRoleReviewSuggestions,
   deletePortfolioRoleReview,
   fetchFundReport,
   fetchPortfolioDraft,
   fetchPortfolioMatrix,
+  fetchPortfolioRoleReviewSuggestions,
   fetchPortfolioRoleReviews,
   fetchRelativeEligibility,
   fetchRuns,
   postPortfolioRoleReview,
+  type ApplySuggestionsRequest,
   type FundLabel,
   type FundReport,
   type PortfolioDraftMode,
   type PortfolioDraftResponse,
   type PortfolioMatrixResponse,
   type PortfolioRoleReview,
+  type PortfolioRoleReviewSuggestions,
   type RelativeEligibilityResponse,
+  type RoleReviewSuggestion,
 } from "../api";
 import { LabelStatusBadge, ReviewActionBadge } from "../components";
 import { labelTier, tierTitle, type LabelTier } from "../labelTiers";
@@ -269,6 +274,9 @@ export default function PortfolioWorkbenchPage() {
   const [reviewer, setReviewer] = useState("researcher-a");
   const [savingFund, setSavingFund] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<RoleReviewSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [applyingSuggestions, setApplyingSuggestions] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
@@ -392,6 +400,58 @@ export default function PortfolioWorkbenchPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingFund(null);
+    }
+  };
+
+  const loadSuggestions = async () => {
+    if (!runId) return;
+    setLoadingSuggestions(true);
+    setError(null);
+    try {
+      const payload: PortfolioRoleReviewSuggestions = await fetchPortfolioRoleReviewSuggestions(runId);
+      setSuggestions(payload.suggestions || []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  };
+
+  const applyAllSuggestions = async () => {
+    if (!runId || suggestions.length === 0) return;
+    if (!reviewer.trim()) {
+      setError("请输入复核人姓名后再一键采纳。");
+      return;
+    }
+    setApplyingSuggestions(true);
+    setError(null);
+    try {
+      const payload: ApplySuggestionsRequest = {
+        reviewer,
+        items: suggestions.map((s) => ({
+          fund_code: s.fund_code,
+          role_code: s.role_code,
+          decision: s.decision,
+          target_bucket: s.target_bucket as "core" | "satellite" | "index_tool" | "cash_buffer" | "exclude",
+          max_weight_pct: s.recommended_max_weight_pct,
+          rationale: s.rationale,
+        })),
+      };
+      const result = await applyPortfolioRoleReviewSuggestions(runId, payload);
+      setSuggestions([]);
+      // 重新拉取 reviews 和 draft，让组合草案刷新
+      const [nextReviews, nextDraft] = await Promise.all([
+        fetchPortfolioRoleReviews(runId),
+        fetchPortfolioDraft(runId, draftMode),
+      ]);
+      setReviews(nextReviews);
+      setDraft(nextDraft);
+      // 用 alert 提示成功消息
+      alert(`已采纳 ${result.applied_count} 条建议`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setApplyingSuggestions(false);
     }
   };
 
@@ -681,6 +741,45 @@ export default function PortfolioWorkbenchPage() {
                     </>
                   )}
                 </div>
+
+                <section className="suggestions-block">
+                  <div className="suggestions-header">
+                    <h4>角色建议（批量）</h4>
+                    <div>
+                      <button
+                        className="secondary"
+                        onClick={loadSuggestions}
+                        disabled={loadingSuggestions}
+                      >
+                        {loadingSuggestions ? "加载中..." : "生成建议"}
+                      </button>
+                      <button
+                        onClick={applyAllSuggestions}
+                        disabled={applyingSuggestions || suggestions.length === 0}
+                        style={{ marginLeft: 8 }}
+                      >
+                        一键采纳 ({suggestions.length})
+                      </button>
+                    </div>
+                  </div>
+                  {suggestions.length > 0 && (
+                    <ol className="suggestion-list">
+                      {suggestions.slice(0, 10).map((s) => (
+                        <li key={`${s.fund_code}-${s.role_code}`}>
+                          <code>{s.fund_code}</code>
+                          <span className="muted"> → {bucketLabel(s.target_bucket)} · 上限 {s.recommended_max_weight_pct.toFixed(1)}%</span>
+                          <small>{s.rationale}</small>
+                        </li>
+                      ))}
+                      {suggestions.length > 10 && (
+                        <li className="muted">... 另 {suggestions.length - 10} 条</li>
+                      )}
+                    </ol>
+                  )}
+                  {suggestions.length === 0 && (
+                    <p className="muted">点击"生成建议"获取需复核基金的角色推荐。</p>
+                  )}
+                </section>
 
                 <Link className="full-report-link" to={`/runs/${runId}/funds/${selectedFund}`}>进入完整基金报告</Link>
               </>

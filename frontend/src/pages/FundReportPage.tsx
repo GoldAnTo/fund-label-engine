@@ -276,8 +276,8 @@ export default function FundReportPage() {
     [runId, fundCode]
   );
   const { data: eligibility } = useAsync(
-    () => fetchRelativeEligibility(runId, "all"),
-    [runId]
+    () => fetchRelativeEligibility(runId, "all", fundCode),
+    [runId, fundCode]
   );
   const { data: percentile } = useAsync(
     () => fetchFundPercentile(runId, fundCode),

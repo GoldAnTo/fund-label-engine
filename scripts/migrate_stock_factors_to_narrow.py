@@ -70,7 +70,7 @@ def migrate(db_path: str | Path, as_of_override: str | None = None) -> int:
         )
         inserted = 0
         for row in rows:
-            d = dict(zip(columns, row))
+            d = dict(zip(columns, row, strict=True))
             as_of = as_of_override or d["factor_date"]
             if not as_of:
                 continue

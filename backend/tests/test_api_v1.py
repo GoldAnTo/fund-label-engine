@@ -1,11 +1,11 @@
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.batch import run_batch
 from app.main import create_app
+from fastapi.testclient import TestClient
+
 from scripts.seed_sample_db import seed
 
 
@@ -302,6 +302,33 @@ def test_get_run_returns_failure_count_and_rule_snapshot(seeded_run) -> None:
     assert payload["failures"] == []
     # 规则快照已落库
     assert payload["rule_snapshot"]["holding_concentration_threshold"] == 0.55
+    # 数据快照字段存在（即使数据源没有外部 stock_holdings 也应该有）
+    assert payload["data_snapshot_id"] is not None
+    assert payload["data_snapshot"] is not None
+
+
+def test_label_changes_endpoint_returns_changes(seeded_run) -> None:
+    """label-changes 端点应返回变化列表和汇总。"""
+    db, run_id = seeded_run
+    client = TestClient(create_app(db_path=db))
+    resp = client.get(f"/v1/runs/{run_id}/label-changes")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["run_id"] == run_id
+    assert "summary" in payload
+    assert "changes" in payload
+    assert isinstance(payload["count"], int)
+
+
+def test_label_changes_endpoint_filters_risk_only(seeded_run) -> None:
+    """risk_warnings_only=True 时只返回风险预警。"""
+    db, run_id = seeded_run
+    client = TestClient(create_app(db_path=db))
+    resp = client.get(f"/v1/runs/{run_id}/label-changes?risk_warnings_only=true")
+    assert resp.status_code == 200
+    payload = resp.json()
+    for change in payload["changes"]:
+        assert change["is_risk_warning"] == 1
 
 
 def test_get_run_rules_endpoint_returns_snapshot(seeded_run) -> None:
@@ -877,6 +904,75 @@ def test_relative_label_eligibility_endpoint_filters_blocked(seeded_run) -> None
     assert response.status_code == 200
     rows = response.json()["results"]
     assert [row["fund_code"] for row in rows] == ["000002"]
+
+
+def test_relative_label_eligibility_fund_code_filter(seeded_run) -> None:
+    """fund_code 参数应只返回该基金的 eligibility，避免前端拉全量。"""
+    db, run_id = seeded_run
+    with sqlite3.connect(db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE benchmark_components (
+                fund_code TEXT,
+                component_order INTEGER,
+                component_code TEXT,
+                component_name TEXT,
+                weight REAL,
+                source_text TEXT,
+                status TEXT,
+                reason TEXT,
+                secid TEXT
+            );
+            CREATE TABLE benchmark_returns (
+                fund_code TEXT,
+                benchmark_code TEXT,
+                trade_date TEXT,
+                daily_return REAL
+            );
+            CREATE TABLE benchmark_component_returns (
+                component_code TEXT,
+                trade_date TEXT,
+                daily_return REAL
+            );
+            ALTER TABLE fund_profiles ADD COLUMN benchmark TEXT;
+            ALTER TABLE fund_profiles ADD COLUMN tracking_target TEXT;
+            """
+        )
+        conn.execute(
+            "INSERT INTO benchmark_components VALUES ('000001', 1, '000300', '沪深300', 1.0, '沪深300', 'resolved', 'exact', '1.000300')"
+        )
+        conn.execute(
+            "INSERT INTO benchmark_components VALUES ('000002', 1, 'LOCAL_CBOND_TOTAL', '中债总', 1.0, '中债总', 'resolved', 'exact', 'LOCAL_CBOND_TOTAL')"
+        )
+        for i in range(200):
+            conn.execute(
+                "INSERT INTO nav_history (fund_code, nav_date, daily_return) VALUES ('000001', ?, 0.001)",
+                (f"2026-01-{i:03d}",),
+            )
+            conn.execute(
+                "INSERT INTO benchmark_returns VALUES ('000001', '000300', ?, 0.001)",
+                (f"2026-01-{i:03d}",),
+            )
+        conn.commit()
+    client = TestClient(create_app(db_path=db))
+
+    # 只请求 000001 的 eligibility
+    response = client.get(
+        f"/v1/runs/{run_id}/relative-label-eligibility",
+        params={"fund_code": "000001"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    results = payload["results"]
+    assert len(results) == 1
+    assert results[0]["fund_code"] == "000001"
+
+    # 不存在的基金代码应返回 404
+    response = client.get(
+        f"/v1/runs/{run_id}/relative-label-eligibility",
+        params={"fund_code": "999999"},
+    )
+    assert response.status_code == 404
 
 
 def test_workbench_tasks_and_summary_aggregate_ready_pool_and_review_queue(seeded_run) -> None:

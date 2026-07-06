@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.factors.exposure_aggregator import FundFactorExposure
@@ -50,7 +50,7 @@ def aggregate_dividend_sector_mix(
 
     coverage = mapped_total / total if total > 0 else 0.0
     as_of_date = max(industry_dates) if industry_dates else report_date
-    computed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    computed_at = datetime.now(UTC).isoformat(timespec="seconds")
     result = [
         _record(
             fund_code,

@@ -185,10 +185,30 @@ def test_eight_sample_funds_all_have_benchmark_data_missing_not_triggered():
     而在 pytest.skip 里说明。基准解读请看 scripts/fetch_benchmark_returns.py 注释。
     """
     db_path = Path("/tmp/fle-run/output.sqlite")
+    src_db = Path("/tmp/fle-run/source.sqlite")
     if not db_path.exists():
         import pytest
 
         pytest.skip(f"{db_path} not found; run make run-batch-v1-with-benchmark first")
+    # 必须在 source 库含 benchmark_components 审计表时才跑（依赖 fetch_benchmark_returns）
+    src_con = sqlite3.connect(src_db) if src_db.exists() else None
+    src_has_components = False
+    if src_con is not None:
+        try:
+            row = src_con.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='benchmark_components'"
+            ).fetchone()
+            src_has_components = row is not None
+        finally:
+            src_con.close()
+    if not src_has_components:
+        import pytest
+
+        pytest.skip(
+            "source.db missing benchmark_components table; "
+            "run scripts/fetch_benchmark_returns.py first"
+        )
     eligibility = {r["fund_code"]: r for r in csv.DictReader(open("reports/phase1-real-run-2026-06-29/relative-label-eligibility.csv", encoding="utf-8"))}
     con = sqlite3.connect(db_path)
     try:
@@ -241,6 +261,22 @@ def test_render_report_smoke(tmp_path):
         import pytest
 
         pytest.skip("source/output/audit files not ready; run the make pipeline first")
+    # 必须在 source 库含 benchmark_components 审计表时才跑（依赖 fetch_benchmark_returns）
+    src_con = sqlite3.connect(src_db)
+    try:
+        row = src_con.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='benchmark_components'"
+        ).fetchone()
+        if row is None:
+            import pytest
+
+            pytest.skip(
+                "source.db missing benchmark_components table; "
+                "run scripts/fetch_benchmark_returns.py first"
+            )
+    finally:
+        src_con.close()
     out_md = tmp_path / "smoke.md"
     result = subprocess.run(
         [

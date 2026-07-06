@@ -7,7 +7,6 @@ from typing import Any
 
 from app.label_engine.engine import SUPPORTED_ACTIVE_EQUITY_TYPES, FundInput
 
-
 # 真库里大量 ETF / LOF 在 fee_structures 表只存了「场内ETF-无费率信息」
 # 这一占位行不等于管理费/托管费为 0，不能作为正式 fee_low 证据。
 _ETF_NO_FEE_CONDITION = "场内ETF-无费率信息"

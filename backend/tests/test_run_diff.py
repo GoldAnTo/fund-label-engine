@@ -5,12 +5,11 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.batch import run_batch
 from app.label_engine.engine import RuleConfig
 from app.main import create_app
 from app.persistence import LabelRunReader
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture()

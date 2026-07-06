@@ -221,7 +221,7 @@ export default function ReadyPoolPage() {
                 <ol style={{ margin: 0, paddingLeft: 20, fontSize: 12 }}>
                   {resp.results.map((f) => (
                     <li key={f.fund_code} style={{ margin: "3px 0" }}>
-                      <Link to={`/funds/${f.fund_code}?run_id=${runId}`} style={{ fontFamily: "ui-monospace, monospace" }}>
+                      <Link to={`/runs/${runId}/funds/${f.fund_code}`} style={{ fontFamily: "ui-monospace, monospace" }}>
                         {f.fund_code}
                       </Link>
                       <span className="muted" style={{ marginLeft: 6 }}>

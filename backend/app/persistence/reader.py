@@ -44,7 +44,8 @@ class LabelRunReader:
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT run_id, run_at, data_as_of, rule_version, status, rule_snapshot_json "
+                "SELECT run_id, run_at, data_as_of, rule_version, status, "
+                "rule_snapshot_json, data_snapshot_id "
                 "FROM label_runs WHERE run_id = ?",
                 (run_id,),
             ).fetchone()
@@ -60,13 +61,33 @@ class LabelRunReader:
         run["rule_snapshot"] = json.loads(snapshot_raw) if snapshot_raw else None
         return run
 
-    def latest_succeeded_run_id(self) -> str | None:
+    def get_data_snapshot(self, snapshot_id: str | None) -> dict[str, Any] | None:
+        """读取数据快照信息。"""
+        if not snapshot_id:
+            return None
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT run_id FROM label_runs "
-                "WHERE status = 'succeeded' "
-                "ORDER BY run_at DESC, rowid DESC LIMIT 1"
-            ).fetchone()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM data_snapshots WHERE snapshot_id = ?",
+                    (snapshot_id,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                return None
+            return dict(row) if row else None
+
+    def latest_succeeded_run_id(self, exclude: str | None = None) -> str | None:
+        """最近一次成功的 run_id。exclude 用于跳过自己（标签变化检测）。"""
+        query = (
+            "SELECT run_id FROM label_runs "
+            "WHERE status = 'succeeded' "
+        )
+        params: tuple = ()
+        if exclude is not None:
+            query += "AND run_id != ? "
+            params = (exclude,)
+        query += "ORDER BY run_at DESC, rowid DESC LIMIT 1"
+        with self._connect() as conn:
+            row = conn.execute(query, params).fetchone()
         return row["run_id"] if row else None
 
     def get_fund_labels(self, run_id: str, fund_code: str) -> dict[str, Any] | None:
@@ -463,9 +484,9 @@ class LabelRunReader:
             funds_payload.append({
                 "fund_code": fund_code,
                 "labels": [
-                    {"label_code": l["label_code"], "label_name": l["label_name"],
-                     "status": l["status"], "category": l["category"]}
-                    for l in report.get("labels", [])
+                    {"label_code": lbl["label_code"], "label_name": lbl["label_name"],
+                     "status": lbl["status"], "category": lbl["category"]}
+                    for lbl in report.get("labels", [])
                 ],
                 "factor_exposures": report.get("factor_exposures", []),
                 "metrics": metrics,
@@ -634,7 +655,6 @@ class LabelRunReader:
         for fc in fund_codes:
             series[fc] = [nav_by_fund[fc][d] for d in sorted_dates]
 
-        n = len(fund_codes)
         sample_count = len(sorted_dates)
 
         # 计算 Pearson 相关系数矩阵
@@ -646,7 +666,7 @@ class LabelRunReader:
                 return 0.0
             mean_x = sum(x) / n
             mean_y = sum(y) / n
-            cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y))
+            cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y, strict=True))
             var_x = sum((xi - mean_x) ** 2 for xi in x)
             var_y = sum((yi - mean_y) ** 2 for yi in y)
             denom = math.sqrt(var_x * var_y)
@@ -951,6 +971,98 @@ class LabelRunReader:
                 (run_id,),
             ).fetchall()
         return [row["classification_code"] for row in rows]
+
+    def list_label_changes(
+        self,
+        run_id: str,
+        fund_code: str | None = None,
+        risk_warnings_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """读取某次 run 的标签变化列表，可按基金过滤或只看风险预警。"""
+        clauses = ["run_id = ?"]
+        params: list[Any] = [run_id]
+        if fund_code:
+            clauses.append("fund_code = ?")
+            params.append(fund_code)
+        if risk_warnings_only:
+            clauses.append("is_risk_warning = 1")
+        sql = (
+            "SELECT run_id, previous_run_id, fund_code, label_code, change_type, "
+            "previous_status, current_status, is_risk_warning, detected_at "
+            "FROM label_changes WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY is_risk_warning DESC, fund_code, label_code"
+        )
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(sql, tuple(params)).fetchall()
+            except sqlite3.OperationalError:
+                return []
+        return [dict(row) for row in rows]
+
+    def get_label_change_summary(self, run_id: str) -> dict[str, Any]:
+        """汇总本次 run 的标签变化（用于工作台）。"""
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT change_type, is_risk_warning, COUNT(*) AS c "
+                    "FROM label_changes WHERE run_id = ? GROUP BY change_type, is_risk_warning",
+                    (run_id,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return {"total": 0, "risk_warnings": 0, "by_type": {}}
+        total = 0
+        risk_warnings = 0
+        by_type: dict[str, int] = {}
+        for row in rows:
+            cnt = int(row["c"])
+            total += cnt
+            if row["is_risk_warning"]:
+                risk_warnings += cnt
+            by_type[row["change_type"]] = by_type.get(row["change_type"], 0) + cnt
+        return {"total": total, "risk_warnings": risk_warnings, "by_type": by_type}
+
+    def list_audit_log(
+        self,
+        run_id: str | None = None,
+        actor: str | None = None,
+        action: str | None = None,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """读取审计日志，可按多个维度过滤。"""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if run_id:
+            clauses.append("run_id = ?")
+            params.append(run_id)
+        if actor:
+            clauses.append("actor = ?")
+            params.append(actor)
+        if action:
+            clauses.append("action = ?")
+            params.append(action)
+        if target_type:
+            clauses.append("target_type = ?")
+            params.append(target_type)
+        if target_id:
+            clauses.append("target_id = ?")
+            params.append(target_id)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        sql = (
+            "SELECT audit_id, run_id, actor, action, target_type, target_id, "
+            "payload_json, source_ip, occurred_at "
+            f"FROM audit_log {where} "
+            "ORDER BY occurred_at DESC, rowid DESC LIMIT ?"
+        )
+        params.append(limit)
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(sql, tuple(params)).fetchall()
+            except sqlite3.OperationalError:
+                return []
+        return [dict(row) for row in rows]
 
     def list_failures(self, run_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -1693,10 +1805,10 @@ class LabelRunReader:
             )
 
         added = sorted(
-            (pair for pair in target_pairs - base_pairs if pair[0] in common_funds)
+            pair for pair in target_pairs - base_pairs if pair[0] in common_funds
         )
         removed = sorted(
-            (pair for pair in base_pairs - target_pairs if pair[0] in common_funds)
+            pair for pair in base_pairs - target_pairs if pair[0] in common_funds
         )
 
         def _by_label(pairs: list[tuple[str, str]]) -> dict[str, list[str]]:

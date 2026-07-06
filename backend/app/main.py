@@ -123,6 +123,10 @@ def create_app(
     output_db_path: str | Path | None = None,
     frontend_dist: str | Path | None = None,
 ) -> FastAPI:
+    from app.logging_config import configure_logging
+
+    configure_logging()
+
     app = FastAPI(
         title="Fund Label Engine",
         description="Explainable fund label calculation engine.",
@@ -241,6 +245,9 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
         run["fund_codes"] = reader.list_run_funds(run_id)
         run["failures"] = reader.list_failures(run_id)
+        run["data_snapshot"] = reader.get_data_snapshot(
+            run.get("data_snapshot_id")
+        )
         return run
 
     @app.get("/v1/runs/{run_id}/failures")
@@ -275,7 +282,53 @@ def create_app(
         summary = reader.get_summary(run_id)
         if not summary:
             raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        # 附带标签变化汇总，让前端一次拿全
+        summary["label_change_summary"] = reader.get_label_change_summary(run_id)
         return summary
+
+    @app.get("/v1/audit-log")
+    def get_audit_log(
+        run_id: str | None = None,
+        actor: str | None = None,
+        action: str | None = None,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        limit: int = 200,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """查询审计日志，可按多个维度过滤。"""
+        rows = reader.list_audit_log(
+            run_id=run_id,
+            actor=actor,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            limit=limit,
+        )
+        return {"count": len(rows), "rows": rows}
+
+    @app.get("/v1/runs/{run_id}/label-changes")
+    def get_run_label_changes(
+        run_id: str,
+        fund_code: str | None = None,
+        risk_warnings_only: bool = False,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """列出本次 run 的标签变化，含新增/消失/状态变更、风险预警标记。"""
+        if reader.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        changes = reader.list_label_changes(
+            run_id,
+            fund_code=fund_code,
+            risk_warnings_only=risk_warnings_only,
+        )
+        summary = reader.get_label_change_summary(run_id)
+        return {
+            "run_id": run_id,
+            "summary": summary,
+            "count": len(changes),
+            "changes": changes,
+        }
 
     def _annotate_benchmark_precision(payload: dict[str, Any]) -> None:
         """给 matrix 每行补 benchmark_precision(exact/approx/none)。
@@ -361,6 +414,8 @@ def create_app(
                 detail="reviewer is required to apply suggestions",
             )
         applied: list[str] = []
+        from app.audit import audit_log
+
         for item in request.items:
             writer.write_portfolio_role_review(
                 run_id=run_id,
@@ -373,6 +428,20 @@ def create_app(
                 reviewer=request.reviewer,
             )
             applied.append(item.fund_code)
+            audit_log(
+                writer,
+                action="apply_role_suggestion",
+                target_type="role",
+                target_id=f"{item.fund_code}/{item.role_code}",
+                payload={
+                    "decision": item.decision,
+                    "target_bucket": item.target_bucket,
+                    "max_weight_pct": item.max_weight_pct,
+                    "rationale": item.rationale,
+                },
+                actor=request.reviewer,
+                run_id=run_id,
+            )
         return {
             "run_id": run_id,
             "reviewer": request.reviewer,
@@ -397,6 +466,21 @@ def create_app(
             max_weight_pct=request.max_weight_pct,
             rationale=request.rationale,
             reviewer=request.reviewer,
+        )
+        from app.audit import audit_log
+        audit_log(
+            writer,
+            action="write_role_review",
+            target_type="role",
+            target_id=f"{request.fund_code}/{request.role_code}",
+            payload={
+                "decision": request.decision,
+                "target_bucket": request.target_bucket,
+                "max_weight_pct": request.max_weight_pct,
+                "rationale": request.rationale,
+            },
+            actor=request.reviewer or "unknown",
+            run_id=run_id,
         )
         reviews = reader.list_portfolio_role_reviews(run_id, fund_code=request.fund_code)
         for review in reviews:
@@ -837,8 +921,12 @@ def create_app(
         status: Literal["all", "ready", "blocked"],
         limit: int,
         reader: LabelRunReader,
+        fund_code: str | None = None,
     ) -> dict[str, Any]:
-        """返回相对基准标签 ready/blocked 池，用于工作台展示。"""
+        """返回相对基准标签 ready/blocked 池，用于工作台展示。
+
+        当 fund_code 不为空时，只返回该基金的 eligibility，避免前端拉全量。
+        """
         import sqlite3
 
         if reader.get_run(run_id) is None:
@@ -854,6 +942,13 @@ def create_app(
         from scripts.audit_relative_label_eligibility import build_eligibility_rows
 
         codes = reader.list_run_funds(run_id)
+        if fund_code:
+            codes = [c for c in codes if c == fund_code]
+            if not codes:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"fund not found in run: {fund_code}",
+                )
         precision_by_code = benchmark_precision_by_fund(source_db)
         try:
             with sqlite3.connect(source_db) as conn:
@@ -1093,9 +1188,10 @@ def create_app(
         run_id: str,
         status: Literal["all", "ready", "blocked"] = "all",
         limit: int = 200,
+        fund_code: str | None = None,
         reader: LabelRunReader = Depends(get_reader),
     ) -> dict[str, Any]:
-        return _relative_eligibility_payload(run_id, status, limit, reader)
+        return _relative_eligibility_payload(run_id, status, limit, reader, fund_code)
 
     @app.get("/v1/funds/{fund_code}/labels")
     def get_latest_fund_labels(

@@ -4,6 +4,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -23,9 +24,9 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [...deps, refreshCounter]);
 
-  return { data, error, loading, refresh: () => setLoading(true) };
+  return { data, error, loading, refresh: () => setRefreshCounter((c) => c + 1) };
 }
 
 export function reviewActionLabel(value: string) {

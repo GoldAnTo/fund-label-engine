@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 # 建议的目标分桶 → role_code 映射。target_bucket 来自前端下拉，role_code
 # 是 DB 里 role 维度。两个维度不冲突：target_bucket 是组合视角，role_code
 # 是角色视角。研究员接受建议时二者会一起持久化。

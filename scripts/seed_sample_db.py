@@ -15,7 +15,6 @@ import sqlite3
 import sys
 from pathlib import Path
 
-
 SCHEMA = (
     """
     CREATE TABLE IF NOT EXISTS fund_profiles (

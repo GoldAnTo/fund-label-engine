@@ -1,5 +1,4 @@
 """role_review_suggest 单元测试：覆盖四个分支 + 边界。"""
-import pytest
 
 from app.portfolio.role_review_suggest import suggest_role_reviews
 

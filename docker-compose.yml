@@ -1,0 +1,35 @@
+# docker-compose.yml 一键启动 Fund Label Engine
+#
+# 用法：
+#   docker compose up --build       # 构建并启动
+#   docker compose down             # 停止
+#   docker compose logs -f          # 查看日志
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fle-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # 持久化数据（数据库 + 备份）
+      - fle-data:/app/data
+      - fle-backups:/app/backups
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      # 通知 webhook（可选，按需设置）
+      # - FLE_NOTIFY_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=xxx
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  fle-data:
+  fle-backups:

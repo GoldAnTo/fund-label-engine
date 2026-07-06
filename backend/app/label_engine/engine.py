@@ -6,7 +6,6 @@ from math import sqrt
 from pathlib import Path
 from typing import Any
 
-
 SUPPORTED_ACTIVE_EQUITY_TYPES = {
     "股票型",
     "混合型-偏股",
@@ -45,12 +44,19 @@ class RuleConfig:
     drawdown_high_threshold: float = -0.2
     sharpe_high_threshold: float = 1.0
     long_term_return_threshold: float = 0.15
+    # 无风险利率（年化），用于夏普比率和 Alpha 计算。
+    # 默认 1.5%，近似一年期国债收益率。0 表示不扣除无风险利率（旧行为）。
+    risk_free_rate: float = 0.015
     excess_return_strong_threshold: float = 0.05
     information_ratio_high_threshold: float = 0.5
     tracking_error_high_threshold: float = 0.08
     alpha_positive_threshold: float = 0.03
     beta_high_threshold: float = 1.2
     beta_low_threshold: float = 0.8
+    # Fama-French 3 因子 Alpha：enable_ff3_alpha=True 时启用
+    # 降级策略：SMB/HML 缺失则自动回退 CAPM
+    enable_ff3_alpha: bool = False
+    ff3_min_samples: int = 60  # 至少 60 个观测才能用三因子
     fund_size_small_threshold: float = 1.0
     fund_size_moderate_min: float = 5.0
     fund_size_moderate_max: float = 100.0
@@ -123,7 +129,7 @@ class RuleConfig:
     disabled_rules: frozenset[str] = frozenset()
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "RuleConfig":
+    def from_file(cls, path: str | Path) -> RuleConfig:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("Rule config file must contain a JSON object.")
@@ -183,6 +189,7 @@ class RuleConfig:
             },
             "sharpe_high": {
                 "sharpe_ratio_min": self.sharpe_high_threshold,
+                "risk_free_rate": self.risk_free_rate,
                 "window": "3y|1y",
             },
             "long_term_return_strong": {
@@ -203,6 +210,7 @@ class RuleConfig:
             },
             "alpha_positive": {
                 "alpha_min": self.alpha_positive_threshold,
+                "risk_free_rate": self.risk_free_rate,
                 "window": "3y|1y",
             },
             "beta_high": {"beta_min": self.beta_high_threshold, "window": "3y|1y"},
@@ -420,7 +428,7 @@ DEFAULT_LABEL_DEFINITIONS = (
         "label_name": "夏普较高",
         "category": "return_risk",
         "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
-        "description": "区间年化夏普达到规则阈值。",
+        "description": "区间年化夏普达到规则阈值（扣除无风险利率）。",
     },
     {
         "label_code": "style_unlabeled_stock_factors_missing",
@@ -644,7 +652,7 @@ DEFAULT_LABEL_DEFINITIONS = (
         "label_name": "Alpha 为正",
         "category": "relative_benchmark",
         "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
-        "description": "按零无风险利率近似计算的 Alpha 达到规则阈值。",
+        "description": "按 CAPM 模型扣除无风险利率后的 Alpha 达到规则阈值。",
     },
     {
         "label_code": "beta_high",
@@ -888,6 +896,17 @@ class EngineResult:
 class LabelEngine:
     def __init__(self, rule_config: RuleConfig | None = None) -> None:
         self._rule_config = rule_config or RuleConfig()
+        # FF3 因子加载器：callable() -> (smb_returns, hml_returns)
+        # 默认 None，需要通过 set_ff3_factor_loader() 设置
+        self._ff3_factor_loader: callable | None = None
+
+    def set_ff3_factor_loader(self, loader: callable | None) -> None:
+        """注册 SMB / HML 因子加载器。
+
+        loader 是零参 callable，调用时返回 (smb_returns, hml_returns)。
+        任何异常都会被捕获并回退到 CAPM。
+        """
+        self._ff3_factor_loader = loader
 
     def evaluate(self, fund: FundInput) -> EngineResult:
         labels: list[LabelResult] = []
@@ -1797,8 +1816,8 @@ class LabelEngine:
 
         return features
 
-    @staticmethod
     def _append_relative_benchmark_features(
+        self,
         features: list[FeatureValue],
         window: str,
         fund_returns: list[float],
@@ -1809,7 +1828,7 @@ class LabelEngine:
             return
         fund_window = fund_returns[-n:]
         benchmark_window = benchmark_returns[-n:]
-        active_returns = [f - b for f, b in zip(fund_window, benchmark_window)]
+        active_returns = [f - b for f, b in zip(fund_window, benchmark_window, strict=True)]
         active_cumulative = 1.0
         fund_cumulative = 1.0
         benchmark_cumulative = 1.0
@@ -1817,6 +1836,7 @@ class LabelEngine:
             fund_window,
             benchmark_window,
             active_returns,
+            strict=True,
         ):
             fund_cumulative *= 1 + fund_return
             benchmark_cumulative *= 1 + benchmark_return
@@ -1855,14 +1875,44 @@ class LabelEngine:
         covariance = (
             sum(
                 (fund_return - fund_mean) * (benchmark_return - benchmark_mean)
-                for fund_return, benchmark_return in zip(fund_window, benchmark_window)
+                for fund_return, benchmark_return in zip(fund_window, benchmark_window, strict=True)
             )
             / (n - 1)
             if n > 1
             else 0.0
         )
         beta = covariance / benchmark_variance if benchmark_variance > 0 else 0.0
-        alpha = annualized_fund - beta * annualized_benchmark
+        rf = self._rule_config.risk_free_rate
+        # 默认 CAPM Alpha
+        alpha = (annualized_fund - rf) - beta * (annualized_benchmark - rf)
+        ff3_method = "capm"
+        beta_smb = 0.0
+        beta_hml = 0.0
+
+        # 可选：Fama-French 3 因子 Alpha（当启用且因子可用时）
+        if (
+            self._rule_config.enable_ff3_alpha
+            and n >= self._rule_config.ff3_min_samples
+            and self._ff3_factor_loader is not None
+        ):
+            try:
+                smb_returns, hml_returns = self._ff3_factor_loader()
+                from app.factors.fama_french import compute_ff3_alpha
+
+                ff3_result = compute_ff3_alpha(
+                    fund_returns=fund_window,
+                    market_returns=benchmark_window,
+                    smb_returns=smb_returns,
+                    hml_returns=hml_returns,
+                    risk_free_rate=rf,
+                )
+                alpha = ff3_result.alpha_annualized
+                beta = ff3_result.beta_market
+                beta_smb = ff3_result.beta_smb
+                beta_hml = ff3_result.beta_hml
+                ff3_method = ff3_result.method
+            except Exception:  # noqa: BLE001 - 任何加载失败都回退到 CAPM
+                ff3_method = "capm_fallback_on_error"
 
         for code, value in (
             ("benchmark_sample_count", n),
@@ -1877,6 +1927,18 @@ class LabelEngine:
                 FeatureValue(f"{code}_{window}", round(value, 6), "benchmark_returns")
             )
 
+        # Fama-French 3 因子增量特征
+        if self._rule_config.enable_ff3_alpha:
+            features.append(
+                FeatureValue(f"beta_smb_{window}", round(beta_smb, 6), "ff3")
+            )
+            features.append(
+                FeatureValue(f"beta_hml_{window}", round(beta_hml, 6), "ff3")
+            )
+            features.append(
+                FeatureValue(f"alpha_method_{window}", ff3_method, "ff3")
+            )
+
     @staticmethod
     def _max_drawdown(returns: list[float]) -> float:
         wealth = 1.0
@@ -1889,8 +1951,8 @@ class LabelEngine:
                 max_drawdown = min(max_drawdown, wealth / peak - 1)
         return max_drawdown
 
-    @staticmethod
     def _append_window_features(
+        self,
         features: list[FeatureValue],
         window: str,
         window_returns: list[float],
@@ -1912,8 +1974,9 @@ class LabelEngine:
         )
         annualized_volatility = sqrt(variance) * sqrt(ANNUALIZATION_FACTOR)
         max_drawdown = LabelEngine._max_drawdown(window_returns)
+        rf = self._rule_config.risk_free_rate
         sharpe = (
-            annualized_return / annualized_volatility
+            (annualized_return - rf) / annualized_volatility
             if annualized_volatility > 0
             else 0.0
         )

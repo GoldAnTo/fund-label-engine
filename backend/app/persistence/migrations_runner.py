@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC
 from pathlib import Path
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
@@ -45,7 +46,7 @@ def run_migrations(db_path: str) -> list[str]:
     但仍把整个 migration 标记为已执行。这样允许 ALTER TABLE 在已有列的
     新库上安全运行。
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     conn = sqlite3.connect(db_path)
     try:
@@ -67,7 +68,7 @@ def run_migrations(db_path: str) -> list[str]:
                     raise
             conn.execute(
                 "INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)",
-                (mig_id, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+                (mig_id, datetime.now(UTC).isoformat(timespec="seconds")),
             )
             conn.commit()
             executed.append(mig_id)

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 # 关键指标清单
@@ -180,7 +180,7 @@ def compute_percentile_ranks(
         for g in tags:
             group_members.setdefault(g, set()).add(fund_code)
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     records: list[dict[str, Any]] = []
 
     for metric_code, _, _, direction in PERCENTILE_METRICS:
