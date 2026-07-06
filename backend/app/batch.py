@@ -478,11 +478,11 @@ def _apply_cross_sectional_percentiles(
         if roe_p70 is not None:
             updates["high_roe_threshold"] = roe_p70
 
-    # 利润高增长: 利润增速第 65 百分位
+    # 利润高增长: 利润增速第 70 百分位
     if pg_values:
-        pg_p65 = percentile(sorted(pg_values), 0.65)
-        if pg_p65 is not None:
-            updates["profit_growth_strong_threshold"] = pg_p65
+        pg_p70 = percentile(sorted(pg_values), 0.70)
+        if pg_p70 is not None:
+            updates["profit_growth_strong_threshold"] = pg_p70
 
     if not updates:
         return rule_config

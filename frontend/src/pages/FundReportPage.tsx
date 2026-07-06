@@ -91,17 +91,7 @@ function PercentilePanel({ ranks, fundStyleTags }: { ranks: PercentileRank[]; fu
     return a.localeCompare(b);
   });
 
-  // 指标中文名
-  const metricName: Record<string, string> = {
-    annualized_return_1y: "年化收益",
-    sharpe_ratio_1y: "夏普比率",
-    max_drawdown_1y: "最大回撤",
-    annualized_excess_return_1y: "超额收益",
-    information_ratio_1y: "信息比率",
-    roe_weighted: "加权 ROE",
-    pe_weighted: "加权 PE",
-    pb_weighted: "加权 PB",
-  };
+  const metricName = METRIC_NAMES;
 
   const filteredRanks = selectedGroup === "all_market"
     ? ranks.filter((r) => r.label_code === "all_market")
@@ -137,7 +127,6 @@ function PercentilePanel({ ranks, fundStyleTags }: { ranks: PercentileRank[]; fu
               <tr key={r.metric_code}>
                 <td>
                   <strong>{displayName}</strong>
-                  <div className="muted" style={{ fontSize: 11 }}>{r.metric_code}</div>
                 </td>
                 <td className="num">
                   {r.metric_value !== null ? Number(r.metric_value).toFixed(4) : "-"}
@@ -209,6 +198,70 @@ function DrillDownPanel({ contributions, styleCode }: { contributions: EquitySty
       </table>
     </div>
   );
+}
+
+// 指标/因子中文名映射（模块级，所有组件共享）
+const METRIC_NAMES: Record<string, string> = {
+  annualized_return_1y: "年化收益",
+  annualized_return_3y: "近三年年化收益",
+  annualized_return_1m: "近一月收益",
+  annualized_return_3m: "近三月收益",
+  sharpe_ratio_1y: "夏普比率",
+  sharpe_ratio_3y: "近三年夏普",
+  max_drawdown_1y: "最大回撤",
+  max_drawdown_3y: "近三年最大回撤",
+  annualized_excess_return_1y: "超额收益",
+  annualized_excess_return_3y: "近三年超额收益",
+  information_ratio_1y: "信息比率",
+  information_ratio_3y: "近三年信息比率",
+  tracking_error_1y: "跟踪误差",
+  beta_1y: "Beta",
+  alpha_1y: "Alpha",
+  roe_weighted: "加权 ROE",
+  pe_weighted: "加权 PE",
+  pb_weighted: "加权 PB",
+  profit_growth_weighted: "加权利润增速",
+  revenue_growth_weighted: "加权营收增速",
+  dividend_yield_weighted: "加权股息率",
+  log10_market_cap_weighted: "加权对数市值",
+  valuation_percentile_weighted: "加权估值分位",
+  quality_growth_weight: "质量成长权重",
+  deep_value_weight: "深度价值权重",
+  dividend_steady_weight: "红利稳健权重",
+  factor_coverage_weight: "因子覆盖权重",
+  annualized_volatility_1y: "年化波动率",
+  annualized_volatility_3y: "近三年波动率",
+  top_10_holding_weight: "前十大持仓权重",
+  industry_top1_weight: "第一大行业权重",
+  industry_top3_weight: "前三大行业权重",
+  industry_count: "行业数量",
+  equity_position: "权益仓位",
+  manager_tenure_years: "经理任期",
+  total_annual_fee: "综合费率",
+  fund_size: "基金规模",
+  stock_holding_count: "持仓股票数",
+  annualized_benchmark_return_1y: "基准年化收益",
+};
+
+const REASON_LABELS: Record<string, string> = {
+  threshold_not_met: "未达阈值",
+  benchmark_data_missing: "基准数据缺失",
+  return_window_insufficient: "收益窗口不足",
+  stock_factors_missing: "缺少股票因子",
+  coverage_passed: "数据覆盖通过",
+  threshold_met: "达到阈值",
+};
+
+function translateObserved(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return "-";
+  const s = String(value);
+  return s
+    .replace(/style_weight_below_threshold/g, "风格权重未达阈值")
+    .replace(/min\(1y=(\d+), 3y=(\d+)\)/g, "最少 $1 天（1年）/ $2 天（3年）")
+    .replace(/all_required_fields_present/g, "所有必要字段已提供")
+    .replace(/any_required_field_missing/g, "存在缺失字段")
+    .replace(/'(\w+)':\s*([\d.]+)/g, "$1 = $2")
+    .replace(/[{}']/g, "");
 }
 
 export default function FundReportPage() {
@@ -464,7 +517,7 @@ export default function FundReportPage() {
             <tbody>
               {data.factor_exposures.map((f) => (
                 <tr key={`${f.report_date}-${f.factor_code}`}>
-                  <td><code>{f.factor_code}</code></td>
+                  <td>{METRIC_NAMES[f.factor_code] ?? f.factor_code}</td>
                   <td className="num">{Number(f.exposure_value).toFixed(4)}</td>
                   <td className="num">{(Number(f.coverage_weight) * 100).toFixed(1)}%</td>
                   <td>{f.covered_stock_count}/{f.stock_count}</td>
@@ -525,9 +578,9 @@ export default function FundReportPage() {
               {unresolvedCalculations.map((c) => (
                 <tr key={c.label_code}>
                   <td><strong>{c.label_name}</strong></td>
-                  <td className="muted">{c.message}</td>
-                  <td className="num">{c.observed ?? "-"}</td>
-                  <td className="num">{c.threshold ?? "-"}</td>
+                  <td className="muted">{c.message}（{REASON_LABELS[c.reason_code] ?? c.reason_code}）</td>
+                  <td className="num">{translateObserved(c.observed)}</td>
+                  <td className="num">{translateObserved(c.threshold)}</td>
                 </tr>
               ))}
             </tbody>
@@ -546,7 +599,7 @@ export default function FundReportPage() {
             <tbody>
               {data.reviews.map((r) => (
                 <tr key={r.review_id}>
-                  <td>{r.label_code}</td>
+                  <td>{styleCodeToName(r.label_code)}</td>
                   <td>{reviewActionLabel(r.decision)}</td>
                   <td>{r.reviewer}</td>
                   <td>{r.comment}</td>

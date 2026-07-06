@@ -568,6 +568,281 @@ class LabelRunReader:
             "common_holdings": common_holdings,
         }
 
+    def get_correlation_matrix(
+        self,
+        fund_codes: list[str],
+    ) -> dict[str, Any]:
+        """计算多只基金基于日收益率的两两相关系数矩阵。
+
+        从 source 库读取 nav_history 日收益率，按日期对齐后计算 Pearson 相关系数。
+
+        返回:
+        {
+          "fund_codes": [...],
+          "matrix": [[1.0, 0.85, ...], [0.85, 1.0, ...], ...],
+          "sample_count": 252,
+          "pairs": [
+            {"fund_a": "000017", "fund_b": "000411", "correlation": 0.85, "level": "high"}
+          ],
+        }
+        """
+        if len(fund_codes) < 2:
+            return {"fund_codes": fund_codes, "matrix": [], "sample_count": 0, "pairs": []}
+
+        source_db = self._source_db_path
+        if not source_db:
+            return {"fund_codes": fund_codes, "matrix": [], "sample_count": 0, "pairs": [], "error": "source db not configured"}
+
+        conn = sqlite3.connect(source_db)
+        conn.row_factory = sqlite3.Row
+        try:
+            # 读取每只基金的日收益率序列
+            nav_by_fund: dict[str, dict[str, float]] = {}
+            for fc in fund_codes:
+                rows = conn.execute(
+                    "SELECT nav_date, daily_growth_rate FROM nav_history "
+                    "WHERE fund_code = ? AND daily_growth_rate IS NOT NULL "
+                    "ORDER BY nav_date",
+                    (fc,),
+                ).fetchall()
+                nav_by_fund[fc] = {row["nav_date"]: row["daily_growth_rate"] for row in rows}
+        finally:
+            conn.close()
+
+        # 找到所有基金共同的日期
+        common_dates = None
+        for fc in fund_codes:
+            dates = set(nav_by_fund.get(fc, {}).keys())
+            if common_dates is None:
+                common_dates = dates
+            else:
+                common_dates = common_dates & dates
+
+        if not common_dates or len(common_dates) < 30:
+            return {
+                "fund_codes": fund_codes,
+                "matrix": [],
+                "sample_count": len(common_dates) if common_dates else 0,
+                "pairs": [],
+                "error": "common dates insufficient",
+            }
+
+        sorted_dates = sorted(common_dates)
+
+        # 构建收益率序列
+        series: dict[str, list[float]] = {}
+        for fc in fund_codes:
+            series[fc] = [nav_by_fund[fc][d] for d in sorted_dates]
+
+        n = len(fund_codes)
+        sample_count = len(sorted_dates)
+
+        # 计算 Pearson 相关系数矩阵
+        import math
+
+        def pearson(x: list[float], y: list[float]) -> float:
+            n = len(x)
+            if n == 0:
+                return 0.0
+            mean_x = sum(x) / n
+            mean_y = sum(y) / n
+            cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y))
+            var_x = sum((xi - mean_x) ** 2 for xi in x)
+            var_y = sum((yi - mean_y) ** 2 for yi in y)
+            denom = math.sqrt(var_x * var_y)
+            if denom == 0:
+                return 0.0
+            return cov / denom
+
+        def corr_level(c: float) -> str:
+            ac = abs(c)
+            if ac >= 0.8:
+                return "very_high"
+            if ac >= 0.6:
+                return "high"
+            if ac >= 0.3:
+                return "moderate"
+            return "low"
+
+        matrix: list[list[float]] = []
+        pairs: list[dict[str, Any]] = []
+        for i, fa in enumerate(fund_codes):
+            row: list[float] = []
+            for j, fb in enumerate(fund_codes):
+                if i == j:
+                    c = 1.0
+                elif i < j:
+                    c = pearson(series[fa], series[fb])
+                    pairs.append({
+                        "fund_a": fa,
+                        "fund_b": fb,
+                        "correlation": round(c, 4),
+                        "level": corr_level(c),
+                    })
+                else:
+                    c = matrix[j][i]
+                row.append(round(c, 4))
+            matrix.append(row)
+
+        return {
+            "fund_codes": fund_codes,
+            "matrix": matrix,
+            "sample_count": sample_count,
+            "pairs": pairs,
+        }
+
+    def get_portfolio_risk(
+        self,
+        fund_codes: list[str],
+        weights: list[float],
+    ) -> dict[str, Any]:
+        """计算给定权重下组合的风险指标。
+
+        基于日收益率序列，计算：
+        - 每只基金的年化波动率
+        - 组合年化波动率 = sqrt(w' × Cov × w)
+        - 分散化比率 = 组合波动率 / 加权平均波动率（越低分散越好）
+        - 组合年化收益（加权平均）
+
+        返回:
+        {
+          "fund_codes": [...],
+          "weights": [...],
+          "sample_count": 252,
+          "fund_volatilities": [0.25, 0.30, ...],
+          "fund_returns": [0.15, 0.20, ...],
+          "portfolio_volatility": 0.22,
+          "portfolio_return": 0.17,
+          "weighted_avg_volatility": 0.27,
+          "diversification_ratio": 0.81,
+          "risk_reduction": 0.05,
+        }
+        """
+        if len(fund_codes) < 2:
+            return {"fund_codes": fund_codes, "weights": weights, "error": "at least 2 funds required"}
+
+        if len(fund_codes) != len(weights):
+            return {"fund_codes": fund_codes, "weights": weights, "error": "funds and weights length mismatch"}
+
+        source_db = self._source_db_path
+        if not source_db:
+            return {"fund_codes": fund_codes, "weights": weights, "error": "source db not configured"}
+
+        conn = sqlite3.connect(source_db)
+        conn.row_factory = sqlite3.Row
+        try:
+            nav_by_fund: dict[str, dict[str, float]] = {}
+            for fc in fund_codes:
+                rows = conn.execute(
+                    "SELECT nav_date, daily_growth_rate FROM nav_history "
+                    "WHERE fund_code = ? AND daily_growth_rate IS NOT NULL "
+                    "ORDER BY nav_date",
+                    (fc,),
+                ).fetchall()
+                nav_by_fund[fc] = {row["nav_date"]: row["daily_growth_rate"] for row in rows}
+        finally:
+            conn.close()
+
+        # 找共同日期
+        common_dates = None
+        for fc in fund_codes:
+            dates = set(nav_by_fund.get(fc, {}).keys())
+            if common_dates is None:
+                common_dates = dates
+            else:
+                common_dates = common_dates & dates
+
+        if not common_dates or len(common_dates) < 30:
+            return {"fund_codes": fund_codes, "weights": weights, "sample_count": 0, "error": "common dates insufficient"}
+
+        sorted_dates = sorted(common_dates)
+        n_funds = len(fund_codes)
+        n_days = len(sorted_dates)
+
+        # 构建收益率矩阵 [n_days][n_funds]
+        import math
+
+        returns_matrix: list[list[float]] = []
+        for d in sorted_dates:
+            returns_matrix.append([nav_by_fund[fc][d] for fc in fund_codes])
+
+        # 归一化权重
+        total_w = sum(weights)
+        if total_w <= 0:
+            return {"fund_codes": fund_codes, "weights": weights, "error": "weights must be positive"}
+        norm_weights = [w / total_w for w in weights]
+
+        # 计算每只基金的年化波动率和年化收益
+        fund_vols: list[float] = []
+        fund_returns: list[float] = []
+
+        for j in range(n_funds):
+            col = [returns_matrix[i][j] for i in range(n_days)]
+            mean = sum(col) / n_days
+            var = sum((x - mean) ** 2 for x in col) / (n_days - 1) if n_days > 1 else 0.0
+            fund_vols.append(math.sqrt(var) * math.sqrt(252))
+            # 年化收益
+            cumulative = 1.0
+            for r in col:
+                cumulative *= (1.0 + r)
+            fund_returns.append(cumulative ** (252.0 / n_days) - 1.0 if cumulative > 0 else -1.0)
+
+        # 计算协方差矩阵
+        means = [sum(returns_matrix[i][j] for i in range(n_days)) / n_days for j in range(n_funds)]
+        cov_matrix: list[list[float]] = [[0.0] * n_funds for _ in range(n_funds)]
+        for i in range(n_funds):
+            for j in range(i, n_funds):
+                cov = sum(
+                    (returns_matrix[k][i] - means[i]) * (returns_matrix[k][j] - means[j])
+                    for k in range(n_days)
+                ) / (n_days - 1) if n_days > 1 else 0.0
+                cov_matrix[i][j] = cov
+                cov_matrix[j][i] = cov
+
+        # 年化协方差
+        ann_factor = 252.0
+        for i in range(n_funds):
+            for j in range(n_funds):
+                cov_matrix[i][j] *= ann_factor
+
+        # 组合方差 = w' × Cov × w
+        port_var = 0.0
+        for i in range(n_funds):
+            for j in range(n_funds):
+                port_var += norm_weights[i] * norm_weights[j] * cov_matrix[i][j]
+
+        port_vol = math.sqrt(max(port_var, 0.0))
+
+        # 加权平均波动率
+        weighted_avg_vol = sum(norm_weights[i] * fund_vols[i] for i in range(n_funds))
+
+        # 分散化比率
+        div_ratio = port_vol / weighted_avg_vol if weighted_avg_vol > 0 else 1.0
+
+        # 风险降低
+        risk_reduction = weighted_avg_vol - port_vol
+
+        # 组合年化收益
+        port_return = sum(norm_weights[i] * fund_returns[i] for i in range(n_funds))
+
+        # 组合夏普
+        port_sharpe = port_return / port_vol if port_vol > 0 else 0.0
+
+        return {
+            "fund_codes": fund_codes,
+            "weights": [round(w, 4) for w in norm_weights],
+            "raw_weights": weights,
+            "sample_count": n_days,
+            "fund_volatilities": [round(v, 4) for v in fund_vols],
+            "fund_returns": [round(r, 4) for r in fund_returns],
+            "portfolio_volatility": round(port_vol, 4),
+            "portfolio_return": round(port_return, 4),
+            "portfolio_sharpe": round(port_sharpe, 4),
+            "weighted_avg_volatility": round(weighted_avg_vol, 4),
+            "diversification_ratio": round(div_ratio, 4),
+            "risk_reduction": round(risk_reduction, 4),
+        }
+
     def search_run_funds(
         self,
         run_id: str,

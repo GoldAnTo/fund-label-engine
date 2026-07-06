@@ -65,17 +65,96 @@ const TAG_LABELS: Record<string, string> = {
   sharpe_high: "高夏普",
   data_sufficient: "数据充分",
   return_window_insufficient: "收益窗口不足",
+  // 风格标签
+  deep_value: "深度价值",
+  low_valuation: "低估值",
+  high_valuation: "高估值",
+  quality_growth: "质量成长",
+  high_roe: "高盈利",
+  profit_growth_strong: "利润高增长",
+  dividend_steady: "红利稳健",
+  high_dividend_financial: "金融高股息",
+  consumer_quality: "消费质量",
+  large_cap: "大盘",
+  mid_cap: "中盘",
+  small_cap: "小盘",
+  tech_focused: "科技主题",
+  finance_focused: "金融主题",
+  consumer_focused: "消费主题",
+  healthcare_focused: "医药主题",
+  cyclical_focused: "周期主题",
+  value_dividend: "价值红利",
+  growth_large_cap: "大盘成长",
+  growth_small_cap: "小盘成长",
+  small_cap_growth: "小盘高成长",
+  quality_dividend: "高质量红利",
+  value_quality: "价值质量",
+  growth_profit: "成长盈利",
+  // 收益风险标签
+  long_term_return_strong: "长期收益优秀",
+  // 持仓标签
+  equity_position_high: "权益仓位高",
+  holding_concentration_high: "持仓集中度高",
+  industry_concentration_high: "行业集中度高",
+  industry_concentration_observe: "行业集中观察",
+  industry_diversified: "行业分散",
+  // 描述性标签
+  manager_tenure_long: "经理任期长",
+  fee_low: "费率低",
+  fee_high: "费率高",
+  fund_size_moderate: "规模适中",
+  fund_size_small: "规模偏小",
+  // 相对基准标签
+  excess_return_strong: "超额收益较强",
+  information_ratio_high: "信息比率较高",
+  tracking_error_high: "跟踪误差较高",
+  beta_high: "Beta 较高",
+  beta_low: "Beta 较低",
+  benchmark_data_missing: "基准数据缺失",
+  // 数据质量
+  data_insufficient: "数据不足",
+  manual_review_required: "需人工复核",
 };
 
 const FEATURE_LABELS: Record<string, string> = {
   annualized_return_1y: "近一年收益",
   annualized_return_3y: "近三年收益",
+  annualized_return_1m: "近一月收益",
+  annualized_return_3m: "近三月收益",
   max_drawdown_1y: "最大回撤",
+  max_drawdown_3y: "近三年最大回撤",
   volatility_1y: "波动率",
+  volatility_3y: "近三年波动率",
   sharpe_1y: "夏普",
+  sharpe_3y: "近三年夏普",
+  sharpe_ratio_1y: "夏普比率",
   fund_size: "基金规模",
   manager_tenure_years: "经理任职",
   expense_ratio: "费率",
+  total_annual_fee: "综合费率",
+  equity_position: "权益仓位",
+  top_10_holding_weight: "前十大持仓",
+  stock_holding_count: "持仓股票数",
+  industry_top1_weight: "第一大行业",
+  industry_top3_weight: "前三大行业",
+  industry_count: "行业数量",
+  // 相对基准
+  annualized_excess_return_1y: "超额收益",
+  annualized_excess_return_3y: "近三年超额收益",
+  tracking_error_1y: "跟踪误差",
+  information_ratio_1y: "信息比率",
+  beta_1y: "Beta",
+  alpha_1y: "Alpha",
+  annualized_benchmark_return_1y: "基准收益",
+  // 因子暴露
+  pb_weighted: "加权 PB",
+  pe_weighted: "加权 PE",
+  roe_weighted: "加权 ROE",
+  profit_growth_weighted: "加权利润增速",
+  revenue_growth_weighted: "加权营收增速",
+  dividend_yield_weighted: "加权股息率",
+  log10_market_cap_weighted: "加权对数市值",
+  valuation_percentile_weighted: "加权估值分位",
 };
 
 const REVIEW_DECISIONS = [
@@ -110,11 +189,11 @@ function bucketLabel(value: string) {
 }
 
 function tagLabel(value: string) {
-  return TAG_LABELS[value] ?? value.replaceAll("_", " ");
+  return TAG_LABELS[value] ?? value;
 }
 
 function featureLabel(value: string) {
-  return FEATURE_LABELS[value] ?? value.replaceAll("_", " ");
+  return FEATURE_LABELS[value] ?? value;
 }
 
 function displayValue(value: string | number | null | undefined) {

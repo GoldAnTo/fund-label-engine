@@ -2,6 +2,19 @@ import { Link, useParams } from "react-router-dom";
 import { downloadFile, fetchRun, fetchRunStyle, fetchRunSummary } from "../api";
 import { useAsync, runStatusLabel } from "../components";
 
+const CATEGORY_LABELS: Record<string, string> = {
+  data_quality: "数据质量",
+  return_risk: "收益风险",
+  holding: "持仓结构",
+  holding_style: "持仓风格",
+  relative_benchmark: "相对基准",
+  manager: "基金经理",
+  fee: "费率",
+  fund_size: "规模",
+  review: "复核",
+  description: "描述性",
+};
+
 export default function RunDetailPage() {
   const { runId = "" } = useParams();
   const { data, error, loading } = useAsync(() => fetchRun(runId), [runId]);
@@ -64,9 +77,8 @@ export default function RunDetailPage() {
                 <tr key={row.label_code}>
                   <td>
                     <strong>{row.label_name}</strong>
-                    <div className="muted"><code>{row.label_code}</code></div>
                   </td>
-                  <td>{row.category}</td>
+                  <td>{CATEGORY_LABELS[row.category] ?? row.category}</td>
                   <td>{row.fund_count}</td>
                 </tr>
               ))}

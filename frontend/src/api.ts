@@ -384,6 +384,53 @@ export async function fetchHoldingsOverlap(
   return json(`/v1/holdings-overlap?funds=${encodeURIComponent(funds)}&top_n=${topN}`);
 }
 
+export interface CorrelationPair {
+  fund_a: string;
+  fund_b: string;
+  correlation: number;
+  level: "very_high" | "high" | "moderate" | "low";
+}
+
+export interface CorrelationResponse {
+  fund_codes: string[];
+  matrix: number[][];
+  sample_count: number;
+  pairs: CorrelationPair[];
+  error?: string;
+}
+
+export async function fetchCorrelation(
+  fundCodes: string[]
+): Promise<CorrelationResponse> {
+  const funds = fundCodes.join(",");
+  return json(`/v1/correlation?funds=${encodeURIComponent(funds)}`);
+}
+
+export interface PortfolioRiskResponse {
+  fund_codes: string[];
+  weights: number[];
+  raw_weights: number[];
+  sample_count: number;
+  fund_volatilities: number[];
+  fund_returns: number[];
+  portfolio_volatility: number;
+  portfolio_return: number;
+  portfolio_sharpe: number;
+  weighted_avg_volatility: number;
+  diversification_ratio: number;
+  risk_reduction: number;
+  error?: string;
+}
+
+export async function fetchPortfolioRisk(
+  fundCodes: string[],
+  weights: number[]
+): Promise<PortfolioRiskResponse> {
+  const funds = fundCodes.join(",");
+  const w = weights.join(",");
+  return json(`/v1/portfolio-risk?funds=${encodeURIComponent(funds)}&weights=${encodeURIComponent(w)}`);
+}
+
 export interface WorkbenchTask {
   task_id: string;
   task_type: "benchmark_gap" | "manual_review" | "observe_signal" | "calibration_signal" | string;

@@ -28,6 +28,13 @@ _STYLE_NAMES = {
     "deep_value": "深度价值",
     "quality_growth": "质量成长",
     "dividend_steady": "红利稳健",
+    "high_valuation": "高估值",
+    "low_valuation": "低估值",
+    "large_cap": "大盘",
+    "mid_cap": "中盘",
+    "small_cap": "小盘",
+    "high_roe": "高盈利质量",
+    "profit_growth_strong": "利润高增长",
 }
 
 _SOURCE = "stock_holdings+stock_factor_values"
@@ -97,7 +104,10 @@ def _evaluate_styles(factors: dict[str, Any], cfg: Any):
     roe = _as_float(factors.get("roe"))
     revenue_growth = _as_float(factors.get("revenue_growth"))
     dividend_yield = _as_float(factors.get("dividend_yield"))
+    profit_growth = _as_float(factors.get("profit_growth"))
+    log10_mcap = _as_float(factors.get("log10_market_cap"))
 
+    # 高级风格标签（原 3 个）
     deep_value_matched = (
         pb is not None
         and valuation_pct is not None
@@ -112,6 +122,31 @@ def _evaluate_styles(factors: dict[str, Any], cfg: Any):
     )
     dividend_steady_matched = (
         dividend_yield is not None and dividend_yield >= cfg.dividend_steady_yield_min
+    )
+
+    # 扩展风格标签（股票级判断，用 RuleConfig 阈值）
+    high_valuation_matched = (
+        (pb is not None and pb >= cfg.high_valuation_pb_min)
+        or (pb is not None and pb >= 8.0)
+    )
+    low_valuation_matched = (
+        (pb is not None and pb <= cfg.low_valuation_pb_max)
+        or (pb is not None and pb <= 3.0)
+    )
+    large_cap_matched = (
+        log10_mcap is not None and log10_mcap >= cfg.large_cap_log10_mcap_min
+    )
+    mid_cap_matched = (
+        log10_mcap is not None
+        and cfg.mid_cap_log10_mcap_min <= log10_mcap < cfg.mid_cap_log10_mcap_max
+    )
+    small_cap_matched = (
+        log10_mcap is not None and log10_mcap < cfg.small_cap_log10_mcap_max
+    )
+    high_roe_matched = roe is not None and roe >= cfg.high_roe_threshold
+    profit_growth_matched = (
+        profit_growth is not None
+        and profit_growth >= cfg.profit_growth_strong_threshold
     )
 
     yield (
@@ -137,6 +172,51 @@ def _evaluate_styles(factors: dict[str, Any], cfg: Any):
         dividend_steady_matched,
         {"dividend_yield": dividend_yield},
         {"dividend_yield_min": cfg.dividend_steady_yield_min},
+    )
+    yield (
+        "high_valuation",
+        high_valuation_matched,
+        {"pb": pb},
+        {"pb_min": cfg.high_valuation_pb_min},
+    )
+    yield (
+        "low_valuation",
+        low_valuation_matched,
+        {"pb": pb},
+        {"pb_max": cfg.low_valuation_pb_max},
+    )
+    yield (
+        "large_cap",
+        large_cap_matched,
+        {"log10_market_cap": log10_mcap},
+        {"log10_mcap_min": cfg.large_cap_log10_mcap_min},
+    )
+    yield (
+        "mid_cap",
+        mid_cap_matched,
+        {"log10_market_cap": log10_mcap},
+        {
+            "log10_mcap_min": cfg.mid_cap_log10_mcap_min,
+            "log10_mcap_max": cfg.mid_cap_log10_mcap_max,
+        },
+    )
+    yield (
+        "small_cap",
+        small_cap_matched,
+        {"log10_market_cap": log10_mcap},
+        {"log10_mcap_max": cfg.small_cap_log10_mcap_max},
+    )
+    yield (
+        "high_roe",
+        high_roe_matched,
+        {"roe": roe},
+        {"roe_min": cfg.high_roe_threshold},
+    )
+    yield (
+        "profit_growth_strong",
+        profit_growth_matched,
+        {"profit_growth": profit_growth},
+        {"profit_growth_min": cfg.profit_growth_strong_threshold},
     )
 
 

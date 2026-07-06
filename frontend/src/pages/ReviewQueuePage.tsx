@@ -8,6 +8,7 @@ import {
   type WorkbenchSummary,
   type WorkbenchTasksResponse,
 } from "../api";
+import { styleName } from "../styleConfig";
 
 function taskTypeLabel(value: string) {
   const labels: Record<string, string> = {
@@ -33,7 +34,7 @@ function taskTarget(task: WorkbenchTasksResponse["results"][number]) {
     return <><code>{task.fund_code}</code><div className="muted">{task.fund_name || "单基金任务"}</div></>;
   }
   if (task.label_code) {
-    return <><code>{task.label_code}</code><div className="muted">{task.label_name || "标签任务"}</div></>;
+    return <><strong>{styleName(task.label_code)}</strong><div className="muted">{task.label_name || "标签任务"}</div></>;
   }
   return <span className="muted">-</span>;
 }

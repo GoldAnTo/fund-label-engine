@@ -57,12 +57,12 @@ class RuleConfig:
     # ---- Phase 5: 高级风格阈值 ----
     deep_value_pb_max: float = 1.5
     deep_value_valuation_pct_max: float = 0.3
-    deep_value_weight_min: float = 0.6
+    deep_value_weight_min: float = 0.5
     quality_growth_roe_min: float = 0.15
     quality_growth_revenue_growth_min: float = 0.15
-    quality_growth_weight_min: float = 0.5
-    dividend_steady_yield_min: float = 0.03
-    dividend_steady_weight_min: float = 0.5
+    quality_growth_weight_min: float = 0.4
+    dividend_steady_yield_min: float = 0.025
+    dividend_steady_weight_min: float = 0.3
     high_dividend_sector_ratio_min: float = 0.6
     consumer_dominant_ratio_min: float = 0.6
     sector_coverage_min: float = 0.7
@@ -756,6 +756,7 @@ _STYLE_LABELS = {
     "value_dividend",
     "growth_large_cap",
     "growth_small_cap",
+    "small_cap_growth",
     "quality_dividend",
     "value_quality",
     "growth_profit",
@@ -781,6 +782,7 @@ _STYLE_GROUP_BY_LABEL = {
     "value_dividend": ("composite_group", "组合风格组"),
     "growth_large_cap": ("composite_group", "组合风格组"),
     "growth_small_cap": ("composite_group", "组合风格组"),
+    "small_cap_growth": ("composite_group", "组合风格组"),
     "quality_dividend": ("composite_group", "组合风格组"),
     "value_quality": ("composite_group", "组合风格组"),
     "growth_profit": ("composite_group", "组合风格组"),
@@ -1336,7 +1338,12 @@ class LabelEngine:
     @staticmethod
     def _is_passive_index_fund(fund: FundInput) -> bool:
         text = f"{fund.fund_type} {fund.fund_name}".upper()
-        return any(keyword in text for keyword in ("指数", "ETF", "联接", "INDEX"))
+        if any(keyword in text for keyword in ("指数", "ETF", "联接", "INDEX")):
+            # 指数增强/增强型 属于主动管理，不应判为被动
+            if "增强" in fund.fund_name:
+                return False
+            return True
+        return False
 
     def _calculate_label_states(
         self,
@@ -3075,6 +3082,7 @@ class LabelEngine:
             ("value_dividend", "价值红利", frozenset({"low_valuation", "dividend_steady"})),
             ("growth_large_cap", "大盘成长", frozenset({"quality_growth", "large_cap"})),
             ("growth_small_cap", "小盘成长", frozenset({"quality_growth", "small_cap"})),
+            ("small_cap_growth", "小盘高成长", frozenset({"small_cap", "profit_growth_strong"})),
             ("quality_dividend", "高质量红利", frozenset({"high_roe", "dividend_steady"})),
             ("value_quality", "价值质量", frozenset({"low_valuation", "high_roe"})),
             ("growth_profit", "成长盈利", frozenset({"quality_growth", "profit_growth_strong"})),

@@ -2,10 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   fetchCompare,
+  fetchCorrelation,
   fetchHoldingsOverlap,
+  fetchPortfolioRisk,
   fetchRuns,
   type CompareResponse,
+  type CorrelationResponse,
   type HoldingsOverlapResponse,
+  type PortfolioRiskResponse,
 } from "../api";
 import { ALL_STYLE_CODES, STYLE_GROUPS, styleTagClass, styleName } from "../styleConfig";
 
@@ -182,6 +186,9 @@ export default function ComparePage() {
   );
   const [compare, setCompare] = useState<CompareResponse | null>(null);
   const [overlap, setOverlap] = useState<HoldingsOverlapResponse | null>(null);
+  const [correlation, setCorrelation] = useState<CorrelationResponse | null>(null);
+  const [portfolioRisk, setPortfolioRisk] = useState<PortfolioRiskResponse | null>(null);
+  const [portfolioWeights, setPortfolioWeights] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -207,12 +214,24 @@ export default function ComparePage() {
       setLoading(true);
       setError(null);
       try {
-        const [comp, ov] = await Promise.all([
+        const [comp, ov, corr] = await Promise.all([
           fetchCompare(runId, fundCodes),
           fetchHoldingsOverlap(fundCodes, 10),
+          fetchCorrelation(fundCodes),
         ]);
         setCompare(comp);
         setOverlap(ov);
+        setCorrelation(corr);
+
+        // 组合风险：默认等权
+        const defaultWeights = fundCodes.map(() => 1 / fundCodes.length);
+        setPortfolioWeights(defaultWeights);
+        try {
+          const pr = await fetchPortfolioRisk(fundCodes, defaultWeights);
+          setPortfolioRisk(pr);
+        } catch {
+          setPortfolioRisk(null);
+        }
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -485,6 +504,215 @@ export default function ComparePage() {
               </table>
             </div>
           </div>
+
+          {/* 相关性热力图 */}
+          {correlation && !correlation.error && correlation.matrix.length > 0 && (
+            <div className="card">
+              <h2>基金相关性矩阵</h2>
+              <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+                基于日收益率的 Pearson 相关系数，共 {correlation.sample_count} 个交易日。|r| ≥ 0.8 替代性强，&lt; 0.3 分散效果好。
+              </p>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: "4px 8px", textAlign: "center", borderBottom: "1px solid var(--border)" }}></th>
+                      {correlation.fund_codes.map((fc) => (
+                        <th key={fc} style={{ padding: "4px 8px", textAlign: "center", borderBottom: "1px solid var(--border)", fontSize: 11 }}>
+                          {fc}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {correlation.matrix.map((row, i) => (
+                      <tr key={i}>
+                        <td style={{ padding: "4px 8px", fontWeight: 600, fontSize: 11, borderBottom: "1px solid var(--border)" }}>
+                          {correlation.fund_codes[i]}
+                        </td>
+                        {row.map((val, j) => {
+                          const isDiagonal = i === j;
+                          const absVal = Math.abs(val);
+                          // 颜色梯度：红(高相关) → 黄(中等) → 绿(低相关)
+                          let bg = "transparent";
+                          let color = "var(--text)";
+                          if (!isDiagonal) {
+                            if (absVal >= 0.8) { bg = "rgba(220, 53, 69, 0.7)"; color = "#fff"; }
+                            else if (absVal >= 0.6) { bg = "rgba(240, 173, 78, 0.6)"; color = "#333"; }
+                            else if (absVal >= 0.3) { bg = "rgba(255, 235, 59, 0.4)"; color = "#333"; }
+                            else { bg = "rgba(40, 167, 69, 0.4)"; color = "#333"; }
+                          }
+                          return (
+                            <td key={j} style={{
+                              padding: "6px 10px",
+                              textAlign: "center",
+                              borderBottom: "1px solid var(--border)",
+                              background: bg,
+                              color: color,
+                              fontWeight: isDiagonal ? 700 : 400,
+                              fontFamily: "monospace",
+                            }}>
+                              {isDiagonal ? "1.00" : val.toFixed(2)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {/* 图例 */}
+              <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 11, color: "var(--muted)" }}>
+                <span><span style={{ display: "inline-block", width: 12, height: 12, background: "rgba(220, 53, 69, 0.7)", marginRight: 4, verticalAlign: "middle" }}></span>≥ 0.8 替代性强</span>
+                <span><span style={{ display: "inline-block", width: 12, height: 12, background: "rgba(240, 173, 78, 0.6)", marginRight: 4, verticalAlign: "middle" }}></span>0.6-0.8 较高</span>
+                <span><span style={{ display: "inline-block", width: 12, height: 12, background: "rgba(255, 235, 59, 0.4)", marginRight: 4, verticalAlign: "middle" }}></span>0.3-0.6 中等</span>
+                <span><span style={{ display: "inline-block", width: 12, height: 12, background: "rgba(40, 167, 69, 0.4)", marginRight: 4, verticalAlign: "middle" }}></span>&lt; 0.3 分散好</span>
+              </div>
+              {/* 相关性较高的基金对 */}
+              {correlation.pairs.filter(p => p.level === "very_high" || p.level === "high").length > 0 && (
+                <div style={{ marginTop: 12, padding: 10, background: "rgba(220, 53, 69, 0.08)", borderRadius: 6 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>⚠ 高相关基金对（建议二选一）</p>
+                  {correlation.pairs
+                    .filter(p => p.level === "very_high" || p.level === "high")
+                    .sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation))
+                    .map((p, idx) => (
+                      <span key={idx} style={{ fontSize: 12, marginRight: 16 }}>
+                        {p.fund_a} ↔ {p.fund_b}：<strong>{p.correlation.toFixed(2)}</strong>
+                      </span>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 组合风险预估 */}
+          {fundCodes.length >= 2 && (
+            <div className="card">
+              <h2>组合风险预估</h2>
+              <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+                调整各基金权重，实时计算组合波动率和分散化效果。分散化比率越低 = 分散效果越好。
+              </p>
+              {/* 权重滑块 */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+                {fundCodes.map((fc, idx) => (
+                  <div key={fc} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                    <span style={{ width: 80, fontWeight: 600 }}>{fc}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={Math.round((portfolioWeights[idx] || 0) * 100)}
+                      onChange={async (e) => {
+                        const newWeights = [...portfolioWeights];
+                        newWeights[idx] = parseInt(e.target.value) / 100;
+                        setPortfolioWeights(newWeights);
+                        // 归一化后调用 API
+                        const total = newWeights.reduce((a, b) => a + b, 0);
+                        if (total > 0) {
+                          fetchPortfolioRisk(fundCodes, newWeights).then(setPortfolioRisk).catch(() => {});
+                        }
+                      }}
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ width: 50, textAlign: "right", fontFamily: "monospace" }}>
+                      {((portfolioWeights[idx] || 0) * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {/* 组合指标 */}
+              {portfolioRisk && !portfolioRisk.error && (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+                    <div style={{ padding: 12, background: "var(--bg-alt)", borderRadius: 6, textAlign: "center" }}>
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>组合年化波动率</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "monospace" }}>
+                        {(portfolioRisk.portfolio_volatility * 100).toFixed(2)}%
+                      </div>
+                    </div>
+                    <div style={{ padding: 12, background: "var(--bg-alt)", borderRadius: 6, textAlign: "center" }}>
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>加权平均波动率</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "monospace", color: "var(--muted)" }}>
+                        {(portfolioRisk.weighted_avg_volatility * 100).toFixed(2)}%
+                      </div>
+                    </div>
+                    <div style={{ padding: 12, background: "var(--bg-alt)", borderRadius: 6, textAlign: "center" }}>
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>风险降低</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "monospace", color: "var(--pos)" }}>
+                        -{(portfolioRisk.risk_reduction * 100).toFixed(2)}%
+                      </div>
+                    </div>
+                    <div style={{ padding: 12, background: "var(--bg-alt)", borderRadius: 6, textAlign: "center" }}>
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>分散化比率</div>
+                      <div style={{
+                        fontSize: 20,
+                        fontWeight: 700,
+                        fontFamily: "monospace",
+                        color: portfolioRisk.diversification_ratio <= 0.85 ? "var(--pos)" : portfolioRisk.diversification_ratio <= 0.95 ? "var(--warn)" : "var(--neg)"
+                      }}>
+                        {portfolioRisk.diversification_ratio.toFixed(2)}
+                      </div>
+                    </div>
+                    <div style={{ padding: 12, background: "var(--bg-alt)", borderRadius: 6, textAlign: "center" }}>
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>组合年化收益</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "monospace" }}>
+                        {(portfolioRisk.portfolio_return * 100).toFixed(2)}%
+                      </div>
+                    </div>
+                    <div style={{ padding: 12, background: "var(--bg-alt)", borderRadius: 6, textAlign: "center" }}>
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>组合夏普</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "monospace" }}>
+                        {portfolioRisk.portfolio_sharpe.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                  {/* 分散化效果说明 */}
+                  <div style={{
+                    marginTop: 12,
+                    padding: 10,
+                    borderRadius: 6,
+                    background: portfolioRisk.diversification_ratio <= 0.85
+                      ? "rgba(40, 167, 69, 0.1)"
+                      : portfolioRisk.diversification_ratio <= 0.95
+                      ? "rgba(255, 193, 7, 0.1)"
+                      : "rgba(220, 53, 69, 0.1)"
+                  }}>
+                    <p style={{ fontSize: 12, margin: 0 }}>
+                      {portfolioRisk.diversification_ratio <= 0.85
+                        ? "✓ 分散化效果良好：组合风险比加权平均降低了 15% 以上，基金之间互补性较强。"
+                        : portfolioRisk.diversification_ratio <= 0.95
+                        ? "△ 分散化效果一般：组合风险仅降低 5-15%，基金之间有一定相关性。"
+                        : "✗ 分散化效果较差：组合风险几乎没有降低，基金之间相关性太高，建议替换部分基金。"}
+                      （基于 {portfolioRisk.sample_count} 个交易日数据）
+                    </p>
+                  </div>
+                  {/* 各基金波动率对比条 */}
+                  <div style={{ marginTop: 12 }}>
+                    <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>各基金年化波动率对比</p>
+                    {fundCodes.map((fc, idx) => {
+                      const vol = portfolioRisk.fund_volatilities[idx] || 0;
+                      const maxVol = Math.max(...portfolioRisk.fund_volatilities, 0.01);
+                      const w = portfolioRisk.weights[idx] || 0;
+                      return (
+                        <div key={fc} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, fontSize: 12 }}>
+                          <span style={{ width: 80, fontWeight: 600 }}>{fc}</span>
+                          <span style={{ width: 40, color: "var(--muted)", fontFamily: "monospace" }}>{(w * 100).toFixed(0)}%</span>
+                          <div style={{ flex: 1, height: 16, background: "var(--bg-alt)", borderRadius: 3, overflow: "hidden" }}>
+                            <div style={{
+                              width: `${(vol / maxVol) * 100}%`,
+                              height: "100%",
+                              background: vol >= 0.4 ? "var(--neg)" : vol >= 0.25 ? "var(--warn)" : "var(--pos)",
+                            }} />
+                          </div>
+                          <span style={{ width: 60, textAlign: "right", fontFamily: "monospace" }}>{(vol * 100).toFixed(2)}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {/* 持仓重叠度 */}
           {overlap && !overlap.error && (

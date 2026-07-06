@@ -38,6 +38,7 @@ export const STYLE_NAMES: Record<string, string> = {
   value_dividend: "价值红利",
   growth_large_cap: "大盘成长",
   growth_small_cap: "小盘成长",
+  small_cap_growth: "小盘高成长",
   quality_dividend: "高质量红利",
   value_quality: "价值质量",
   growth_profit: "成长盈利",
@@ -73,6 +74,7 @@ export const STYLE_COLORS: Record<string, StyleColor> = {
   value_dividend: "composite",
   growth_large_cap: "composite",
   growth_small_cap: "composite",
+  small_cap_growth: "composite",
   quality_dividend: "composite",
   value_quality: "composite",
   growth_profit: "composite",
@@ -85,7 +87,7 @@ export const STYLE_GROUPS: { title: string; color: StyleColor; codes: string[] }
   { title: "红利", color: "dividend", codes: ["dividend_steady", "high_dividend_financial", "consumer_quality"] },
   { title: "规模", color: "size", codes: ["large_cap", "mid_cap", "small_cap"] },
   { title: "主题", color: "theme", codes: ["tech_focused", "finance_focused", "consumer_focused", "healthcare_focused", "cyclical_focused"] },
-  { title: "组合", color: "composite", codes: ["value_dividend", "growth_large_cap", "growth_small_cap", "quality_dividend", "value_quality", "growth_profit"] },
+  { title: "组合", color: "composite", codes: ["value_dividend", "growth_large_cap", "growth_small_cap", "small_cap_growth", "quality_dividend", "value_quality", "growth_profit"] },
 ];
 
 // 所有风格标签代码集合

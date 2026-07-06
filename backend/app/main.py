@@ -554,6 +554,36 @@ def create_app(
             raise HTTPException(status_code=400, detail="最多支持 6 只基金")
         return reader.get_holdings_overlap(fund_codes, top_n)
 
+    @app.get("/v1/correlation")
+    def get_correlation(
+        funds: str,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """基金相关性矩阵：基于日收益率计算两两 Pearson 相关系数。"""
+        fund_codes = [c.strip() for c in funds.split(",") if c.strip()]
+        if len(fund_codes) < 2:
+            raise HTTPException(status_code=400, detail="至少需要 2 只基金")
+        if len(fund_codes) > 6:
+            raise HTTPException(status_code=400, detail="最多支持 6 只基金")
+        return reader.get_correlation_matrix(fund_codes)
+
+    @app.get("/v1/portfolio-risk")
+    def get_portfolio_risk(
+        funds: str,
+        weights: str,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """组合风险预估：给定基金和权重，计算组合波动率、分散化比率。"""
+        fund_codes = [c.strip() for c in funds.split(",") if c.strip()]
+        weight_list = [float(w.strip()) for w in weights.split(",") if w.strip()]
+        if len(fund_codes) < 2:
+            raise HTTPException(status_code=400, detail="至少需要 2 只基金")
+        if len(fund_codes) > 6:
+            raise HTTPException(status_code=400, detail="最多支持 6 只基金")
+        if len(fund_codes) != len(weight_list):
+            raise HTTPException(status_code=400, detail="基金数和权重数不一致")
+        return reader.get_portfolio_risk(fund_codes, weight_list)
+
     @app.get("/v1/runs/{run_id}/funds/{fund_code}/benchmark-components")
     def get_run_fund_benchmark_components(
         run_id: str,

@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import { fetchRunDiff, fetchRuns, Run, RunDiff } from "../api";
 
+const CATEGORY_LABELS: Record<string, string> = {
+  data_quality: "数据质量",
+  return_risk: "收益风险",
+  holding: "持仓结构",
+  holding_style: "持仓风格",
+  relative_benchmark: "相对基准",
+  manager: "基金经理",
+  fee: "费率",
+  fund_size: "规模",
+  review: "复核",
+  description: "描述性",
+};
+
 type Tab = "by_label" | "by_fund";
 
 export default function RunDiffPage() {
@@ -125,9 +138,8 @@ export default function RunDiffPage() {
                     <tr key={r.label_code}>
                       <td>
                         <strong>{r.label_name}</strong>
-                        <div className="muted"><code>{r.label_code}</code></div>
                       </td>
-                      <td>{r.category}</td>
+                      <td>{CATEGORY_LABELS[r.category] ?? r.category}</td>
                       <td>{r.added_funds.length}</td>
                       <td>{r.removed_funds.length}</td>
                       <td>{r.delta}</td>

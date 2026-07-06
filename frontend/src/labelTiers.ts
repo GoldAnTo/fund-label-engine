@@ -22,6 +22,7 @@ const STYLE_OFFICIAL_CODES = new Set([
   "value_dividend",
   "growth_large_cap",
   "growth_small_cap",
+  "small_cap_growth",
   "quality_dividend",
   "value_quality",
   "growth_profit",
