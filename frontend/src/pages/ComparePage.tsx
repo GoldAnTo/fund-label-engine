@@ -319,9 +319,41 @@ export default function ComparePage() {
 
   return (
     <div>
-      <div className="page-head">
-        <h1>竞品横评</h1>
-        <p>选 2-6 只基金并排对比风格、指标、持仓重叠度。</p>
+      <div className="page-head-v2">
+        <div>
+          <span className="eyebrow">RESEARCH · 竞品横评</span>
+          <h1>竞品横评</h1>
+          <p>选 2-6 只基金并排对比风格、指标、持仓重叠度。</p>
+        </div>
+        <div className="flow-steps" style={{ alignSelf: "flex-start" }}>
+          <span className="flow-step is-done">
+            <span className="step-num">1</span>总览
+          </span>
+          <span className="flow-arrow">→</span>
+          <span className="flow-step is-done">
+            <span className="step-num">2</span>筛选
+          </span>
+          <span className="flow-arrow">→</span>
+          <span className="flow-step is-current">
+            <span className="step-num">3</span>横评
+          </span>
+        </div>
+      </div>
+      <div className="context-bar">
+        <div className="chip chip-mono">
+          <span className="label">批次</span>
+          <span className="value">{runId ? runId.slice(0, 12) + "…" : "—"}</span>
+        </div>
+        <div className="chip">
+          <span className="label">已选</span>
+          <span className="value">{fundCodes.length} 只</span>
+        </div>
+        <div className="spacer" />
+        {fundCodes.length > 0 && (
+          <span className="meta" style={{ fontSize: 12, color: "var(--text-3)" }}>
+            最多 6 只
+          </span>
+        )}
       </div>
 
       {/* 选基区 */}

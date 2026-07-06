@@ -55,15 +55,31 @@ export default function RunDiffPage() {
 
   return (
     <div>
+      <div className="page-head-v2">
+        <div>
+          <span className="eyebrow">OPS · 批次对比</span>
+          <h1>批次对比</h1>
+          <p>
+            选两个批次，输出标签集合差异。仅以两批共有的基金为统计对象；只在
+            某一边出现的基金会进入单边基金名单，避免被误判为"标签变动"。
+          </p>
+        </div>
+        <div className="flow-steps" style={{ alignSelf: "flex-start" }}>
+          <span className="flow-step is-done">
+            <span className="step-num">✓</span>两批次
+          </span>
+          <span className="flow-arrow">→</span>
+          <span className="flow-step is-current">差异分析</span>
+        </div>
+      </div>
       <div className="card">
-        <h2>批次对比</h2>
-        <p className="muted">
-          选两个批次，输出标签集合差异。仅以两批共有的基金为统计对象；只在
-          某一边出现的基金会进入单边基金名单，避免被误判为“标签变动”。
-        </p>
+        <div className="section-head">
+          <h2>选择对比基准</h2>
+          <div className="meta">base 是旧批次，target 是新批次</div>
+        </div>
         <div className="toolbar">
           <label>
-            base&nbsp;
+            base（旧）&nbsp;
             <select value={base} onChange={(e) => setBase(e.target.value)}>
               {runs.map((r) => (
                 <option key={r.run_id} value={r.run_id}>
@@ -73,7 +89,7 @@ export default function RunDiffPage() {
             </select>
           </label>
           <label>
-            target&nbsp;
+            target（新）&nbsp;
             <select value={target} onChange={(e) => setTarget(e.target.value)}>
               {runs.map((r) => (
                 <option key={r.run_id} value={r.run_id}>
@@ -83,10 +99,10 @@ export default function RunDiffPage() {
             </select>
           </label>
           <button onClick={runDiff} disabled={!base || !target || loading}>
-            {loading ? "对比中…" : "对比"}
+            {loading ? "对比中…" : "开始对比"}
           </button>
         </div>
-        {error && <div className="error">{error}</div>}
+        {error && <div className="alert alert-warn">{error}</div>}
       </div>
 
       {diff && (

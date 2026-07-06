@@ -10,8 +10,9 @@ import {
   type RunSummary,
   type PortfolioMatrixResponse,
   type TopFundsResponse,
+  type RelativeEligibilityRow as EligibilityRow,
 } from "../api";
-import { STYLE_GROUPS, ALL_STYLE_CODES, styleTagClass, styleName } from "../styleConfig";
+import { ALL_STYLE_CODES, styleTagClass, styleName } from "../styleConfig";
 
 const STATUS_LABELS: Record<string, string> = {
   relative_label_ready: "可展示",
@@ -23,14 +24,53 @@ const STATUS_LABELS: Record<string, string> = {
   nav_window_insufficient: "收益窗口不足",
 };
 
+type Verdict = "go" | "watch" | "block" | "info";
+
 function statusLabel(value: string) {
   return STATUS_LABELS[value] ?? value;
 }
 
-function statusClass(value: string) {
-  return value === "relative_label_ready" || value === "relative_label_ready_approx"
-    ? "badge-observe"
-    : "badge-manual_review";
+function statusVerdict(value: string): Verdict {
+  if (value === "relative_label_ready" || value === "relative_label_ready_approx") return "go";
+  if (value === "nav_window_insufficient" || value === "benchmark_source_missing") return "watch";
+  return "block";
+}
+
+function StatusPill({ status }: { status: string }) {
+  const verdict = statusVerdict(status);
+  return (
+    <span className={`status-pill is-${verdict}`}>
+      <span className="pulse" />
+      {statusLabel(status)}
+    </span>
+  );
+}
+
+type StatusFilter = "all" | "ready" | "blocked" | "missing-source" | "mapping-required";
+
+const FILTER_OPTIONS: { key: StatusFilter; label: string }[] = [
+  { key: "all", label: "全部" },
+  { key: "ready", label: "可展示" },
+  { key: "blocked", label: "不可展示" },
+  { key: "missing-source", label: "缺基准源" },
+  { key: "mapping-required", label: "需确认映射" },
+];
+
+function statusFilterMatches(row: EligibilityRow, filter: StatusFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "ready")
+    return (
+      row.relative_label_status === "relative_label_ready" ||
+      row.relative_label_status === "relative_label_ready_approx"
+    );
+  if (filter === "blocked")
+    return !(
+      row.relative_label_status === "relative_label_ready" ||
+      row.relative_label_status === "relative_label_ready_approx"
+    );
+  if (filter === "missing-source") return row.relative_label_status === "benchmark_source_missing";
+  if (filter === "mapping-required") return row.relative_label_status === "benchmark_mapping_required";
+  return true;
 }
 
 export default function ReadyPoolPage() {
@@ -41,6 +81,9 @@ export default function ReadyPoolPage() {
   const [matrix, setMatrix] = useState<PortfolioMatrixResponse | null>(null);
   const [topFundsByStyle, setTopFundsByStyle] = useState<Record<string, TopFundsResponse>>({});
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [query, setQuery] = useState("");
+  const [groupBy, setGroupBy] = useState<"none" | "style">("none");
 
   useEffect(() => {
     fetchRuns()
@@ -66,7 +109,6 @@ export default function ReadyPoolPage() {
       })
       .catch((e) => setError(e.message));
 
-    // 拉取 4 个代表性风格标签的 TOP 5 基金（按年化收益）
     const topStyles = ["quality_growth", "large_cap", "high_valuation", "low_valuation"];
     const requests = topStyles.map((s) =>
       fetchTopFunds(runId, s, "annualized_return_1y", 5)
@@ -93,42 +135,121 @@ export default function ReadyPoolPage() {
     if (!matrix) return new Map<string, string[]>();
     const m = new Map<string, string[]>();
     for (const row of matrix.rows) {
-      m.set(row.fund_code, (row.style_tags || []).filter((t) => ALL_STYLE_CODES.has(t) && t !== "style_pending_rule_definition"));
+      m.set(
+        row.fund_code,
+        (row.style_tags || []).filter(
+          (t) => ALL_STYLE_CODES.has(t) && t !== "style_pending_rule_definition"
+        )
+      );
     }
     return m;
   }, [matrix]);
 
   const totalFunds = eligibility?.total_funds ?? 142;
+  const readyCount = eligibility?.ready_count ?? 0;
+  const blockedCount = eligibility?.blocked_count ?? 0;
   const fundsWithStyle = Array.from(fundStyleMap.values()).filter((tags) => tags.length > 0).length;
-  const fundsNoStyle = totalFunds - fundsWithStyle;
+  const coveragePct = totalFunds > 0 ? Math.round((readyCount / totalFunds) * 100) : 0;
 
-  // 按风格分组统计
-  const groupStats = useMemo(() => {
-    return STYLE_GROUPS.map((group) => {
-      const count = new Set<string>();
-      for (const tags of fundStyleMap.values()) {
-        if (tags.some((t) => group.codes.includes(t))) {
-          for (const fund of fundStyleMap.keys()) {
-            const t = fundStyleMap.get(fund) || [];
-            if (t.some((c) => group.codes.includes(c))) count.add(fund);
-          }
-        }
-      }
-      return { ...group, fundCount: count.size };
+  // 主列表过滤
+  const filteredRows = useMemo(() => {
+    if (!eligibility) return [];
+    const q = query.trim().toLowerCase();
+    return eligibility.results.filter((row) => {
+      if (!statusFilterMatches(row, statusFilter)) return false;
+      if (!q) return true;
+      return (
+        row.fund_code.toLowerCase().includes(q) ||
+        row.fund_name.toLowerCase().includes(q)
+      );
     });
-  }, [fundStyleMap]);
+  }, [eligibility, statusFilter, query]);
+
+  // 按风格分组（当 groupBy=style 时）
+  const rowsByStyle = useMemo(() => {
+    if (groupBy !== "style") return null;
+    const grouped: Record<string, EligibilityRow[]> = {};
+    for (const row of filteredRows) {
+      const tags = fundStyleMap.get(row.fund_code) || [];
+      if (tags.length === 0) {
+        (grouped["未分类"] ??= []).push(row);
+        continue;
+      }
+      for (const t of tags) {
+        (grouped[t] ??= []).push(row);
+      }
+    }
+    return Object.entries(grouped).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [groupBy, filteredRows, fundStyleMap]);
 
   return (
     <div>
-      <div className="page-head">
-        <h1>风格总览</h1>
-        <p>{totalFunds} 只权益基金的风格标签分布和展示池状态</p>
+      {/* 页面标题 */}
+      <div className="page-head-v2">
+        <div>
+          <span className="eyebrow">RESEARCH · 风格研究</span>
+          <h1>展示池与风格总览</h1>
+          <p>
+            一屏看清这批 {totalFunds} 只权益基金的风格画像、可展示状态、Top 业绩归属。
+            先按"是否可展示"过滤，再按风格下钻，最后进入单基金诊断报告。
+          </p>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+          <div className="flow-steps">
+            <span className="flow-step is-current">
+              <span className="step-num">1</span>总览
+            </span>
+            <span className="flow-arrow">→</span>
+            <span className="flow-step">
+              <span className="step-num">2</span>单基金诊断
+            </span>
+            <span className="flow-arrow">→</span>
+            <span className="flow-step">
+              <span className="step-num">3</span>加入组合
+            </span>
+          </div>
+          <Link to="/search" className="link-btn" style={{ fontSize: 12 }}>
+            跳到风格筛选 →
+          </Link>
+        </div>
       </div>
 
-      <div className="toolbar">
-        <label>
-          批次
-          <select value={runId} onChange={(e) => setRunId(e.target.value)}>
+      {/* 上下文栏：当前批次 + 规则版本 + 数据快照 */}
+      <div className="context-bar">
+        <div className="chip">
+          <span className="label">当前批次</span>
+          <span className="value" style={{ fontFamily: "ui-monospace, monospace" }}>
+            {runId ? runId.slice(0, 12) + "…" : "—"}
+          </span>
+        </div>
+        <div className="chip chip-status">
+          <span className="dot" />
+          <span className="label">数据状态</span>
+          <span className="value">实时</span>
+        </div>
+        <div className="chip">
+          <span className="label">规则版本</span>
+          <span className="value">v1</span>
+        </div>
+        <div className="chip">
+          <span className="label">基金池</span>
+          <span className="value">{totalFunds} 只</span>
+        </div>
+        <div className="spacer" />
+        <label className="chip" style={{ background: "var(--surface)", cursor: "pointer" }}>
+          <span className="label">切换批次</span>
+          <select
+            value={runId}
+            onChange={(e) => setRunId(e.target.value)}
+            style={{
+              border: "none",
+              background: "transparent",
+              padding: 0,
+              fontWeight: 700,
+              fontSize: 12,
+              color: "var(--text)",
+            }}
+          >
             {runs.map((r) => (
               <option key={r.run_id} value={r.run_id}>
                 {r.run_id.slice(0, 8)}… ({r.run_at})
@@ -140,23 +261,125 @@ export default function ReadyPoolPage() {
 
       {error && <div className="alert alert-warn">{error}</div>}
 
-      {/* 核心指标 */}
-      {eligibility && (
-        <div className="metric-grid">
-          <div className="metric-tile"><span>正式清单</span><strong>{eligibility.total_funds}</strong></div>
-          <div className="metric-tile"><span>可展示</span><strong>{eligibility.ready_count}</strong></div>
-          <div className="metric-tile"><span>暂不可展示</span><strong>{eligibility.blocked_count}</strong></div>
-          <div className="metric-tile"><span>有风格标签</span><strong>{fundsWithStyle}</strong></div>
-          <div className="metric-tile"><span>风格未定</span><strong>{fundsNoStyle}</strong></div>
+      {/* 顶部决策摘要：覆盖率 + 4 维核心指标 */}
+      <div className="decision-card">
+        <span className="verdict is-go">展示池健康度 {coveragePct}%</span>
+        <div className="takeaway">
+          本批次 <strong>{totalFunds}</strong> 只权益基金中，<strong>{readyCount}</strong> 只可立即进入展示池
+          （{coveragePct}%），<strong>{blockedCount}</strong> 只因基准或数据问题暂未达标。
+          {blockedCount > 0 ? (
+            <>
+              {" "}
+              主要原因是 <strong>缺基准源 / 需确认映射</strong>，已标注在下方"暂不可展示原因"表中。
+            </>
+          ) : (
+            <> 全量已就绪。</>
+          )}
         </div>
-      )}
+        <div className="actions">
+          <button
+            className="secondary"
+            onClick={() => {
+              setStatusFilter("blocked");
+              document
+                .getElementById("fund-list-section")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          >
+            查看 {blockedCount} 只待修复
+          </button>
+          <Link to="/search" className="primary">
+            风格筛选
+          </Link>
+        </div>
+      </div>
 
-      {/* 风格分布概览 */}
-      <div className="card">
-        <h2>风格分布</h2>
-        {styleDistribution.length > 0 ? (
+      {/* 核心指标卡：4 维 */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: 10,
+          marginBottom: 18,
+        }}
+      >
+        <div className="metric-card-v2 is-pos">
+          <div className="label">可展示</div>
+          <div className="value">{readyCount}</div>
+          <div className="sub">{coveragePct}% 覆盖率</div>
+        </div>
+        <div className="metric-card-v2 is-warn">
+          <div className="label">暂不可展示</div>
+          <div className="value">{blockedCount}</div>
+          <div className="sub">需修复后入池</div>
+        </div>
+        <div className="metric-card-v2 is-accent">
+          <div className="label">有风格标签</div>
+          <div className="value">{fundsWithStyle}</div>
+          <div className="sub">
+            {totalFunds > 0 ? Math.round((fundsWithStyle / totalFunds) * 100) : 0}% 风格已识别
+          </div>
+        </div>
+        <div className="metric-card-v2">
+          <div className="label">风格未定</div>
+          <div className="value">{totalFunds - fundsWithStyle}</div>
+          <div className="sub">等待因子或持仓补全</div>
+        </div>
+      </div>
+
+      {/* 工具栏：状态过滤 + 搜索 + 分组 */}
+      <div className="toolbar-v2">
+        <div className="filter-group" role="tablist">
+          {FILTER_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              role="tab"
+              aria-selected={statusFilter === opt.key}
+              className={statusFilter === opt.key ? "active" : ""}
+              onClick={() => setStatusFilter(opt.key)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className="search">
+          <input
+            type="search"
+            placeholder="搜索基金代码或名称"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className="filter-group" role="tablist">
+          <button
+            className={groupBy === "none" ? "active" : ""}
+            onClick={() => setGroupBy("none")}
+          >
+            列表
+          </button>
+          <button
+            className={groupBy === "style" ? "active" : ""}
+            onClick={() => setGroupBy("style")}
+          >
+            按风格分组
+          </button>
+        </div>
+        <div className="spacer" />
+        <div className="meta">共 {filteredRows.length} 只 / {totalFunds}</div>
+      </div>
+
+      {/* 风格分布：仅在未分组时显示 */}
+      {groupBy === "none" && styleDistribution.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="section-head">
+            <h2>风格画像分布</h2>
+            <div className="meta">按 {totalFunds} 只正式清单统计</div>
+            <div className="actions">
+              <Link to="/search">查看风格筛选器 →</Link>
+            </div>
+          </div>
           <div className="style-overview">
-            {styleDistribution.map((d) => (
+            {styleDistribution.slice(0, 9).map((d) => (
               <Link key={d.label_code} to={`/search?label_code=${d.label_code}`} className="style-card">
                 <div className="style-card-head">
                   <strong>{d.label_name}</strong>
@@ -169,59 +392,48 @@ export default function ReadyPoolPage() {
               </Link>
             ))}
           </div>
-        ) : (
-          <p className="muted">暂无风格标签数据。请先跑批生成风格标签。</p>
-        )}
-      </div>
-
-      {/* 风格维度统计 */}
-      {groupStats.length > 0 && fundsWithStyle > 0 && (
-        <div className="card">
-          <h2>风格维度统计</h2>
-          <p className="muted">每个维度有多少只基金命中</p>
-          <table>
-            <thead><tr><th>维度</th><th>基金数</th><th>标签</th></tr></thead>
-            <tbody>
-              {groupStats.map((g) => (
-                <tr key={g.title}>
-                  <td><strong>{g.title}</strong></td>
-                  <td className="num">{g.fundCount}</td>
-                  <td>
-                    <div className="style-labels-grid">
-                      {g.codes.map((code) => (
-                        <span key={code} className={styleTagClass(code)}>{styleName(code)}</span>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
 
-      {/* 同类 TOP 5：按风格分组查看年化收益排名靠前的基金 */}
+      {/* 同类 TOP 5：让研究员快速发现组内强者 */}
       {Object.keys(topFundsByStyle).length > 0 && (
-        <div className="card">
-          <h2>同类 TOP 5</h2>
-          <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-            4 个代表性风格标签里年化收益排名前 5 的基金（点击进入诊断报告查看分位详情）。
-          </p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="section-head">
+            <h2>同类 TOP 5（年化收益）</h2>
+            <div className="meta">4 个代表性风格标签 · 点击进入诊断报告</div>
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+              gap: 12,
+            }}
+          >
             {Object.entries(topFundsByStyle).map(([styleCode, resp]) => (
-              <div key={styleCode} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: 10, background: "var(--surface-2)" }}>
-                <div style={{ marginBottom: 8 }}>
+              <div
+                key={styleCode}
+                style={{
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--r)",
+                  padding: 12,
+                  background: "var(--surface-2)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
                   <span className={`style-tag ${styleTagClass(styleCode)}`}>
                     {styleName(styleCode)}
                   </span>
-                  <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>
+                  <span className="muted" style={{ fontSize: 11 }}>
                     同类 {resp.results[0]?.peer_count ?? 0} 只
                   </span>
                 </div>
                 <ol style={{ margin: 0, paddingLeft: 20, fontSize: 12 }}>
                   {resp.results.map((f) => (
                     <li key={f.fund_code} style={{ margin: "3px 0" }}>
-                      <Link to={`/runs/${runId}/funds/${f.fund_code}`} style={{ fontFamily: "ui-monospace, monospace" }}>
+                      <Link
+                        to={`/runs/${runId}/funds/${f.fund_code}`}
+                        style={{ fontFamily: "ui-monospace, monospace" }}
+                      >
                         {f.fund_code}
                       </Link>
                       <span className="muted" style={{ marginLeft: 6 }}>
@@ -237,69 +449,219 @@ export default function ReadyPoolPage() {
         </div>
       )}
 
-      {/* 展示池门禁 */}
-      {eligibility && eligibility.blocked_count > 0 && (
-        <div className="card">
-          <h2>暂不可展示原因</h2>
-          <table>
-            <thead><tr><th>原因</th><th className="num">基金数</th></tr></thead>
-            <tbody>
-              {Object.entries(eligibility.status_counts)
-                .filter(([key]) => key !== "relative_label_ready" && key !== "relative_label_ready_approx")
-                .map(([key, count]) => (
-                  <tr key={key}>
-                    <td><span className={`badge ${statusClass(key)}`}>{statusLabel(key)}</span></td>
-                    <td className="num">{count}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
+      {/* 暂不可展示原因：让运维/风控能定位修复点 */}
+      {eligibility && blockedCount > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="section-head">
+            <h2>暂不可展示原因</h2>
+            <div className="meta">运维重点修复项 · 影响 {blockedCount} 只基金</div>
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 8,
+            }}
+          >
+            {Object.entries(eligibility.status_counts)
+              .filter(
+                ([key]) =>
+                  key !== "relative_label_ready" && key !== "relative_label_ready_approx"
+              )
+              .map(([key, count]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => {
+                    setStatusFilter("blocked");
+                    document
+                      .getElementById("fund-list-section")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "10px 12px",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--r-s)",
+                    background: "var(--surface-2)",
+                    cursor: "pointer",
+                    font: "inherit",
+                    textAlign: "left",
+                  }}
+                >
+                  <StatusPill status={key} />
+                  <strong style={{ fontVariantNumeric: "tabular-nums" }}>{count}</strong>
+                </button>
+              ))}
+          </div>
         </div>
       )}
 
-      {/* 基金列表 */}
-      {eligibility && (
-        <div className="card">
-          <h2>基金列表</h2>
-          <table className="fund-table">
+      {/* 基金列表 / 分组列表 */}
+      <div id="fund-list-section" className="card">
+        <div className="section-head">
+          <h2>
+            {groupBy === "style" ? "按风格分组的展示池" : "展示池清单"}
+          </h2>
+          <div className="meta">共 {filteredRows.length} 只</div>
+        </div>
+
+        {filteredRows.length === 0 ? (
+          <div className="empty-state">
+            <div className="icon">∅</div>
+            <div className="title">没有匹配的基金</div>
+            <div className="hint">
+              {query
+                ? `没有代码或名称包含「${query}」的基金`
+                : '当前过滤器下没有基金，试试切换「全部」或其他状态。'}
+            </div>
+          </div>
+        ) : rowsByStyle ? (
+          <div style={{ display: "grid", gap: 14 }}>
+            {rowsByStyle.map(([styleCode, rows]) => (
+              <div key={styleCode} style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 8,
+                  }}
+                >
+                  {styleCode === "未分类" ? (
+                    <span className="status-pill">未分类</span>
+                  ) : (
+                    <span className={`style-tag ${styleTagClass(styleCode)}`}>
+                      {styleName(styleCode)}
+                    </span>
+                  )}
+                  <span className="muted" style={{ fontSize: 11 }}>
+                    {rows.length} 只
+                  </span>
+                </div>
+                <table className="table-v2">
+                  <thead>
+                    <tr>
+                      <th>基金</th>
+                      <th>其他风格</th>
+                      <th>展示状态</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => {
+                      const allTags = fundStyleMap.get(row.fund_code) || [];
+                      const otherTags = allTags.filter((t) => t !== styleCode);
+                      return (
+                        <tr
+                          key={`${styleCode}-${row.fund_code}`}
+                          onClick={() =>
+                            (window.location.href = `/runs/${eligibility?.run_id}/funds/${row.fund_code}`)
+                          }
+                        >
+                          <td>
+                            <div className="fund-row-code">
+                              <span className="code">{row.fund_code}</span>
+                              <span className="name">{row.fund_name}</span>
+                            </div>
+                          </td>
+                          <td>
+                            {otherTags.length > 0 ? (
+                              <div className="style-labels-grid">
+                                {otherTags.slice(0, 3).map((code) => (
+                                  <span key={code} className={styleTagClass(code)}>
+                                    {styleName(code)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="muted">—</span>
+                            )}
+                          </td>
+                          <td>
+                            <StatusPill status={row.relative_label_status} />
+                          </td>
+                          <td className="num">
+                            <Link
+                              to={`/runs/${eligibility?.run_id}/funds/${row.fund_code}`}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              查看
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <table className="table-v2">
             <thead>
-              <tr><th>基金</th><th>风格标签</th><th>展示状态</th><th></th></tr>
+              <tr>
+                <th>基金</th>
+                <th>风格标签</th>
+                <th>展示状态</th>
+                <th></th>
+              </tr>
             </thead>
             <tbody>
-              {eligibility.results.map((row) => {
+              {filteredRows.map((row) => {
                 const tags = fundStyleMap.get(row.fund_code) || [];
                 return (
-                  <tr key={row.fund_code}>
+                  <tr
+                    key={row.fund_code}
+                    onClick={() =>
+                      (window.location.href = `/runs/${eligibility?.run_id}/funds/${row.fund_code}`)
+                    }
+                  >
                     <td>
-                      <div className="fund-code-cell">{row.fund_code}</div>
-                      <div className="fund-name-cell">{row.fund_name}</div>
+                      <div className="fund-row-code">
+                        <span className="code">{row.fund_code}</span>
+                        <span className="name">{row.fund_name}</span>
+                      </div>
                     </td>
                     <td>
                       {tags.length > 0 ? (
                         <div className="style-labels-grid">
-                          {tags.map((code) => (
-                            <span key={code} className={styleTagClass(code)}>{styleName(code)}</span>
+                          {tags.slice(0, 4).map((code) => (
+                            <span key={code} className={styleTagClass(code)}>
+                              {styleName(code)}
+                            </span>
                           ))}
+                          {tags.length > 4 && (
+                            <span className="muted" style={{ fontSize: 11 }}>
+                              +{tags.length - 4}
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <span className="muted">—</span>
                       )}
                     </td>
                     <td>
-                      <span className={`badge ${statusClass(row.relative_label_status)}`}>
-                        {statusLabel(row.relative_label_status)}
-                      </span>
+                      <StatusPill status={row.relative_label_status} />
                     </td>
-                    <td>
-                      <Link to={`/runs/${eligibility.run_id}/funds/${row.fund_code}`}>查看</Link>
+                    <td className="num">
+                      <Link
+                        to={`/runs/${eligibility?.run_id}/funds/${row.fund_code}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        查看
+                      </Link>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

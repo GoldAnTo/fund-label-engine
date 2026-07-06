@@ -70,9 +70,36 @@ export default function ReviewQueuePage() {
   }, [runId]);
 
   return (
-    <div className="card">
-      <h2>待处理队列</h2>
-      <p className="muted">汇总基准缺口、人工复核、观察信号和待校准信号，处理入口仍在单基金报告或标签检索。</p>
+    <div>
+      <div className="page-head-v2">
+        <div>
+          <span className="eyebrow">PORTFOLIO · 复核队列</span>
+          <h1>复核队列</h1>
+          <p>汇总基准缺口、人工复核、观察信号和待校准信号，处理入口仍在单基金报告或标签检索。</p>
+        </div>
+        <div className="flow-steps" style={{ alignSelf: "flex-start" }}>
+          <span className="flow-step is-current">
+            <span className="step-num">!</span>待复核
+          </span>
+        </div>
+      </div>
+      <div className="context-bar">
+        <div className="chip chip-mono">
+          <span className="label">批次</span>
+          <span className="value">{runId ? runId.slice(0, 12) + "…" : "—"}</span>
+        </div>
+        <div className="spacer" />
+        {tasks && (
+          <span className="meta" style={{ fontSize: 12, color: "var(--text-3)" }}>
+            共 <strong>{tasks.results.length}</strong> 条
+          </span>
+        )}
+      </div>
+      <div className="card">
+        <div className="section-head">
+          <h2>待处理清单</h2>
+          <div className="meta">处理入口：单基金报告 / 风格筛选</div>
+        </div>
       <div className="toolbar">
         <label>
           批次&nbsp;
@@ -155,6 +182,7 @@ export default function ReviewQueuePage() {
       {tasks && tasks.results.length === 0 && (
         <p className="muted">当前批次没有待处理任务。</p>
       )}
+      </div>
     </div>
   );
 }

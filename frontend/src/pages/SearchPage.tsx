@@ -61,9 +61,47 @@ export default function SearchPage() {
 
   return (
     <div>
-      <div className="page-head">
-        <h1>风格筛选</h1>
-        <p>按风格标签筛选基金，横向对比同类基金</p>
+      <div className="page-head-v2">
+        <div>
+          <span className="eyebrow">RESEARCH · 风格筛选</span>
+          <h1>风格筛选</h1>
+          <p>按风格标签筛选基金，横向对比同类基金</p>
+        </div>
+        <div className="flow-steps" style={{ alignSelf: "flex-start" }}>
+          <span className="flow-step is-done">
+            <span className="step-num">1</span>总览
+          </span>
+          <span className="flow-arrow">→</span>
+          <span className="flow-step is-current">
+            <span className="step-num">2</span>筛选
+          </span>
+          <span className="flow-arrow">→</span>
+          <span className="flow-step">诊断</span>
+        </div>
+      </div>
+      <div className="context-bar">
+        <div className="chip chip-mono">
+          <span className="label">批次</span>
+          <span className="value">{runId ? runId.slice(0, 12) + "…" : "—"}</span>
+        </div>
+        {labelCode && (
+          <div className="chip">
+            <span className="label">当前筛选</span>
+            <span className="value">{labelCode}</span>
+          </div>
+        )}
+        {fundCode && (
+          <div className="chip">
+            <span className="label">基金</span>
+            <span className="value">{fundCode}</span>
+          </div>
+        )}
+        <div className="spacer" />
+        {data && (
+          <span className="meta" style={{ fontSize: 12, color: "var(--text-3)" }}>
+            匹配 <strong>{data.results.length}</strong> 只
+          </span>
+        )}
       </div>
 
       {/* 风格快捷筛选 */}

@@ -484,6 +484,30 @@ export default function PortfolioWorkbenchPage() {
 
   return (
     <div className="executive-room">
+      <div className="page-head-v2">
+        <div>
+          <span className="eyebrow">PORTFOLIO · 组合工作台</span>
+          <h1>组合工作台</h1>
+          <p>
+            从风格标签到组合草案的完整生产线：研究员在此完成"基金地图 → 角色复核 → 草案生成 → 优化输出"。
+          </p>
+        </div>
+        <div className="flow-steps" style={{ alignSelf: "flex-start" }}>
+          <span className="flow-step is-done">
+            <span className="step-num">1</span>总览
+          </span>
+          <span className="flow-arrow">→</span>
+          <span className="flow-step is-done">
+            <span className="step-num">2</span>诊断
+          </span>
+          <span className="flow-arrow">→</span>
+          <span className="flow-step is-current">
+            <span className="step-num">3</span>组合
+          </span>
+          <span className="flow-arrow">→</span>
+          <span className="flow-step">导出</span>
+        </div>
+      </div>
       <section className="executive-hero">
         <div className="hero-story">
           <p className="eyebrow">Executive overview</p>

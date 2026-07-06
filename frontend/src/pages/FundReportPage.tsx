@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import {
   downloadFile,
   fetchBenchmarkComponents,
@@ -315,6 +315,21 @@ export default function FundReportPage() {
 
   const contributions = data?.equity_style_contributions ?? [];
 
+  // 用于报告头：核心指标摘要
+  const annualReturnFeature = data?.features.find((f) => f.feature_code === "annualized_return_1y");
+  const annualReturnValue = annualReturnFeature ? Number(annualReturnFeature.value) : null;
+  const annualBenchmarkFeature = data?.features.find(
+    (f) => f.feature_code === "annualized_benchmark_return_1y"
+  );
+  const annualBenchmarkValue = annualBenchmarkFeature ? Number(annualBenchmarkFeature.value) : null;
+  const taggedStylesCount = data
+    ? new Set(
+        data.labels
+          .filter((l) => l.category === "style" && l.status === "active")
+          .map((l) => l.label_code)
+      ).size
+    : 0;
+
   const submit = async () => {
     if (!activeLabel) return;
     setSubmitting(true);
@@ -333,48 +348,173 @@ export default function FundReportPage() {
 
   return (
     <div>
-      {/* 报告头 */}
-      <div className="report-head">
-        <h1>
-          {fundCode}
-          {data && <ReviewActionBadge value={data.review_action} />}
-        </h1>
-        <div className="fund-meta">
-          <span>批次 {runId.slice(0, 8)}</span>
-          {eligibilityRow && (
-            <span className={relativeReady ? "" : "muted"}>
-              {relativeReady ? "可展示" : "暂不可展示"}
+      {/* 报告头 v2：决策摘要 + 关键指标 */}
+      <div className="report-head-v2">
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <span className="flow-steps" style={{ fontSize: 10 }}>
+              <span className="flow-step is-done">
+                <span className="step-num">1</span>总览
+              </span>
+              <span className="flow-arrow">→</span>
+              <span className="flow-step is-current">
+                <span className="step-num">2</span>诊断
+              </span>
+              <span className="flow-arrow">→</span>
+              <span className="flow-step">
+                <span className="step-num">3</span>加入组合
+              </span>
             </span>
-          )}
-          {factorCoverageValue !== null && (
-            <span className="muted">因子覆盖率 {(factorCoverageValue * 100).toFixed(1)}%</span>
-          )}
-          {contributions.length > 0 && (
-            <span className="muted">下钻明细 {contributions.length} 条</span>
-          )}
+          </div>
+          <div className="fund-id">
+            <span className="code">{fundCode}</span>
+            {eligibilityRow?.fund_name && (
+              <span className="name">· {eligibilityRow.fund_name}</span>
+            )}
+            {data && <ReviewActionBadge value={data.review_action} />}
+          </div>
+          <div className="meta-row">
+            <span>
+              批次 <strong>{runId.slice(0, 12)}…</strong>
+            </span>
+            {factorCoverageValue !== null && (
+              <span>
+                因子覆盖 <strong>{(factorCoverageValue * 100).toFixed(1)}%</strong>
+              </span>
+            )}
+            {contributions.length > 0 && (
+              <span>
+                风格贡献明细 <strong>{contributions.length} 条</strong>
+              </span>
+            )}
+            {data?.summary && (
+              <span>
+                标签 <strong>{data.summary.label_count}</strong> · 证据{" "}
+                <strong>{data.summary.evidence_count}</strong>
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="head-stats">
+          <div className="head-stat">
+            <div className="label">展示资格</div>
+            <div className="value" style={{ color: relativeReady ? "var(--pos-text)" : "var(--warn-text)" }}>
+              {eligibilityRow
+                ? relativeReady
+                  ? "可展示"
+                  : "暂不可"
+                : "—"}
+            </div>
+            <div className="sub">
+              {eligibilityRow
+                ? relativeReady
+                  ? "可进入展示池"
+                  : cleanBlocker(
+                      eligibilityRow.blocking_components ||
+                        eligibilityRow.blocking_reason ||
+                        ""
+                    )
+                : "加载中…"}
+            </div>
+          </div>
+          <div className="head-stat">
+            <div className="label">年化收益 1Y</div>
+            <div className="value">
+              {annualReturnValue !== null
+                ? `${(annualReturnValue * 100).toFixed(2)}%`
+                : "—"}
+            </div>
+            <div className="sub">
+              {annualBenchmarkValue !== null
+                ? `基准 ${(annualBenchmarkValue * 100).toFixed(2)}%`
+                : "基准缺失"}
+            </div>
+          </div>
+          <div className="head-stat">
+            <div className="label">风格标签</div>
+            <div className="value">{taggedStylesCount}</div>
+            <div className="sub">
+              {taggedStylesCount > 0 ? "已识别" : "未识别"}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* 工具栏 */}
-      <div className="toolbar">
-        <button className="secondary" onClick={() =>
-          downloadFile(`/v1/runs/${runId}/funds/${fundCode}/export?format=xlsx`, `fund_${fundCode}.xlsx`)
-        }>导出 XLSX</button>
-        <button className="secondary" onClick={() =>
-          downloadFile(`/v1/runs/${runId}/funds/${fundCode}/export?format=csv`, `fund_${fundCode}.zip`)
-        }>导出 CSV</button>
+      {/* 工具栏 v2 */}
+      <div className="toolbar-v2">
+        <span className="flow-step is-done">
+          <span className="step-num">✓</span>数据已加载
+        </span>
+        <div className="spacer" />
+        <button
+          className="secondary"
+          onClick={() =>
+            downloadFile(
+              `/v1/runs/${runId}/funds/${fundCode}/export?format=xlsx`,
+              `fund_${fundCode}.xlsx`
+            )
+          }
+        >
+          导出 XLSX
+        </button>
+        <button
+          className="secondary"
+          onClick={() =>
+            downloadFile(
+              `/v1/runs/${runId}/funds/${fundCode}/export?format=csv`,
+              `fund_${fundCode}.zip`
+            )
+          }
+        >
+          导出 CSV
+        </button>
+        <Link to={`/compare?codes=${fundCode}`} className="link-btn" style={{ fontSize: 12 }}>
+          横向对比 →
+        </Link>
       </div>
 
-      {loading && <p>加载中...</p>}
+      {loading && (
+        <div className="filter-empty" style={{ marginBottom: 12 }}>
+          加载中…
+        </div>
+      )}
       {error && <div className="alert alert-warn">{error}</div>}
 
-      {/* 展示门禁 */}
+      {/* 展示门禁作为 decision card 形式 */}
       {data && (
-        <div className={`alert ${relativeReady ? "alert-ok" : "alert-warn"}`}>
-          <strong>{relativeReady ? "展示资格：可展示" : "展示资格：暂不可展示"}</strong>
-          {eligibilityRow && !relativeReady && (
-            <span> — {cleanBlocker(eligibilityRow.blocking_components || eligibilityRow.blocking_reason || "")}</span>
-          )}
+        <div className="decision-card">
+          <span
+            className={`verdict is-${relativeReady ? "go" : "watch"}`}
+            style={!relativeReady ? { background: "var(--warn-soft)", color: "var(--warn-text)" } : undefined}
+          >
+            {relativeReady ? "GO" : "WATCH"}
+          </span>
+          <div className="takeaway">
+            {relativeReady ? (
+              <>
+                该基金 <strong>可立即进入展示池</strong>
+                ：基准已就绪、收益窗口充足、风格已识别。
+              </>
+            ) : (
+              <>
+                该基金 <strong>暂不可进入展示池</strong>
+                ，主要阻塞：{" "}
+                <strong>
+                  {cleanBlocker(
+                    eligibilityRow?.blocking_components ||
+                      eligibilityRow?.blocking_reason ||
+                      ""
+                  )}
+                </strong>
+                。需运维修复后可入池。
+              </>
+            )}
+          </div>
+          <div className="actions">
+            <Link to="/ready-pool" className="secondary">
+              返回展示池
+            </Link>
+          </div>
         </div>
       )}
 
