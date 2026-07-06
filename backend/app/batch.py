@@ -606,12 +606,12 @@ def run_batch(
                     "SELECT COUNT(DISTINCT stock_code) AS cnt FROM stock_factor_values"
                 ).fetchone()
                 if row:
-                    factor_cnt = row[0] if isinstance(row, sqlite3.Row) else row["cnt"]
+                    factor_cnt = row["cnt"] if isinstance(row, sqlite3.Row) else row[0]
                 row = fconn.execute(
                     "SELECT MAX(as_of_date) AS ad FROM stock_factor_values"
                 ).fetchone()
                 if row:
-                    factor_as_of = row[0] if isinstance(row, sqlite3.Row) else row["ad"]
+                    factor_as_of = row["ad"] if isinstance(row, sqlite3.Row) else row[0]
         except sqlite3.OperationalError:
             pass
 

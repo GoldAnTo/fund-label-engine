@@ -22,6 +22,7 @@ import { labelTier, shouldDisplayTier, type LabelTier } from "../labelTiers";
 import {
   styleName as styleCodeToName,
   styleTagClass,
+  ALL_STYLE_CODES,
 } from "../styleConfig";
 
 function cleanBlocker(value: string) {
@@ -76,26 +77,26 @@ function PercentilePanel({ ranks, fundStyleTags }: { ranks: PercentileRank[]; fu
     return <p className="muted">暂无分位数据</p>;
   }
 
-  // 收集所有有数据的分组
-  const availableGroups = Array.from(new Set(ranks.map((r) => r.label_code)));
-  // 优先级排序：all_market 在前，然后是基础数据类，然后风格标签
-  const labelOrder = (code: string) => {
-    if (code === "all_market") return 0;
-    if (["data_sufficient", "equity_position_high"].includes(code)) return 1;
-    return 2;
-  };
+  // 收集所有有数据的分组，过滤掉非风格标签（只保留 all_market + 风格标签）
+  const availableGroups = Array.from(new Set(ranks.map((r) => r.label_code)))
+    .filter((code) => code === "all_market" || ALL_STYLE_CODES.has(code));
+  // 风格标签按名称排序
   const sortedGroups = availableGroups.sort((a, b) => {
-    const oa = labelOrder(a);
-    const ob = labelOrder(b);
-    if (oa !== ob) return oa - ob;
-    return a.localeCompare(b);
+    if (a === "all_market") return -1;
+    if (b === "all_market") return 1;
+    return styleCodeToName(a).localeCompare(styleCodeToName(b));
   });
-
-  const metricName = METRIC_NAMES;
 
   const filteredRanks = selectedGroup === "all_market"
     ? ranks.filter((r) => r.label_code === "all_market")
     : ranks.filter((r) => r.label_code === selectedGroup);
+
+  const formatMetricValue = (metricCode: string, value: number | null) => {
+    if (value === null) return "-";
+    const pctMetrics = new Set(["annualized_return_1y", "max_drawdown_1y", "annualized_excess_return_1y", "roe_weighted", "profit_growth_weighted"]);
+    if (pctMetrics.has(metricCode)) return `${(value * 100).toFixed(2)}%`;
+    return value.toFixed(2);
+  };
 
   return (
     <div>
@@ -121,7 +122,7 @@ function PercentilePanel({ ranks, fundStyleTags }: { ranks: PercentileRank[]; fu
         </thead>
         <tbody>
           {filteredRanks.map((r) => {
-            const displayName = metricName[r.metric_code] ?? r.metric_code;
+            const displayName = METRIC_NAMES[r.metric_code] ?? r.metric_code;
             const arrow = r.direction === "higher_better" ? "↑ 越大越好" : "↓ 越小越好";
             return (
               <tr key={r.metric_code}>
@@ -129,7 +130,7 @@ function PercentilePanel({ ranks, fundStyleTags }: { ranks: PercentileRank[]; fu
                   <strong>{displayName}</strong>
                 </td>
                 <td className="num">
-                  {r.metric_value !== null ? Number(r.metric_value).toFixed(4) : "-"}
+                  {formatMetricValue(r.metric_code, r.metric_value !== null ? Number(r.metric_value) : null)}
                   <div className="muted" style={{ fontSize: 11 }}>{arrow}</div>
                 </td>
                 <td className="num">

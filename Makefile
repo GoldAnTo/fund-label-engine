@@ -35,7 +35,7 @@ RELATIVE_ELIGIBILITY_CSV ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.c
 RELATIVE_ELIGIBILITY_MD  ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.md
 READY_POOL_MD  ?= $(BENCHMARK_REPORT_DIR)/phase1-v1-ready-pool-sample.md
 
-.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark import-authorized-benchmark-components audit-benchmark audit-relative-eligibility render-ready-pool-report run-batch-v1-with-benchmark test lint lint-fix backup-db
+.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark import-authorized-benchmark-components fetch-investoday-benchmark audit-benchmark audit-relative-eligibility render-ready-pool-report run-batch-v1-with-benchmark test lint lint-fix backup-db
 
 help:
 	@echo "Available targets:"
@@ -87,9 +87,7 @@ run-batch: copy-source
 	    --rule-config $(PWD)/$(RULE_CONFIG) \
 	    --factor-db $(PWD)/$(FACTOR_DB) \
 	    --min-nav-samples 180 \
-	    --min-holding-total-weight 0.5 \
-	    --deep-value-weight-min 0.4 \
-	    --quality-growth-weight-min 0.4
+	    --min-holding-total-weight 0.5
 
 run-batch-v1: copy-source
 	@rm -f $(OUTPUT_DB)
@@ -101,14 +99,12 @@ run-batch-v1: copy-source
 	    --rule-config $(PWD)/$(RULE_CONFIG) \
 	    --factor-db $(PWD)/$(FACTOR_DB) \
 	    --min-nav-samples 180 \
-	    --min-holding-total-weight 0.5 \
-	    --deep-value-weight-min 0.4 \
-	    --quality-growth-weight-min 0.4
+	    --min-holding-total-weight 0.5
 	@echo "Importing stock_industry_map from $(FACTOR_DB) into $(OUTPUT_DB)..."
 	@sqlite3 $(OUTPUT_DB) "DROP TABLE IF EXISTS stock_industry_map"
 	@sqlite3 $(FACTOR_DB) ".dump stock_industry_map" | sqlite3 $(OUTPUT_DB)
 
-refresh-benchmark: copy-source seed-benchmark-approx
+refresh-benchmark: copy-source seed-benchmark-approx fetch-investoday-benchmark
 	@mkdir -p $(BENCHMARK_REPORT_DIR)
 	$(PYTHON) scripts/fetch_benchmark_returns.py \
 	  --db $(SOURCE_DB) \
@@ -124,6 +120,21 @@ seed-benchmark-approx: copy-source
 	  --start-date $(BENCHMARK_START) \
 	  --end-date $(BENCHMARK_END) \
 	  --include-approx
+
+fetch-investoday-benchmark: copy-source
+	@echo "fetching Investoday index quotes (H11001/H11009/H11006/HSI) into $(SOURCE_DB)"
+	$(PYTHON) scripts/fetch_investoday_index_quotes.py \
+	  --out-csv $(CBOND_AUTHORIZED_CSV) \
+	  --start-date $(BENCHMARK_START) \
+	  --end-date $(BENCHMARK_END) \
+	  --codes H11001,H11009,H11006,HSI \
+	  || echo "WARN: Investoday fetch failed, continuing without it"
+	@if [ -f $(CBOND_AUTHORIZED_CSV) ]; then \
+	  $(PYTHON) scripts/import_benchmark_component_returns.py \
+	    --db $(SOURCE_DB) \
+	    --from-csv $(CBOND_AUTHORIZED_CSV) \
+	    --min-rows 180; \
+	fi
 
 import-authorized-benchmark-components:
 	$(PYTHON) scripts/import_benchmark_component_returns.py \
@@ -166,9 +177,10 @@ run-batch-v1-with-benchmark: refresh-benchmark audit-benchmark
 	    --rule-config $(PWD)/$(RULE_CONFIG) \
 	    --factor-db $(PWD)/$(FACTOR_DB) \
 	    --min-nav-samples 180 \
-	    --min-holding-total-weight 0.5 \
-	    --deep-value-weight-min 0.4 \
-	    --quality-growth-weight-min 0.4
+	    --min-holding-total-weight 0.5
+	@echo "Importing stock_industry_map from $(FACTOR_DB) into $(OUTPUT_DB)..."
+	@sqlite3 $(OUTPUT_DB) "DROP TABLE IF EXISTS stock_industry_map"
+	@sqlite3 $(FACTOR_DB) ".dump stock_industry_map" | sqlite3 $(OUTPUT_DB)
 
 test:
 	cd backend && $(PYTHON) -m pytest -q

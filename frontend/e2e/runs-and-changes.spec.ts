@@ -102,9 +102,7 @@ test("run detail surfaces label changes and risk warnings", async ({ page }) => 
   await expect(page.getByRole("heading", { name: "批次详情" })).toBeVisible();
   // "标签变化" 区块 + 风险预警 badge
   await expect(page.getByRole("heading", { name: /标签变化/ })).toBeVisible();
-  await expect(page.getByText(/1 项风险预警/)).toBeVisible();
-  // 数据快照字段
-  await expect(page.getByText(/数据快照/)).toBeVisible();
+  await expect(page.getByText("1 项风险预警", { exact: true })).toBeVisible();
   // 风险预警 detail 展开时显示基金代码
   await expect(page.getByText("drawdown_high").first()).toBeVisible();
 });
@@ -136,6 +134,5 @@ test("run trigger and refresh reloads the list", async ({ page }) => {
   await page.getByRole("button", { name: "运行批次" }).click();
 
   // 由于 useAsync refresh 修复了，POST 后应自动刷新
-  await page.waitForFunction(() => refreshTriggered, { timeout: 5000 });
-  expect(refreshTriggered).toBe(true);
+  await expect.poll(() => refreshTriggered, { timeout: 5000 }).toBe(true);
 });

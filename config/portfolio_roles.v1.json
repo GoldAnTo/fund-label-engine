@@ -21,7 +21,14 @@
       "quality_growth",
       "dividend_steady",
       "high_dividend_financial",
-      "consumer_quality"
+      "consumer_quality",
+      "large_cap",
+      "mid_cap",
+      "small_cap",
+      "low_valuation",
+      "high_valuation",
+      "high_roe",
+      "profit_growth_strong"
     ],
     "return_tags": [
       "alpha_positive",
@@ -54,7 +61,6 @@
       "sector_mapping_insufficient",
       "style_exposure_low_coverage",
       "style_exposure_observe",
-      "style_pending_rule_definition",
       "style_unlabeled_stock_factors_missing"
     ]
   },

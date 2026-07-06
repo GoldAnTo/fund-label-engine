@@ -2627,6 +2627,10 @@ class LabelEngine:
                     confidence=0.75,
                 )
             )
+            # Beta 和信息比率不是百分比，用小数格式
+            is_pct = metric_prefix not in ("beta", "information_ratio")
+            value_fmt = f"{value:.2%}" if is_pct else f"{value:.2f}"
+            threshold_fmt = f"{threshold:.2%}" if is_pct else f"{threshold:.2f}"
             evidence.append(
                 EvidenceItem(
                     label_code=label_code,
@@ -2635,8 +2639,8 @@ class LabelEngine:
                     threshold=threshold,
                     source="benchmark_returns",
                     message=(
-                        f"{chosen_window.upper()} {display_name} {value:.2%}，"
-                        f"达到相对基准阈值 {threshold:.2%}。"
+                        f"{chosen_window.upper()} {display_name} {value_fmt}，"
+                        f"达到相对基准阈值 {threshold_fmt}。"
                     ),
                 )
             )
@@ -2951,7 +2955,7 @@ class LabelEngine:
                     label_code="low_valuation",
                     metric="pb_weighted/pe_weighted",
                     value=f"PB={pb_weighted:.2f}, PE={pe_weighted:.2f}",
-                    threshold=f"PB≤{cfg.low_valuation_pb_max} 或 PE≤{cfg.low_valuation_pe_max}",
+                    threshold=f"PB≤{cfg.low_valuation_pb_max:.2f} 或 PE≤{cfg.low_valuation_pe_max:.2f}",
                     source=source,
                     message=f"加权 PB={pb_weighted:.2f}，加权 PE={pe_weighted:.2f}，达到低估值阈值。",
                 ))
@@ -2966,7 +2970,7 @@ class LabelEngine:
                     label_code="high_valuation",
                     metric="pb_weighted/pe_weighted",
                     value=f"PB={pb_weighted:.2f}, PE={pe_weighted:.2f}",
-                    threshold=f"PB≥{cfg.high_valuation_pb_min} 或 PE≥{cfg.high_valuation_pe_min}",
+                    threshold=f"PB≥{cfg.high_valuation_pb_min:.2f} 或 PE≥{cfg.high_valuation_pe_min:.2f}",
                     source=source,
                     message=f"加权 PB={pb_weighted:.2f}，加权 PE={pe_weighted:.2f}，达到高估值阈值。",
                 ))
@@ -2984,9 +2988,9 @@ class LabelEngine:
                     label_code="large_cap",
                     metric="log10_market_cap_weighted",
                     value=round(mcap_weighted, 4),
-                    threshold=cfg.large_cap_log10_mcap_min,
+                    threshold=round(cfg.large_cap_log10_mcap_min, 2),
                     source=source,
-                    message=f"加权对数市值 {mcap_weighted:.2f}，达到大盘阈值 {cfg.large_cap_log10_mcap_min}。",
+                    message=f"加权对数市值 {mcap_weighted:.2f}，达到大盘阈值 {cfg.large_cap_log10_mcap_min:.2f}。",
                 ))
             elif cfg.mid_cap_log10_mcap_min <= mcap_weighted < cfg.mid_cap_log10_mcap_max:
                 labels.append(LabelResult(
@@ -2999,7 +3003,7 @@ class LabelEngine:
                     label_code="mid_cap",
                     metric="log10_market_cap_weighted",
                     value=round(mcap_weighted, 4),
-                    threshold=f"{cfg.mid_cap_log10_mcap_min}~{cfg.mid_cap_log10_mcap_max}",
+                    threshold=f"{cfg.mid_cap_log10_mcap_min:.2f}~{cfg.mid_cap_log10_mcap_max:.2f}",
                     source=source,
                     message=f"加权对数市值 {mcap_weighted:.2f}，处于中盘区间。",
                 ))
@@ -3014,9 +3018,9 @@ class LabelEngine:
                     label_code="small_cap",
                     metric="log10_market_cap_weighted",
                     value=round(mcap_weighted, 4),
-                    threshold=cfg.small_cap_log10_mcap_max,
+                    threshold=round(cfg.small_cap_log10_mcap_max, 2),
                     source=source,
-                    message=f"加权对数市值 {mcap_weighted:.2f}，达到小盘阈值 {cfg.small_cap_log10_mcap_max}。",
+                    message=f"加权对数市值 {mcap_weighted:.2f}，达到小盘阈值 {cfg.small_cap_log10_mcap_max:.2f}。",
                 ))
 
         # --- 盈利质量标签 ---
@@ -3151,6 +3155,9 @@ class LabelEngine:
             ("growth_profit", "成长盈利", frozenset({"quality_growth", "profit_growth_strong"})),
         ]
 
+        # 构建 label_code → label_name 映射，用于翻译英文 code
+        code_to_name = {lbl.label_code: lbl.label_name for lbl in labels}
+
         for label_code, label_name, required in composite_rules:
             if required.issubset(triggered_codes):
                 labels.append(LabelResult(
@@ -3159,13 +3166,27 @@ class LabelEngine:
                     category="holding_style",
                     confidence=0.65,
                 ))
+                # 拼接底层基础标签的中文名称和证据
+                parts = []
+                for code in sorted(required):
+                    cn_name = code_to_name.get(code, code)
+                    base_ev = next(
+                        (e for e in evidence if e.label_code == code and e.metric != "composite_styles"),
+                        None,
+                    )
+                    if base_ev and base_ev.value is not None and base_ev.threshold is not None:
+                        parts.append(f"{cn_name}（{base_ev.message}）")
+                    elif base_ev:
+                        parts.append(f"{cn_name}（{base_ev.message}）")
+                    else:
+                        parts.append(cn_name)
                 evidence.append(EvidenceItem(
                     label_code=label_code,
                     metric="composite_styles",
                     value="+".join(sorted(required)),
                     threshold="同时命中",
                     source=source,
-                    message=f"同时命中 {' + '.join(sorted(required))}，组合为{label_name}。",
+                    message=f"{' + '.join(parts)}，组合为{label_name}。",
                 ))
 
     @staticmethod

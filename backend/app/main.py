@@ -1019,7 +1019,8 @@ def create_app(
         return {
             "run_id": run_id,
             "total_funds": len(rows),
-            "ready_count": status_counts.get("relative_label_ready", 0),
+            "ready_count": ready_count,
+            "ready_exact_count": status_counts.get("relative_label_ready", 0),
             "ready_approx_count": status_counts.get("relative_label_ready_approx", 0),
             "blocked_count": len(rows) - ready_count,
             "status_counts": dict(status_counts),
