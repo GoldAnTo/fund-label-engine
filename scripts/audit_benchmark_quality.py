@@ -91,23 +91,60 @@ def summarize_fund_quality(
 
 
 def load_component_codes_with_returns(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute(
-        """
-        SELECT DISTINCT benchmark_code AS component_code
-        FROM benchmark_returns
-        WHERE benchmark_code IS NOT NULL
-        UNION
-        SELECT DISTINCT component_code
-        FROM benchmark_component_returns
-        WHERE component_code IS NOT NULL
-        """
-    ).fetchall()
-    return {str(row["component_code"]) for row in rows if row["component_code"]}
+    """返回已合成/落库的成分代码集合。
+
+    当 source DB 缺 benchmark_returns / benchmark_component_returns 表时
+    （例如历史库未跑过 fetch_benchmark_returns），优雅降级返回空集，
+    让上层 audit 把它判为 benchmark_source_missing，而不是抛 503。
+    """
+    codes: set[str] = set()
+    for table in ("benchmark_returns", "benchmark_component_returns"):
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT benchmark_code AS component_code
+                FROM {table}
+                WHERE benchmark_code IS NOT NULL
+                """
+                if table == "benchmark_returns"
+                else f"""
+                SELECT DISTINCT component_code
+                FROM {table}
+                WHERE component_code IS NOT NULL
+                """
+            ).fetchall()
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            if "no such table" in msg or "no such column" in msg:
+                continue
+            raise
+        for row in rows:
+            value = row["component_code"]
+            if value:
+                codes.add(str(value))
+    return codes
 
 
 def build_quality_rows(conn: sqlite3.Connection, codes: list[str]) -> list[dict[str, str]]:
     component_codes_with_returns = load_component_codes_with_returns(conn)
     placeholders = ",".join("?" for _ in codes)
+
+    # 探测 source DB 是否含 benchmark_components / benchmark_returns。
+    # 缺表时（未跑过 fetch_benchmark_returns）优雅降级：每个基金都判为
+    # benchmark_source_missing，不抛 503。
+    def _has_table(name: str) -> bool:
+        try:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (name,),
+            ).fetchone()
+            return row is not None
+        except sqlite3.OperationalError:
+            return False
+
+    has_components_table = _has_table("benchmark_components")
+    has_returns_table = _has_table("benchmark_returns")
+
     profile_rows = conn.execute(
         f"""
         SELECT fund_code, fund_name, fund_type, benchmark, tracking_target
@@ -119,22 +156,26 @@ def build_quality_rows(conn: sqlite3.Connection, codes: list[str]) -> list[dict[
     ).fetchall()
     rows: list[dict[str, str]] = []
     for profile in profile_rows:
-        components = [
-            dict(row)
-            for row in conn.execute(
-                """
-                SELECT component_code, component_name, weight, source_text, status, reason, secid
-                FROM benchmark_components
-                WHERE fund_code = ?
-                ORDER BY component_order
-                """,
+        components: list[dict[str, Any]] = []
+        if has_components_table:
+            components = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT component_code, component_name, weight, source_text, status, reason, secid
+                    FROM benchmark_components
+                    WHERE fund_code = ?
+                    ORDER BY component_order
+                    """,
+                    (profile["fund_code"],),
+                ).fetchall()
+            ]
+        has_returns = None
+        if has_returns_table:
+            has_returns = conn.execute(
+                "SELECT 1 FROM benchmark_returns WHERE fund_code = ? LIMIT 1",
                 (profile["fund_code"],),
-            ).fetchall()
-        ]
-        has_returns = conn.execute(
-            "SELECT 1 FROM benchmark_returns WHERE fund_code = ? LIMIT 1",
-            (profile["fund_code"],),
-        ).fetchone()
+            ).fetchone()
         summary = summarize_fund_quality(
             components,
             component_codes_with_returns,
