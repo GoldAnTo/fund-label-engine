@@ -5,11 +5,14 @@ import { ReviewActionBadge } from "../components";
 import { STYLE_GROUPS, ALL_STYLE_CODES, styleTagClass, styleName } from "../styleConfig";
 
 export default function SearchPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [runs, setRuns] = useState<{ run_id: string; run_at: string }[]>([]);
   const [runId, setRunId] = useState(searchParams.get("run_id") || "");
   const [fundCode, setFundCode] = useState(searchParams.get("fund_code") || "");
   const [labelCode, setLabelCode] = useState(searchParams.get("label_code") || "");
+  const [groupCode, setGroupCode] = useState(searchParams.get("group_code") || "");
+  const [groupType, setGroupType] = useState(searchParams.get("group_type") || "");
+  const [classificationCode, setClassificationCode] = useState(searchParams.get("classification_code") || "");
   const [data, setData] = useState<SearchResponse | null>(null);
   const [matrix, setMatrix] = useState<PortfolioMatrixResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +30,19 @@ export default function SearchPage() {
     if (runId) fetchPortfolioMatrix(runId).then(setMatrix).catch(() => {});
   }, [runId]);
 
+  // 把当前筛选条件同步到 URL
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (runId) next.set("run_id", runId);
+    if (fundCode) next.set("fund_code", fundCode);
+    if (labelCode) next.set("label_code", labelCode);
+    if (groupCode) next.set("group_code", groupCode);
+    if (groupType) next.set("group_type", groupType);
+    if (classificationCode) next.set("classification_code", classificationCode);
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId, fundCode, labelCode, groupCode, groupType, classificationCode]);
+
   const runSearch = async () => {
     if (!runId) return;
     setError(null);
@@ -34,6 +50,9 @@ export default function SearchPage() {
       const res = await searchFunds(runId, {
         fund_code: fundCode || undefined,
         label_code: labelCode || undefined,
+        group_code: groupCode || undefined,
+        group_type: groupType || undefined,
+        classification_code: classificationCode || undefined,
       });
       setData(res);
     } catch (e: unknown) {
@@ -44,7 +63,15 @@ export default function SearchPage() {
   useEffect(() => {
     if (runId) runSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId, labelCode]);
+  }, [runId, labelCode, groupCode, groupType, classificationCode]);
+
+  const clearGroup = () => {
+    setGroupCode("");
+    setGroupType("");
+  };
+  const clearClassification = () => {
+    setClassificationCode("");
+  };
 
   const fundStyleMap = useMemo(() => {
     const m = new Map<string, string[]>();
@@ -86,8 +113,25 @@ export default function SearchPage() {
         </div>
         {labelCode && (
           <div className="chip">
-            <span className="label">当前筛选</span>
-            <span className="value">{labelCode}</span>
+            <span className="label">风格</span>
+            <span className="value">{styleName(labelCode)}</span>
+            <button className="chip-close" onClick={() => setLabelCode("")} title="清除风格筛选">×</button>
+          </div>
+        )}
+        {groupCode && (
+          <div className="chip">
+            <span className="label">分组</span>
+            <span className="value">
+              {groupType ? `${groupType} · ` : ""}{groupCode}
+            </span>
+            <button className="chip-close" onClick={clearGroup} title="清除分组筛选">×</button>
+          </div>
+        )}
+        {classificationCode && (
+          <div className="chip">
+            <span className="label">分类</span>
+            <span className="value">{classificationCode}</span>
+            <button className="chip-close" onClick={clearClassification} title="清除分类筛选">×</button>
           </div>
         )}
         {fundCode && (
@@ -173,7 +217,15 @@ export default function SearchPage() {
                         {tags.length > 0 ? (
                           <div className="style-labels-grid">
                             {tags.map((code) => (
-                              <span key={code} className={styleTagClass(code)}>{styleName(code)}</span>
+                              <button
+                                key={code}
+                                type="button"
+                                className={`${styleTagClass(code)} style-tag-clickable`}
+                                onClick={() => setLabelCode(code)}
+                                title={`按「${styleName(code)}」筛选`}
+                              >
+                                {styleName(code)}
+                              </button>
                             ))}
                           </div>
                         ) : (

@@ -18,6 +18,7 @@ import {
   reviewActionLabel,
   useAsync,
 } from "../components";
+import { StyleHistoryTimeline } from "../components/StyleHistoryTimeline";
 import { labelTier, shouldDisplayTier, type LabelTier } from "../labelTiers";
 import {
   styleName as styleCodeToName,
@@ -576,6 +577,14 @@ export default function FundReportPage() {
         </div>
       )}
 
+      {/* 风格稳定性时间线（跨 run 演化） */}
+      {data?.style_history && data.style_history.timeline.length > 0 && (
+        <div className="report-section">
+          <h2>风格稳定性时间线</h2>
+          <StyleHistoryTimeline history={data.style_history} />
+        </div>
+      )}
+
       {/* 风格观察 */}
       {data && tieredLabels.observe.length > 0 && (
         <div className="report-section">
@@ -599,34 +608,108 @@ export default function FundReportPage() {
       {bench && (
         <div className="report-section">
           <h2>基准解析</h2>
-          {bench.has_benchmark_returns ? (
-            <div className="alert alert-ok">
-              基准收益已合成（{bench.benchmark_returns_count} 行），全部组件已解析。
+          {/* 解析结果摘要 + KPI */}
+          <div className="benchmark-kpi-row">
+            <div className={`benchmark-kpi ${bench.has_benchmark_returns ? "is-ok" : "is-bad"}`}>
+              <div className="label">基准收益合成</div>
+              <div className="value">
+                {bench.has_benchmark_returns ? "已合成" : "未合成"}
+              </div>
+              <div className="sub">
+                {bench.benchmark_returns_count} 行日收益
+              </div>
             </div>
-          ) : (
+            <div className={`benchmark-kpi ${bench.coverage_pct !== undefined && bench.coverage_pct >= 95 ? "is-ok" : "is-warn"}`}>
+              <div className="label">权重覆盖率</div>
+              <div className="value">
+                {bench.coverage_pct !== undefined ? `${bench.coverage_pct}%` : "—"}
+              </div>
+              <div className="sub">
+                {bench.unresolved_unresolved_count ?? 0} 组件未解析 ·
+                {" "}{bench.unresolved_missing_returns_count ?? 0} 缺收益源
+              </div>
+            </div>
+            <div className="benchmark-kpi">
+              <div className="label">组件总数</div>
+              <div className="value">{bench.components.length}</div>
+              <div className="sub">来自基准文本</div>
+            </div>
+          </div>
+
+          {/* 未合成时给出原因说明 */}
+          {!bench.has_benchmark_returns && (
             <div className="alert alert-warn">
               未能合成基准日收益，相对基准类标签无法计算。
-              {bench.unresolved_count > 0 && ` ${bench.unresolved_count} 个组件未解析。`}
+              {bench.unresolved_count > 0 && (
+                <>
+                  {" "}原因：{bench.unresolved_count} 个组件未解析。请检查：
+                  <ul style={{ margin: "4px 0 0 16px", fontSize: 12 }}>
+                    <li>组件是否在 <code>benchmark_component_returns</code> 里有日收益源</li>
+                    <li>组件代码是否已登记到 <code>benchmark_components</code> 字典</li>
+                    <li>映射表 <code>benchmark_mapping</code> 是否有 fuzzy 命中</li>
+                  </ul>
+                </>
+              )}
             </div>
           )}
+
           {bench.components.length > 0 && (
             <table>
               <thead>
-                <tr><th>#</th><th>组件</th><th className="num">权重</th><th>状态</th><th>收益源</th></tr>
+                <tr>
+                  <th>#</th>
+                  <th>组件</th>
+                  <th className="num">权重</th>
+                  <th>状态</th>
+                  <th>收益源</th>
+                  <th>未解析原因</th>
+                </tr>
               </thead>
               <tbody>
-                {bench.components.map((c) => (
-                  <tr key={c.component_order}>
-                    <td>{c.component_order}</td>
-                    <td>
-                      <strong>{c.component_name}</strong>
-                      {c.component_code && <div className="muted">{c.component_code}</div>}
-                    </td>
-                    <td className="num">{c.weight !== null ? `${(c.weight * 100).toFixed(1)}%` : "-"}</td>
-                    <td>{c.status === "resolved" ? "已解析" : c.status === "missing_source" ? "缺收益源" : c.status}</td>
-                    <td>{c.has_returns ? "有" : "无"}</td>
-                  </tr>
-                ))}
+                {bench.components.map((c) => {
+                  const isUnresolved = c.status !== "resolved";
+                  return (
+                    <tr
+                      key={c.component_order}
+                      className={isUnresolved ? "row-warn" : ""}
+                    >
+                      <td>{c.component_order}</td>
+                      <td>
+                        <strong>{c.component_name}</strong>
+                        {c.component_code && <div className="muted">{c.component_code}</div>}
+                        <div className="muted" style={{ fontSize: 11 }}>{c.source_text}</div>
+                      </td>
+                      <td className="num">
+                        {c.weight !== null ? `${(c.weight * 100).toFixed(1)}%` : "-"}
+                      </td>
+                      <td>
+                        {c.status === "resolved" ? (
+                          <span className="status-pill is-go">已解析</span>
+                        ) : c.status === "missing_source" ? (
+                          <span className="status-pill is-block">缺收益源</span>
+                        ) : (
+                          <span className="status-pill is-block">{c.status}</span>
+                        )}
+                      </td>
+                      <td>
+                        {c.has_returns ? (
+                          <span style={{ color: "var(--pos)" }}>有</span>
+                        ) : (
+                          <span style={{ color: "var(--neg)", fontWeight: 600 }}>无</span>
+                        )}
+                      </td>
+                      <td>
+                        {isUnresolved ? (
+                          <span style={{ color: "var(--neg)", fontSize: 12 }}>
+                            {c.reason || "未提供"}
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

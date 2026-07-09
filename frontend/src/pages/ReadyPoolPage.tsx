@@ -6,11 +6,13 @@ import {
   fetchRunSummary,
   fetchPortfolioMatrix,
   fetchTopFunds,
+  fetchWorkbenchSummary,
   downloadFile,
   type RelativeEligibilityResponse,
   type RunSummary,
   type PortfolioMatrixResponse,
   type TopFundsResponse,
+  type WorkbenchSummary,
   type Run,
 } from "../api";
 import { ALL_STYLE_CODES, STYLE_GROUPS, styleTagClass, styleName } from "../styleConfig";
@@ -71,6 +73,7 @@ export default function ReadyPoolPage() {
   const [eligibility, setEligibility] = useState<RelativeEligibilityResponse | null>(null);
   const [prevEligibility, setPrevEligibility] = useState<RelativeEligibilityResponse | null>(null);
   const [summary, setSummary] = useState<RunSummary | null>(null);
+  const [workbench, setWorkbench] = useState<WorkbenchSummary | null>(null);
   const [matrix, setMatrix] = useState<PortfolioMatrixResponse | null>(null);
   const [topFundsByStyle, setTopFundsByStyle] = useState<Record<string, TopFundsResponse>>({});
   const [error, setError] = useState<string | null>(null);
@@ -100,11 +103,13 @@ export default function ReadyPoolPage() {
       fetchRelativeEligibility(runId, "all"),
       fetchRunSummary(runId),
       fetchPortfolioMatrix(runId),
+      fetchWorkbenchSummary(runId).catch(() => null),
     ])
-      .then(([elig, summ, mat]) => {
+      .then(([elig, summ, mat, wb]) => {
         setEligibility(elig);
         setSummary(summ);
         setMatrix(mat);
+        setWorkbench(wb);
       })
       .catch((e) => setError(e.message));
 
@@ -324,7 +329,11 @@ export default function ReadyPoolPage() {
                     </div>
                     <div className="style-overview">
                       {items.map((d) => (
-                        <Link key={d.label_code} to={`/search?label_code=${d.label_code}`} className="style-card">
+                        <Link
+                          key={d.label_code}
+                          to={`/search?run_id=${encodeURIComponent(runId)}&label_code=${d.label_code}`}
+                          className="style-card"
+                        >
                           <div className="style-card-head">
                             <strong>{d.label_name}</strong>
                             <span>{d.fund_count}</span>
@@ -340,7 +349,11 @@ export default function ReadyPoolPage() {
           ) : (
             <div className="style-overview">
               {styleDistribution.slice(0, 9).map((d) => (
-                <Link key={d.label_code} to={`/search?label_code=${d.label_code}`} className="style-card">
+                <Link
+                  key={d.label_code}
+                  to={`/search?run_id=${encodeURIComponent(runId)}&label_code=${d.label_code}`}
+                  className="style-card"
+                >
                   <div className="style-card-head">
                     <strong>{d.label_name}</strong>
                     <span>{d.fund_count}</span>
@@ -393,6 +406,76 @@ export default function ReadyPoolPage() {
                 </table>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* 分类 / 分组分布（点击进入筛选） */}
+      {workbench && (workbench.group_distribution.length > 0 || workbench.classification_distribution.length > 0) && (
+        <div className="card">
+          <div className="section-head">
+            <h2>分类 / 分组分布</h2>
+            <div className="meta">点击任意条目跳转到风格筛选页带入筛选条件</div>
+          </div>
+          <div className="dist-grid">
+            {workbench.classification_distribution.length > 0 && (
+              <div className="dist-section">
+                <h3>分类（按维度）</h3>
+                {Object.entries(
+                  workbench.classification_distribution.reduce<
+                    Record<string, typeof workbench.classification_distribution>
+                  >((acc, item) => {
+                    (acc[item.dimension] = acc[item.dimension] || []).push(item);
+                    return acc;
+                  }, {})
+                ).map(([dimension, items]) => (
+                  <div key={dimension} className="dist-dim">
+                    <div className="dist-dim-label">{dimension}</div>
+                    <div className="dist-items">
+                      {items.map((d) => (
+                        <Link
+                          key={d.classification_code}
+                          to={`/search?run_id=${encodeURIComponent(runId)}&classification_code=${encodeURIComponent(d.classification_code)}`}
+                          className="dist-item"
+                        >
+                          <span className="dist-item-name">{d.classification_name}</span>
+                          <span className="dist-item-count">{d.fund_count}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {workbench.group_distribution.length > 0 && (
+              <div className="dist-section">
+                <h3>分组（按 type）</h3>
+                {Object.entries(
+                  workbench.group_distribution.reduce<
+                    Record<string, typeof workbench.group_distribution>
+                  >((acc, item) => {
+                    (acc[item.group_type] = acc[item.group_type] || []).push(item);
+                    return acc;
+                  }, {})
+                ).map(([gtype, items]) => (
+                  <div key={gtype} className="dist-dim">
+                    <div className="dist-dim-label">{gtype}</div>
+                    <div className="dist-items">
+                      {items.map((d) => (
+                        <Link
+                          key={d.group_code}
+                          to={`/search?run_id=${encodeURIComponent(runId)}&group_code=${encodeURIComponent(d.group_code)}&group_type=${encodeURIComponent(d.group_type)}`}
+                          className="dist-item"
+                        >
+                          <span className="dist-item-name">{d.group_name}</span>
+                          <span className="dist-item-count">{d.fund_count}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
