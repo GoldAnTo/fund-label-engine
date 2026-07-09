@@ -128,9 +128,175 @@ def build_portfolio(
     total = sum(s["weight"] for s in selected) + defense_weight
     cash = max(0, 100 - total)
 
-    return {
+    result = {
         "selected_funds": selected,
         "defense_position": defense_fund,
         "cash_pct": round(cash, 1),
         "total_invested": round(total, 1),
+    }
+
+    # 前端兼容字段
+    result["suggested_weight"] = round(sum(s["weight"] for s in selected), 1)
+    result["defense_weight"] = round(defense_weight, 1)
+    return result
+
+
+def calculate_portfolio_metrics(
+    conn: sqlite3.Connection,
+    selected_funds: list[dict[str, Any]],
+    defense_fund: dict[str, Any] | None,
+    all_holdings: dict[str, list[dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    """计算组合级风险指标：加权PE、年化波动率、最大回撤、持仓穿透、行业暴露。
+
+    需要传入 conn 以读取 nav_history 计算波动率和回撤。
+    all_holdings 用于获取防守基金的持仓数据（defense_fund 不含 holdings）。
+    """
+    # 构建权重表 fund_code -> 权重(小数)
+    weight_map: dict[str, float] = {}
+    for f in selected_funds:
+        weight_map[f["fund_code"]] = f.get("weight", 0) / 100.0
+    if defense_fund and defense_fund.get("fund_code"):
+        weight_map[defense_fund["fund_code"]] = defense_fund.get("weight", 0) / 100.0
+
+    invested_fraction = sum(weight_map.values()) or 1.0
+
+    # --- 1. 组合加权PE ---
+    pe_data: list[tuple[float, float]] = []
+    for f in selected_funds:
+        pe = f.get("valuation", {}).get("weighted_pe")
+        w = f.get("weight", 0) / 100.0
+        if pe and pe > 0 and w > 0:
+            pe_data.append((w, pe))
+    if defense_fund:
+        pe = defense_fund.get("valuation", {}).get("weighted_pe")
+        w = defense_fund.get("weight", 0) / 100.0
+        if pe and pe > 0 and w > 0:
+            pe_data.append((w, pe))
+    portfolio_pe = (
+        round(sum(w * pe for w, pe in pe_data) / sum(w for w, _ in pe_data), 1)
+        if pe_data else None
+    )
+
+    # --- 2. 组合年化波动率 + 最大回撤 ---
+    portfolio_volatility: float | None = None
+    portfolio_max_drawdown: float | None = None
+
+    fund_returns: dict[str, dict[str, float]] = {}
+    all_dates: set[str] = set()
+    for fc in weight_map:
+        try:
+            rows = conn.execute(
+                "SELECT nav_date, daily_growth_rate FROM nav_history "
+                "WHERE fund_code = ? AND daily_growth_rate IS NOT NULL",
+                (fc,),
+            ).fetchall()
+        except Exception:
+            rows = []
+        if rows:
+            fund_returns[fc] = {r[0]: r[1] for r in rows}
+            all_dates.update(r[0] for r in rows)
+
+    if len(all_dates) >= 30:
+        sorted_dates = sorted(all_dates)
+        daily_returns: list[float] = []
+        for date in sorted_dates:
+            ret = 0.0
+            for fc, w in weight_map.items():
+                r = fund_returns.get(fc, {}).get(date)
+                if r is not None:
+                    ret += w * r
+            daily_returns.append(ret)
+
+        if len(daily_returns) >= 30:
+            std_ret = statistics.stdev(daily_returns)
+            portfolio_volatility = round(std_ret * (252 ** 0.5), 1)
+
+            # 最大回撤
+            cumulative = 1.0
+            peak = 1.0
+            max_dd = 0.0
+            for r in daily_returns:
+                cumulative *= (1 + r / 100)
+                if cumulative > peak:
+                    peak = cumulative
+                dd = (peak - cumulative) / peak
+                if dd > max_dd:
+                    max_dd = dd
+            portfolio_max_drawdown = round(-max_dd * 100, 1)
+
+    # --- 3. 持仓穿透（底层股票明细） ---
+    stock_map: dict[str, dict[str, Any]] = {}
+    for f in selected_funds:
+        fw = f.get("weight", 0) / 100.0
+        for h in f.get("holdings") or []:
+            code = h.get("stock_code", "")
+            if not code:
+                continue
+            eff = fw * h.get("weight", 0)
+            if code not in stock_map:
+                stock_map[code] = {
+                    "stock_code": code,
+                    "stock_name": h.get("stock_name", ""),
+                    "weight": 0.0,
+                    "industry_name": h.get("industry_name", ""),
+                    "sector_group": h.get("sector_group", ""),
+                    "pe": h.get("pe"),
+                    "roe": h.get("roe"),
+                }
+            stock_map[code]["weight"] += eff
+
+    # 防守基金持仓
+    if defense_fund and all_holdings:
+        df_code = defense_fund.get("fund_code")
+        dw = defense_fund.get("weight", 0) / 100.0
+        for h in all_holdings.get(df_code, []):
+            code = h.get("stock_code", "")
+            if not code:
+                continue
+            eff = dw * h.get("weight", 0)
+            if code not in stock_map:
+                stock_map[code] = {
+                    "stock_code": code,
+                    "stock_name": h.get("stock_name", ""),
+                    "weight": 0.0,
+                    "industry_name": h.get("industry_name", ""),
+                    "sector_group": h.get("sector_group", ""),
+                    "pe": h.get("pe"),
+                    "roe": h.get("roe"),
+                }
+            stock_map[code]["weight"] += eff
+
+    holdings_penetration = sorted(stock_map.values(), key=lambda x: x["weight"], reverse=True)[:10]
+    for h in holdings_penetration:
+        h["weight"] = round(h["weight"] * 100, 2)
+
+    # --- 4. 行业暴露 ---
+    industry_weights: dict[str, float] = {}
+    sector_weights: dict[str, float] = {}
+    for h in stock_map.values():
+        ind = h["industry_name"] or "未知"
+        sec = h["sector_group"] or "other"
+        w = h["weight"]
+        industry_weights[ind] = industry_weights.get(ind, 0) + w
+        sector_weights[sec] = sector_weights.get(sec, 0) + w
+
+    industry_exposure = sorted(
+        [{"name": k, "weight": round(v * 100, 1)} for k, v in industry_weights.items()],
+        key=lambda x: x["weight"],
+        reverse=True,
+    )[:8]
+    sector_exposure = sorted(
+        [{"name": k, "weight": round(v * 100, 1)} for k, v in sector_weights.items()],
+        key=lambda x: x["weight"],
+        reverse=True,
+    )[:6]
+
+    return {
+        "portfolio_pe": portfolio_pe,
+        "portfolio_volatility": portfolio_volatility,
+        "portfolio_max_drawdown": portfolio_max_drawdown,
+        "holdings_penetration": holdings_penetration,
+        "industry_exposure": industry_exposure,
+        "sector_exposure": sector_exposure,
     }

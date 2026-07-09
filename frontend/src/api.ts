@@ -150,6 +150,7 @@ export interface FundReport {
   equity_style_contributions?: EquityStyleContribution[];
   reviews: Review[];
   calculations: Calculation[];
+  style_history?: StyleHistory;
   summary: {
     label_count: number;
     feature_count: number;
@@ -159,7 +160,29 @@ export interface FundReport {
     review_count: number;
     review_action: string;
     equity_style_contribution_count?: number;
+    style_stable_run_count?: number;
+    style_drift_run_count?: number;
+    style_recent_shift_run_count?: number;
   };
+}
+
+export interface StyleHistoryEntry {
+  run_id: string;
+  run_at: string;
+  data_as_of: string;
+  rule_version: string;
+  labels: string[];
+  summary: "stable" | "drift" | "recent_shift" | "none";
+}
+
+export interface StyleHistory {
+  fund_code: string;
+  timeline: StyleHistoryEntry[];
+  current: StyleHistoryEntry | null;
+  trend: "stable" | "drifting" | "shifting" | "insufficient_data";
+  stable_run_count: number;
+  drift_run_count: number;
+  shift_run_count: number;
 }
 
 export interface SearchResult {
@@ -231,6 +254,16 @@ export async function fetchFundReport(runId: string, fundCode: string): Promise<
   return json(`/v1/runs/${runId}/funds/${fundCode}/report`);
 }
 
+export async function fetchStyleHistory(
+  runId: string,
+  fundCode: string,
+  limit: number = 12
+): Promise<StyleHistory & { run_id: string }> {
+  return json(
+    `/v1/runs/${runId}/funds/${fundCode}/style-history?limit=${limit}`
+  );
+}
+
 export interface BenchmarkComponent {
   component_order: number;
   component_code: string | null;
@@ -249,6 +282,10 @@ export interface BenchmarkComponents {
   benchmark_returns_count: number;
   has_benchmark_returns: boolean;
   unresolved_count: number;
+  unresolved_unresolved_count?: number;
+  unresolved_missing_returns_count?: number;
+  coverage_pct?: number;
+  coverage_basis?: string;
 }
 
 export interface RelativeEligibilityRow {
@@ -987,7 +1024,7 @@ export interface GatedOutFund {
 
 export interface OverlapAnalysis {
   max_overlap_pct: number;
-  high_overlap_pairs: Array<[string, string, number]>;
+  high_overlap_pairs: Array<[string, string]>;
 }
 
 export interface CognitionResponse {
@@ -1039,11 +1076,30 @@ export interface CognitionResponse {
     weight_range: [number, number];
     defense_weight: number;
     cash_pct: number;
+    total_invested?: number;
     top_funds: Array<Record<string, unknown>>;
     defense_fund: Record<string, unknown> | null;
     rationale: string;
     overlap_analysis?: OverlapAnalysis;
+    metrics?: PortfolioMetrics;
   };
+}
+
+export interface PortfolioMetrics {
+  portfolio_pe: number | null;
+  portfolio_volatility: number | null;
+  portfolio_max_drawdown: number | null;
+  holdings_penetration: Array<{
+    stock_code: string;
+    stock_name: string;
+    weight: number;
+    industry_name: string;
+    sector_group: string;
+    pe?: number | null;
+    roe?: number | null;
+  }>;
+  industry_exposure: Array<{ name: string; weight: number }>;
+  sector_exposure: Array<{ name: string; weight: number }>;
 }
 
 export async function fetchThemes(): Promise<{ themes: ThemeInfo[] }> {
@@ -1106,4 +1162,77 @@ export async function postConceptCognition(
     concept_name: conceptName,
     conviction: conviction ?? "medium",
   });
+}
+
+// === 个股认知 ===
+
+export interface StockSearchResult {
+  stock_code: string;
+  stock_name: string;
+  industry_name: string;
+  sector_group: string;
+  fund_count: number;
+  pe: number | null;
+  roe: number | null;
+  val_pct: number | null;
+}
+
+export async function searchStocks(keyword: string): Promise<StockSearchResult[]> {
+  const r = await json(
+    `/v1/stocks/search?keyword=${encodeURIComponent(keyword)}`,
+  ) as { stocks: StockSearchResult[] };
+  return r.stocks;
+}
+
+export async function postStockCognition(
+  stockCode: string,
+  stockName?: string,
+  conviction?: string,
+): Promise<CognitionResponse & { stock_info?: Record<string, unknown>; valuation_assessment?: string }> {
+  return postJSON("/v1/cognition/stock", {
+    stock_code: stockCode,
+    stock_name: stockName ?? null,
+    conviction: conviction ?? "medium",
+  });
+}
+
+// === 多认知组合 ===
+
+export interface MultiCognitionItem {
+  direction: string;
+  belief_link?: string | null;
+  conviction?: string;
+  weight_pct: number;
+}
+
+export async function postMultiCognition(
+  items: MultiCognitionItem[],
+  riskTolerance?: string,
+): Promise<{ cognition_count: number; cognitions: unknown[]; combined_portfolio: unknown }> {
+  return postJSON("/v1/cognition/multi", {
+    items,
+    risk_tolerance: riskTolerance ?? "moderate",
+  });
+}
+
+// === 认知结果导出 ===
+
+export async function exportCognition(result: unknown, format: "csv" | "xlsx" = "xlsx"): Promise<void> {
+  const res = await fetch(`${BASE}/v1/cognition/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ result, format }),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^";]+)"?/);
+  const fileName = match ? match[1] : "cognition_result.xlsx";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
 }

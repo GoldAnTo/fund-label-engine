@@ -270,6 +270,125 @@ def export_run_results(run_payload: dict[str, Any], fmt: str) -> tuple[bytes, st
     raise ValueError(f"unsupported format: {fmt}")
 
 
+def export_cognition_result(
+    result: dict[str, Any], fmt: str
+) -> tuple[bytes, str, str]:
+    """导出认知引擎结果为 CSV/XLSX。
+
+    包含 4 个 sheet：认知摘要、匹配基金、组合方案、组合风险指标。
+    """
+    direction = result.get("direction", result.get("stock_name", "cognition"))
+    conviction = result.get("conviction", "medium")
+    base = f"cognition_{direction}"
+
+    # Sheet 1: 认知摘要
+    summary_rows = [{
+        "direction": direction,
+        "conviction": conviction,
+        "belief": (result.get("step1_judgment") or {}).get("belief", ""),
+        "available_links": "、".join(result.get("available_links", [])),
+        "fund_count": len(result.get("step4_fund_matches", [])),
+    }]
+
+    # Sheet 2: 匹配基金
+    fund_rows = []
+    for f in result.get("step4_fund_matches", []):
+        val = f.get("valuation", {})
+        gate = f.get("gate", {})
+        fund_rows.append({
+            "fund_code": f.get("fund_code", ""),
+            "fund_name": f.get("fund_name", ""),
+            "match_pct": f.get("match_pct", ""),
+            "weighted_pe": val.get("weighted_pe", ""),
+            "weighted_val_pct": val.get("weighted_val_pct", ""),
+            "peg": val.get("peg", ""),
+            "price_in_years": val.get("price_in_years", ""),
+            "val_judge": val.get("val_judge", ""),
+            "gate_passed": gate.get("passed", ""),
+            "gate_violations": "; ".join(gate.get("violations", [])),
+            "trend": (f.get("trend") or {}).get("trend", ""),
+        })
+
+    # Sheet 3: 组合方案
+    portfolio = result.get("step5_portfolio", {})
+    pf_rows = []
+    for f in portfolio.get("selected_funds", []):
+        val = f.get("valuation", {})
+        pf_rows.append({
+            "fund_code": f.get("fund_code", ""),
+            "fund_name": f.get("fund_name", ""),
+            "weight": f.get("weight", ""),
+            "match_pct": f.get("match_pct", ""),
+            "max_weight": f.get("max_weight", ""),
+            "weighted_pe": val.get("weighted_pe", ""),
+            "val_judge": val.get("val_judge", ""),
+        })
+    if portfolio.get("defense_position"):
+        df = portfolio["defense_position"]
+        val = df.get("valuation", {})
+        pf_rows.append({
+            "fund_code": df.get("fund_code", ""),
+            "fund_name": df.get("fund_name", ""),
+            "weight": df.get("weight", ""),
+            "match_pct": df.get("match_pct", ""),
+            "max_weight": "",
+            "weighted_pe": val.get("weighted_pe", ""),
+            "val_judge": val.get("val_judge", ""),
+        })
+
+    # Sheet 4: 组合风险指标
+    metrics = portfolio.get("metrics", {})
+    metrics_rows = [
+        {"指标": "组合加权PE", "值": metrics.get("portfolio_pe", "-")},
+        {"指标": "年化波动率(%)", "值": metrics.get("portfolio_volatility", "-")},
+        {"指标": "最大回撤(%)", "值": metrics.get("portfolio_max_drawdown", "-")},
+        {"指标": "现金比例(%)", "值": portfolio.get("cash_pct", "-")},
+        {"指标": "总投资比例(%)", "值": portfolio.get("total_invested", "-")},
+    ]
+    for h in metrics.get("holdings_penetration", []):
+        metrics_rows.append({
+            "指标": f"持仓-{h.get('stock_name', h.get('stock_code', ''))}",
+            "值": h.get("weight", "-"),
+        })
+    for ind in metrics.get("industry_exposure", []):
+        metrics_rows.append({
+            "指标": f"行业-{ind.get('name', '')}",
+            "值": ind.get("weight", "-"),
+        })
+
+    summary_fields = ["direction", "conviction", "belief", "available_links", "fund_count"]
+    fund_fields = [
+        "fund_code", "fund_name", "match_pct", "weighted_pe",
+        "weighted_val_pct", "peg", "price_in_years", "val_judge",
+        "gate_passed", "gate_violations", "trend",
+    ]
+    pf_fields = ["fund_code", "fund_name", "weight", "match_pct", "max_weight", "weighted_pe", "val_judge"]
+    metrics_fields = ["指标", "值"]
+
+    sheets = [
+        ("认知摘要", summary_rows, summary_fields),
+        ("匹配基金", fund_rows, fund_fields),
+        ("组合方案", pf_rows, pf_fields),
+        ("组合风险指标", metrics_rows, metrics_fields),
+    ]
+
+    if fmt == "csv":
+        files: dict[str, bytes] = {}
+        for name, rows, fields in sheets:
+            files[f"{name}.csv"] = rows_to_csv_bytes(rows, fields)
+        return (
+            csv_files_to_zip_bytes(files),
+            "application/zip",
+            f"{base}.zip",
+        )
+
+    return (
+        sheets_to_xlsx_bytes(sheets),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        f"{base}.xlsx",
+    )
+
+
 def export_fund_report(report: dict[str, Any], fmt: str) -> tuple[bytes, str, str]:
     """单基金 report 导出（labels/evidence/features/coverage/reviews）。"""
     fmt = fmt.lower()

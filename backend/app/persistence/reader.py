@@ -301,6 +301,120 @@ class LabelRunReader:
                 overrides[review["fund_code"]] = review
         return overrides
 
+    # ------------------------------------------------------------------
+    # 风格稳定性历史：跨 run 汇总 style_stable / style_drift / style_recent_shift
+    # ------------------------------------------------------------------
+    STABILITY_LABELS = ("style_stable", "style_drift", "style_recent_shift")
+
+    def get_fund_style_history(
+        self, fund_code: str, limit: int = 12
+    ) -> dict[str, Any]:
+        """读取某只基金在最近 N 次 run 中的风格稳定性标签演化。
+
+        返回:
+        {
+          "fund_code": "...",
+          "timeline": [
+            {
+              "run_id": "...",
+              "run_at": "...",
+              "data_as_of": "...",
+              "rule_version": "...",
+              "labels": ["style_stable", "style_drift", ...],   # 该 run 命中的稳定性标签
+              "summary": "stable" | "drift" | "recent_shift" | "none",
+            },
+            ...
+          ],
+          "current": {...} | None,
+          "trend": "stable" | "drifting" | "shifting" | "insufficient_data",
+          "stable_run_count": 3,
+          "drift_run_count": 1,
+          "shift_run_count": 0,
+        }
+        """
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT lr.run_id, lr.run_at, lr.data_as_of, lr.rule_version,
+                           fl.label_code, fl.status
+                    FROM fund_label_results fl
+                    JOIN label_runs lr ON lr.run_id = fl.run_id
+                    WHERE fl.fund_code = ?
+                      AND fl.label_code IN (?, ?, ?)
+                    ORDER BY lr.run_at DESC, lr.rowid DESC
+                    """,
+                    (
+                        fund_code,
+                        *self.STABILITY_LABELS,
+                    ),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
+
+        # 按 run 聚合
+        runs: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            entry = runs.setdefault(
+                row["run_id"],
+                {
+                    "run_id": row["run_id"],
+                    "run_at": row["run_at"],
+                    "data_as_of": row["data_as_of"],
+                    "rule_version": row["rule_version"],
+                    "labels": [],
+                },
+            )
+            if row["label_code"] in self.STABILITY_LABELS:
+                entry["labels"].append(row["label_code"])
+
+        timeline: list[dict[str, Any]] = []
+        for entry in runs.values():
+            labels = sorted(set(entry["labels"]))
+            if "style_stable" in labels:
+                summary = "stable"
+            elif "style_drift" in labels:
+                summary = "drift"
+            elif "style_recent_shift" in labels:
+                summary = "recent_shift"
+            else:
+                summary = "none"
+            timeline.append({**entry, "labels": labels, "summary": summary})
+
+        # 按 run_at 倒序已在 SQL 端保证；保留 limit
+        timeline = timeline[:limit]
+        # 给前端展示按时间正序
+        timeline_asc = list(reversed(timeline))
+
+        current = timeline_asc[-1] if timeline_asc else None
+        stable_n = sum(1 for t in timeline_asc if t["summary"] == "stable")
+        drift_n = sum(1 for t in timeline_asc if t["summary"] == "drift")
+        shift_n = sum(1 for t in timeline_asc if t["summary"] == "recent_shift")
+
+        if len(timeline_asc) < 2:
+            trend = "insufficient_data"
+        else:
+            # 后半段出现 drift/shift 视为趋势恶化
+            half = len(timeline_asc) // 2
+            recent = timeline_asc[half:]
+            later_bad = sum(1 for t in recent if t["summary"] in ("drift", "recent_shift"))
+            if current and current["summary"] == "stable" and later_bad == 0:
+                trend = "stable"
+            elif current and current["summary"] in ("drift", "recent_shift"):
+                trend = "drifting" if current["summary"] == "drift" else "shifting"
+            else:
+                trend = "stable"
+
+        return {
+            "fund_code": fund_code,
+            "timeline": timeline_asc,
+            "current": current,
+            "trend": trend,
+            "stable_run_count": stable_n,
+            "drift_run_count": drift_n,
+            "shift_run_count": shift_n,
+        }
+
     def get_fund_report(self, run_id: str, fund_code: str) -> dict[str, Any] | None:
         payload = self.get_fund_labels(run_id, fund_code)
         if payload is None:
@@ -310,6 +424,7 @@ class LabelRunReader:
             field for field, present in payload["coverage"].items() if not present
         ]
         payload["missing_fields"] = missing_fields
+        payload["style_history"] = self.get_fund_style_history(fund_code)
         payload["summary"] = {
             "label_count": len(payload["labels"]),
             "feature_count": len(payload["features"]),
@@ -324,6 +439,9 @@ class LabelRunReader:
             "missing_field_count": len(missing_fields),
             "review_count": len(payload["reviews"]),
             "review_action": payload["review_action"],
+            "style_stable_run_count": payload["style_history"]["stable_run_count"],
+            "style_drift_run_count": payload["style_history"]["drift_run_count"],
+            "style_recent_shift_run_count": payload["style_history"]["shift_run_count"],
         }
         return payload
 

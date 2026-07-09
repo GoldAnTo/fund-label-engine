@@ -15,7 +15,7 @@ from app.cognition.chain_graph import (
     load_chains,
 )
 from app.cognition.expectation_gap import calculate_link_expectation_gap
-from app.cognition.portfolio_builder import build_portfolio, calculate_overlap
+from app.cognition.portfolio_builder import build_portfolio, calculate_overlap, calculate_portfolio_metrics
 from app.cognition.theme_registry import load_themes
 from app.cognition.valuation_gate import calculate_valuation, check_hard_limits
 from app.cognition.validator import validate_cognition
@@ -45,7 +45,12 @@ class CognitionEngine:
     # ------------------------------------------------------------------
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            conn = sqlite3.connect(f"file:{self._source_db}?mode=ro", uri=True)
+            # check_same_thread=False: FastAPI 通过 anyio 把同步处理函数调度到
+            # 工作线程，CognitionEngine 实例在 lifespan/工厂阶段创建，但
+            # run() 在请求线程执行。共享连接需要跨线程，否则 SQLite 拒绝访问。
+            conn = sqlite3.connect(
+                f"file:{self._source_db}?mode=ro", uri=True, check_same_thread=False
+            )
             conn.row_factory = sqlite3.Row
             if self._factor_db and self._factor_db.exists():
                 conn.execute(f"ATTACH DATABASE '{self._factor_db}' AS factordb")
@@ -162,6 +167,385 @@ class CognitionEngine:
             chain, concept_name, None, conviction,
             time_horizon, risk_tolerance, max_valuation_percentile, top_n,
         )
+
+    # ------------------------------------------------------------------
+    # 个股认知：按股票穿透基金持仓
+    # ------------------------------------------------------------------
+    def search_stocks(self, keyword: str, limit: int = 20) -> list[dict[str, Any]]:
+        """按关键词搜索股票，返回持有该股票的基金数量和估值数据。
+
+        依赖 stock_holdings + stock_industry_map + factordb.stock_factor_values。
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            """
+            SELECT h.stock_code, h.stock_name,
+                   m.industry_name, m.sector_group,
+                   COUNT(DISTINCT h.fund_code) AS fund_count,
+                   (SELECT f.factor_value FROM factordb.stock_factor_values f
+                    WHERE f.stock_code = h.stock_code AND f.factor_code = 'pe') AS pe,
+                   (SELECT f.factor_value FROM factordb.stock_factor_values f
+                    WHERE f.stock_code = h.stock_code AND f.factor_code = 'roe') AS roe,
+                   (SELECT f.factor_value FROM factordb.stock_factor_values f
+                    WHERE f.stock_code = h.stock_code AND f.factor_code = 'valuation_percentile') AS val_pct
+            FROM stock_holdings h
+            LEFT JOIN stock_industry_map m ON h.stock_code = m.stock_code
+            WHERE h.stock_name LIKE ? OR h.stock_code LIKE ?
+            GROUP BY h.stock_code, h.stock_name
+            ORDER BY fund_count DESC
+            LIMIT ?
+            """,
+            (f"%{keyword}%", f"%{keyword}%", limit),
+        ).fetchall()
+        return [
+            {
+                "stock_code": r[0],
+                "stock_name": r[1],
+                "industry_name": r[2] or "",
+                "sector_group": r[3] or "",
+                "fund_count": r[4],
+                "pe": round(r[5], 1) if r[5] else None,
+                "roe": round(r[6] * 100, 1) if r[6] else None,
+                "val_pct": round(r[7] * 100, 0) if r[7] is not None else None,
+            }
+            for r in rows
+        ]
+
+    def run_stock_cognition(
+        self,
+        stock_code: str,
+        stock_name: str | None = None,
+        conviction: str = "medium",
+        time_horizon: str = "long",
+        risk_tolerance: str = "moderate",
+        max_valuation_percentile: float | None = None,
+        top_n: int = 5,
+    ) -> dict[str, Any]:
+        """个股认知：找到持有该股票占比最高的基金，附估值检查。
+
+        流程：
+        1. 搜索所有持有该股票的基金
+        2. 按该股票在基金中的权重排序
+        3. 对每只基金做估值门禁
+        4. 构建组合
+        """
+        conn = self._get_conn()
+
+        # 查找持有该股票的基金
+        rows = conn.execute(
+            """
+            SELECT h.fund_code, h.stock_code, h.stock_name,
+                   h.net_value_ratio AS weight, h.report_period
+            FROM stock_holdings h
+            WHERE h.stock_code = ? OR h.stock_name LIKE ?
+            ORDER BY h.net_value_ratio DESC
+            """,
+            (stock_code, f"%{stock_name or stock_code}%"),
+        ).fetchall()
+
+        if not rows:
+            return {
+                "stock_code": stock_code,
+                "stock_name": stock_name or stock_code,
+                "error": "未找到持有该股票的基金",
+            }
+
+        # 获取股票估值
+        stock_info = self._get_stock_valuation(conn, stock_code)
+
+        # 按基金聚合，取每只基金最新一期的权重
+        fund_latest: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            fc = r[0]
+            if fc not in fund_latest or r[4] > fund_latest[fc]["report_period"]:
+                fund_latest[fc] = {
+                    "fund_code": fc,
+                    "stock_weight": r[3],
+                    "report_period": r[4],
+                }
+
+        # 加载基金持仓和估值
+        hard_limits: dict[str, Any] = {}
+        if max_valuation_percentile is not None:
+            hard_limits["max_valuation_percentile"] = max_valuation_percentile
+        else:
+            hard_limits["max_valuation_percentile"] = 85
+
+        fund_matches: list[dict[str, Any]] = []
+        gated_out: list[dict[str, Any]] = []
+
+        for fc, info in fund_latest.items():
+            holdings = get_holdings(conn, fc)
+            if not holdings:
+                continue
+
+            valuation = calculate_valuation(holdings)
+            industry_pe_medians = self._get_industry_pe_medians(conn)
+            self._enrich_cross_sectional(holdings, valuation, industry_pe_medians)
+
+            gate = check_hard_limits(valuation, hard_limits)
+
+            trend = calculate_holding_trend(
+                conn,
+                fc,
+                {"chain_links": {"_": {"stock_keywords": [stock_name or stock_code], "industry_keywords": []}}},
+            )
+
+            fund_data = {
+                "fund_code": fc,
+                "fund_name": self._get_fund_name(conn, fc),
+                "match_pct": round(info["stock_weight"] * 100, 1),
+                "stock_weight": round(info["stock_weight"] * 100, 2),
+                "valuation": valuation,
+                "trend": trend,
+                "gate": gate,
+                "holdings": holdings,
+            }
+
+            if gate["passed"]:
+                fund_matches.append(fund_data)
+            else:
+                gated_out.append(fund_data)
+
+        fund_matches.sort(key=lambda x: x["match_pct"], reverse=True)
+        top_funds = fund_matches[:top_n]
+
+        # 加载基金经理数据
+        fund_managers = self._load_fund_managers(conn)
+        for fund in top_funds:
+            mgr = fund_managers.get(fund["fund_code"])
+            if mgr:
+                fund["manager"] = mgr
+
+        # 仓位计算
+        if conviction == "high":
+            total_weight = 20.0
+        elif conviction == "medium":
+            total_weight = 12.0
+        else:
+            total_weight = 5.0
+
+        if risk_tolerance == "conservative":
+            defense_weight_pct = 15.0
+        elif risk_tolerance == "aggressive":
+            defense_weight_pct = 5.0
+        else:
+            defense_weight_pct = 10.0
+
+        # 防守基金
+        defense_fund = self._find_defense_fund(
+            conn,
+            {fc: get_holdings(conn, fc) for fc in fund_latest},
+            self._chains.get("dividend_defense", {}),
+        )
+
+        portfolio = build_portfolio(
+            fund_matches,
+            defense_fund,
+            corr_threshold=0.85,
+            total_cognition_weight=total_weight,
+            defense_weight_pct=defense_weight_pct,
+        )
+
+        # 组合级指标
+        all_holdings_local = {fc: get_holdings(conn, fc) for fc in fund_latest}
+        portfolio_metrics = calculate_portfolio_metrics(
+            conn,
+            portfolio.get("selected_funds", []),
+            defense_fund,
+            all_holdings_local,
+        )
+
+        portfolio["metrics"] = portfolio_metrics
+        portfolio["top_funds"] = portfolio.get("selected_funds", [])
+        portfolio["defense_fund"] = defense_fund
+
+        # 估值判断
+        val_assessment = "数据不足"
+        if stock_info and stock_info.get("pe"):
+            pe = stock_info["pe"]
+            val_pct = stock_info.get("val_pct")
+            if val_pct is not None:
+                if val_pct > 85:
+                    val_assessment = f"PE {pe:.0f}，估值分位 {val_pct:.0f}%，极度偏贵"
+                elif val_pct > 70:
+                    val_assessment = f"PE {pe:.0f}，估值分位 {val_pct:.0f}%，偏贵"
+                elif val_pct > 30:
+                    val_assessment = f"PE {pe:.0f}，估值分位 {val_pct:.0f}%，合理"
+                else:
+                    val_assessment = f"PE {pe:.0f}，估值分位 {val_pct:.0f}%，偏低"
+
+        return {
+            "stock_code": stock_code,
+            "stock_name": stock_name or stock_info.get("stock_name", stock_code) if stock_info else stock_code,
+            "stock_info": stock_info,
+            "valuation_assessment": val_assessment,
+            "conviction": conviction,
+            "step4_fund_matches": top_funds,
+            "matches": top_funds,
+            "candidates": top_funds,
+            "step5_portfolio": portfolio,
+            "gated_out_funds": [
+                {
+                    "fund_code": f["fund_code"],
+                    "fund_name": f["fund_name"],
+                    "match_pct": f["match_pct"],
+                    "violations": f["gate"]["violations"],
+                }
+                for f in gated_out[:5]
+            ],
+        }
+
+    def _get_stock_valuation(
+        self, conn: sqlite3.Connection, stock_code: str
+    ) -> dict[str, Any] | None:
+        """获取单只股票的估值数据。"""
+        try:
+            rows = conn.execute(
+                """
+                SELECT f.factor_code, f.factor_value
+                FROM factordb.stock_factor_values f
+                WHERE f.stock_code = ?
+                """,
+                (stock_code,),
+            ).fetchall()
+        except Exception:
+            return None
+
+        factors = {r[0]: r[1] for r in rows}
+        if not factors:
+            return None
+
+        # 获取股票名和行业
+        name_row = conn.execute(
+            "SELECT stock_name FROM stock_holdings WHERE stock_code = ? LIMIT 1",
+            (stock_code,),
+        ).fetchone()
+        ind_row = conn.execute(
+            "SELECT industry_name, sector_group FROM stock_industry_map WHERE stock_code = ? LIMIT 1",
+            (stock_code,),
+        ).fetchone()
+
+        return {
+            "stock_code": stock_code,
+            "stock_name": name_row[0] if name_row else stock_code,
+            "industry_name": ind_row[0] if ind_row else "",
+            "sector_group": ind_row[1] if ind_row else "",
+            "pe": round(factors.get("pe"), 1) if factors.get("pe") else None,
+            "pb": round(factors.get("pb"), 2) if factors.get("pb") else None,
+            "roe": round(factors.get("roe") * 100, 1) if factors.get("roe") else None,
+            "dividend_yield": round(factors.get("dividend_yield") * 100, 2) if factors.get("dividend_yield") else None,
+            "profit_growth": round(factors.get("profit_growth") * 100, 0) if factors.get("profit_growth") else None,
+            "val_pct": round(factors.get("valuation_percentile") * 100, 0) if factors.get("valuation_percentile") is not None else None,
+        }
+
+    # ------------------------------------------------------------------
+    # 多认知组合合并
+    # ------------------------------------------------------------------
+    def combine_cognitions(
+        self,
+        cognition_items: list[dict[str, Any]],
+        risk_tolerance: str = "moderate",
+    ) -> dict[str, Any]:
+        """合并多个认知结果为一个组合。
+
+        cognition_items: [{"direction": "AI", "weight_pct": 30, "result": {...}}, ...]
+        每个 result 是 run() 的返回值，包含 step5_portfolio。
+
+        合并逻辑：
+        1. 每个认知的基金按其分配权重缩放
+        2. 同一基金出现在多个认知中时合并权重
+        3. 重新计算组合级指标
+        """
+        conn = self._get_conn()
+
+        merged_funds: dict[str, dict[str, Any]] = {}
+        cognition_breakdown: list[dict[str, Any]] = []
+        total_allocated = 0.0
+
+        for item in cognition_items:
+            direction = item.get("direction", "?")
+            weight_pct = item.get("weight_pct", 10)
+            result = item.get("result") or {}
+            portfolio = result.get("step5_portfolio", {})
+            selected = portfolio.get("selected_funds", [])
+
+            cognition_total = 0.0
+            for fund in selected:
+                fc = fund["fund_code"]
+                # 缩放权重：基金原权重 × 认知分配比例
+                scaled_weight = round(fund.get("weight", 0) * weight_pct / 100, 1)
+
+                if fc not in merged_funds:
+                    merged_funds[fc] = {
+                        "fund_code": fc,
+                        "fund_name": fund.get("fund_name", fc),
+                        "weight": 0.0,
+                        "match_pct": fund.get("match_pct", 0),
+                        "valuation": fund.get("valuation", {}),
+                        "holdings": fund.get("holdings", []),
+                        "cognitions": [],
+                    }
+                merged_funds[fc]["weight"] += scaled_weight
+                merged_funds[fc]["cognitions"].append(direction)
+                cognition_total += scaled_weight
+
+            total_allocated += cognition_total
+            cognition_breakdown.append({
+                "direction": direction,
+                "allocation_pct": weight_pct,
+                "actual_weight": round(cognition_total, 1),
+                "fund_count": len(selected),
+            })
+
+        # 合并后的基金列表
+        all_funds = sorted(merged_funds.values(), key=lambda x: x["weight"], reverse=True)
+
+        # 计算组合级指标
+        # 构建防守权重
+        defense_fund = None
+        for item in cognition_items:
+            result = item.get("result") or {}
+            portfolio = result.get("step5_portfolio", {})
+            df = portfolio.get("defense_position")
+            if df:
+                defense_fund = df
+                break
+
+        all_holdings_local = {f["fund_code"]: f.get("holdings", []) for f in all_funds}
+        portfolio_metrics = calculate_portfolio_metrics(
+            conn,
+            all_funds,
+            defense_fund,
+            all_holdings_local,
+        )
+
+        total_weight = sum(f["weight"] for f in all_funds)
+        defense_weight = defense_fund.get("weight", 0) if defense_fund else 0
+        cash_pct = max(0, 100 - total_weight - defense_weight)
+
+        return {
+            "cognitions": cognition_breakdown,
+            "combined_funds": [
+                {
+                    "fund_code": f["fund_code"],
+                    "fund_name": f["fund_name"],
+                    "weight": f["weight"],
+                    "match_pct": f["match_pct"],
+                    "cognitions": f["cognitions"],
+                    "valuation": f["valuation"],
+                }
+                for f in all_funds
+            ],
+            "defense_fund": defense_fund,
+            "cash_pct": round(cash_pct, 1),
+            "total_invested": round(total_weight + defense_weight, 1),
+            "metrics": portfolio_metrics,
+            "overlap_analysis": {
+                "max_overlap_pct": 0,
+                "high_overlap_pairs": [],
+            },
+        }
 
     def _run_with_chain(
         self,
@@ -645,7 +1029,7 @@ class CognitionEngine:
         )
 
         # 持仓重叠度分析
-        overlap_analysis: list[dict[str, Any]] = []
+        overlap_pairs: list[dict[str, Any]] = []
         selected = portfolio.get("selected_funds", [])
         for i, fa in enumerate(selected):
             for fb in selected[i + 1:]:
@@ -653,16 +1037,37 @@ class CognitionEngine:
                 holdings_b = all_holdings.get(fb["fund_code"], [])
                 if holdings_a and holdings_b:
                     overlap = calculate_overlap(holdings_a, holdings_b)
-                    overlap_analysis.append({
+                    overlap_pairs.append({
                         "fund_a": fa["fund_code"],
                         "fund_b": fb["fund_code"],
                         **overlap,
                     })
 
+        max_overlap = max((p["overlap_a_pct"] for p in overlap_pairs), default=0)
+        high_overlap_pairs = [
+            [p["fund_a"], p["fund_b"]]
+            for p in overlap_pairs
+            if p["overlap_a_pct"] > 40
+        ]
+        overlap_summary = {
+            "max_overlap_pct": round(max_overlap, 1),
+            "high_overlap_pairs": high_overlap_pairs,
+            "pairs": overlap_pairs,
+        }
+
+        # 组合级风险指标
+        portfolio_metrics = calculate_portfolio_metrics(
+            conn,
+            selected,
+            defense_fund,
+            all_holdings,
+        )
+
         portfolio["role"] = role
         portfolio["total_cognition_weight"] = round(total_cognition_weight, 1)
         portfolio["defense_weight_pct"] = defense_weight_pct
-        portfolio["overlap_analysis"] = overlap_analysis
+        portfolio["overlap_analysis"] = overlap_summary
+        portfolio["metrics"] = portfolio_metrics
         portfolio["rationale"] = self._build_portfolio_rationale(
             judgment, positive_links, negative_links, validation
         )
@@ -675,6 +1080,9 @@ class CognitionEngine:
             }
             for f in gated_out[:5]
         ]
+        # 前端兼容字段
+        portfolio["top_funds"] = portfolio.get("selected_funds", [])
+        portfolio["defense_fund"] = defense_fund
 
         return {
             "direction": direction,

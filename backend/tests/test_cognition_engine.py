@@ -943,15 +943,11 @@ def test_cognition_engine_overlap_analysis(tmp_path: Path) -> None:
         result = engine.run("consumer")
         portfolio = result["step5_portfolio"]
         assert "overlap_analysis" in portfolio
-        # 如果选了2只以上基金，应该有重叠度分析
-        selected = portfolio.get("selected_funds", [])
-        if len(selected) >= 2:
-            assert len(portfolio["overlap_analysis"]) > 0
-            overlap = portfolio["overlap_analysis"][0]
-            assert "fund_a" in overlap
-            assert "fund_b" in overlap
-            assert "overlap_a_pct" in overlap
-            assert "judge" in overlap
+        overlap = portfolio["overlap_analysis"]
+        # overlap_analysis 是 dict 形式：max_overlap_pct / high_overlap_pairs / pairs
+        if overlap.get("max_overlap_pct", 0) > 0:
+            assert "high_overlap_pairs" in overlap
+            assert isinstance(overlap["high_overlap_pairs"], list)
     finally:
         engine.close()
 

@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from app.batch import run_batch
 from app.benchmark_precision import benchmark_precision_by_fund
 from app.exporters import (
+    export_cognition_result,
     export_fund_report,
     export_review_queue,
     export_run_results,
@@ -597,6 +598,23 @@ def create_app(
             )
         return payload
 
+    @app.get("/v1/runs/{run_id}/funds/{fund_code}/style-history")
+    def get_run_fund_style_history(
+        run_id: str,
+        fund_code: str,
+        limit: int = 12,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """返回该基金在最近 N 次 run 中的风格稳定性标签演化。
+
+        - `run_id` 用于校验本次 run 存在（不影响数据范围：timeline 跨 run 聚合）。
+        - 包含 timeline、当前状态、趋势判定、计数。
+        """
+        if reader.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+        history = reader.get_fund_style_history(fund_code, limit=limit)
+        return {"run_id": run_id, **history}
+
     @app.get("/v1/runs/{run_id}/funds/{fund_code}/percentile")
     def get_run_fund_percentile(
         run_id: str,
@@ -787,9 +805,27 @@ def create_app(
                 if c["status"] == "resolved" and not c["has_returns"]:
                     c["has_returns"] = True
 
+        # 未达成"全部分析前置条件"的组件（可能 status!=resolved 或缺收益）
         unresolved = [
             c for c in components if c["status"] != "resolved" or not c["has_returns"]
         ]
+        # 进一步细分，便于前端展示
+        unresolved_unresolved = [c for c in unresolved if c["status"] != "resolved"]
+        unresolved_missing_returns = [
+            c for c in unresolved if c["status"] == "resolved" and not c["has_returns"]
+        ]
+        # 已解析组件的权重合计（用于"覆盖率"展示）
+        total_weight = sum(c.get("weight") or 0 for c in components)
+        resolved_weight = sum(
+            c.get("weight") or 0
+            for c in components
+            if c["status"] == "resolved" and c["has_returns"]
+        )
+        coverage_pct = (
+            round(resolved_weight / total_weight * 100, 1)
+            if total_weight and total_weight > 0
+            else 0.0
+        )
         return {
             "run_id": run_id,
             "fund_code": fund_code,
@@ -797,6 +833,10 @@ def create_app(
             "benchmark_returns_count": benchmark_returns_count,
             "has_benchmark_returns": benchmark_returns_count > 0,
             "unresolved_count": len(unresolved),
+            "unresolved_unresolved_count": len(unresolved_unresolved),
+            "unresolved_missing_returns_count": len(unresolved_missing_returns),
+            "coverage_pct": coverage_pct,
+            "coverage_basis": "weight",
         }
 
     @app.get("/v1/runs/{run_id}/search")
@@ -1375,6 +1415,128 @@ def create_app(
         )
         result["matches"] = result.get("step4_fund_matches", [])
         return result
+
+    # === 个股认知 API ===
+
+    class StockCognitionRequest(BaseModel):
+        stock_code: str
+        stock_name: str | None = None
+        conviction: str = "medium"
+        time_horizon: str = "long"
+        risk_tolerance: str = "moderate"
+        max_valuation_percentile: float | None = None
+        top_n: int = 5
+
+    @app.get("/v1/stocks/search")
+    def search_stocks(keyword: str, limit: int = 20) -> dict[str, Any]:
+        """按关键词搜索股票，返回持有该股票的基金数量和估值数据"""
+        engine = _get_cognition_engine(app)
+        stocks = engine.search_stocks(keyword, limit)
+        return {"keyword": keyword, "stocks": stocks, "count": len(stocks)}
+
+    @app.post("/v1/cognition/stock")
+    def run_stock_cognition_api(request: StockCognitionRequest) -> dict[str, Any]:
+        """个股认知：找到持有该股票占比最高的基金，附估值检查和组合方案"""
+        engine = _get_cognition_engine(app)
+        result = engine.run_stock_cognition(
+            stock_code=request.stock_code,
+            stock_name=request.stock_name,
+            conviction=request.conviction,
+            time_horizon=request.time_horizon,
+            risk_tolerance=request.risk_tolerance,
+            max_valuation_percentile=request.max_valuation_percentile,
+            top_n=request.top_n,
+        )
+        result["matches"] = result.get("step4_fund_matches", [])
+        return result
+
+    # === 多认知组合 API ===
+
+    class MultiCognitionItem(BaseModel):
+        direction: str
+        belief_link: str | None = None
+        conviction: str = "medium"
+        weight_pct: float = 20.0  # 该认知在总组合中的分配比例
+
+    class MultiCognitionRequest(BaseModel):
+        items: list[MultiCognitionItem]
+        risk_tolerance: str = "moderate"
+        time_horizon: str = "long"
+        max_valuation_percentile: float | None = None
+        top_n: int = 5
+
+    @app.post("/v1/cognition/multi")
+    def run_multi_cognition(request: MultiCognitionRequest) -> dict[str, Any]:
+        """运行多个认知并合并为一个组合方案
+
+        每个认知独立运行 7 步流程，然后按 weight_pct 合并基金权重。
+        """
+        engine = _get_cognition_engine(app)
+        cognition_results: list[dict[str, Any]] = []
+
+        for item in request.items:
+            result = engine.run(
+                direction=item.direction,
+                belief_link=item.belief_link,
+                conviction=item.conviction,
+                time_horizon=request.time_horizon,
+                risk_tolerance=request.risk_tolerance,
+                max_valuation_percentile=request.max_valuation_percentile,
+                top_n=request.top_n,
+            )
+            cognition_results.append({
+                "direction": item.direction,
+                "weight_pct": item.weight_pct,
+                "conviction": item.conviction,
+                "result": result,
+            })
+
+        combined = engine.combine_cognitions(
+            cognition_results,
+            risk_tolerance=request.risk_tolerance,
+        )
+        return {
+            "cognition_count": len(request.items),
+            "cognitions": cognition_results,
+            "combined_portfolio": combined,
+        }
+
+    class CombineCognitionItem(BaseModel):
+        direction: str
+        weight_pct: float = 20.0
+        result: dict[str, Any]
+
+    class CombineCognitionRequest(BaseModel):
+        items: list[CombineCognitionItem]
+        risk_tolerance: str = "moderate"
+
+    @app.post("/v1/cognition/combine")
+    def combine_cognitions(request: CombineCognitionRequest) -> dict[str, Any]:
+        """合并已有的认知结果为一个组合（不重新运行认知）"""
+        engine = _get_cognition_engine(app)
+        combined = engine.combine_cognitions(
+            [item.model_dump() for item in request.items],
+            risk_tolerance=request.risk_tolerance,
+        )
+        return combined
+
+    # === 认知结果导出 ===
+
+    class CognitionExportRequest(BaseModel):
+        result: dict[str, Any]
+        format: Literal["csv", "xlsx"] = "xlsx"
+
+    @app.post("/v1/cognition/export")
+    def export_cognition(request: CognitionExportRequest) -> Response:
+        """导出认知引擎结果为 Excel/CSV"""
+        data, media_type, filename = export_cognition_result(
+            request.result, request.format
+        )
+        return Response(
+            content=data,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     # 在 API 路由之后 mount 前端静态文件
     dist_dir = _resolve_frontend_dist(frontend_dist)

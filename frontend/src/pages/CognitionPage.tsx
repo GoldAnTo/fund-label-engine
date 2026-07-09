@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, Component, ReactNode } from "react";
 import {
   fetchThemes,
   fetchDirectionLinks,
   postCognition,
   searchConcepts,
   postConceptCognition,
+  searchStocks,
+  postStockCognition,
+  exportCognition,
   type ThemeInfo,
   type ChainLinkInfo,
   type CognitionResponse,
@@ -12,7 +15,9 @@ import {
   type ConceptBoard,
   type DebateRound,
   type CognitionFeedback,
+  type StockSearchResult,
 } from "../api";
+import { DonutChart, HorizontalBarChart, SkeletonCard } from "../charts";
 import {
   KpiBar,
   ValuationQuad,
@@ -32,6 +37,35 @@ function fmt(v: number | null | undefined, suffix = ""): string {
   return Number.isInteger(v) ? `${v}${suffix}` : `${v.toFixed(1)}${suffix}`;
 }
 
+// 临时 ErrorBoundary：渲染崩溃时把错误显示出来，而不是整页空白
+class CognitionErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
+    console.error("[CognitionPage] render error:", error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: "20px", margin: "20px", background: "#fff3f3", border: "1px solid #e7443c", borderRadius: "6px" }}>
+          <div style={{ fontWeight: 600, color: "#c0392b", marginBottom: "8px" }}>渲染出错：</div>
+          <pre style={{ whiteSpace: "pre-wrap", fontSize: "12px", color: "#333", margin: 0 }}>
+            {this.state.error.message}
+            {"\n\n"}
+            {this.state.error.stack}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function CognitionPage() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [themes, setThemes] = useState<ThemeInfo[]>([]);
@@ -48,6 +82,10 @@ export default function CognitionPage() {
   const [conceptResults, setConceptResults] = useState<ConceptBoard[]>([]);
   const [conceptLoading, setConceptLoading] = useState(false);
   const [selectedFundCode, setSelectedFundCode] = useState<string | null>(null);
+  const [stockKeyword, setStockKeyword] = useState("");
+  const [stockResults, setStockResults] = useState<StockSearchResult[]>([]);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     fetchThemes().then((r) => setThemes(r.themes)).catch(() => {});
@@ -68,6 +106,36 @@ export default function CognitionPage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [conceptKeyword]);
+
+  // 个股搜索
+  useEffect(() => {
+    if (!stockKeyword.trim()) {
+      setStockResults([]);
+      return;
+    }
+    setStockLoading(true);
+    const timer = setTimeout(() => {
+      searchStocks(stockKeyword.trim())
+        .then(setStockResults)
+        .catch(() => setStockResults([]))
+        .finally(() => setStockLoading(false));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [stockKeyword]);
+
+  // 用个股运行认知分析
+  const pickStock = (stock: StockSearchResult) => {
+    setLoading(true);
+    setError(null);
+    postStockCognition(stock.stock_code, stock.stock_name, conviction)
+      .then((r) => {
+        setResult(r as CognitionResponse);
+        setDirection(`${stock.stock_name}（个股认知）`);
+        setStep(3);
+      })
+      .catch(() => setError("个股分析失败"))
+      .finally(() => setLoading(false));
+  };
 
   // 用概念板块运行认知分析
   const pickConcept = (concept: ConceptBoard) => {
@@ -132,7 +200,7 @@ export default function CognitionPage() {
 
         <div className="cognition-direction-grid">
           {themes.map((t) => (
-            <div key={t.key} className="card cognition-direction-card" onClick={() => pickDirection(t.key)}>
+            <div key={t.key} className="card theme-card cognition-direction-card" onClick={() => pickDirection(t.key)}>
               <div style={{ fontWeight: 600, marginBottom: "6px" }}>{t.name}</div>
               <div style={{ fontSize: "13px", color: "var(--text-2)" }}>{t.belief}</div>
             </div>
@@ -161,6 +229,41 @@ export default function CognitionPage() {
                 >
                   <div style={{ fontWeight: 600 }}>{c.name}</div>
                   <div style={{ fontSize: "13px", color: "var(--text-2)" }}>{c.stock_count} 只成分股</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: "24px" }}>
+          <div style={{ fontSize: "13px", color: "var(--text-3)", marginBottom: "8px" }}>
+            搜索个股（找持有该股票占比最高的基金）：
+          </div>
+          <input
+            className="custom-direction-input"
+            style={{ width: "100%" }}
+            value={stockKeyword}
+            onChange={(e) => setStockKeyword(e.target.value)}
+            placeholder="输入股票名称或代码，如：贵州茅台、中际旭创、寒武纪..."
+          />
+          {stockLoading && <p style={{ fontSize: "13px", color: "var(--text-3)", marginTop: "4px" }}>搜索中...</p>}
+          {stockResults.length > 0 && (
+            <div className="concept-search-results">
+              {stockResults.map((s) => (
+                <div
+                  key={s.stock_code}
+                  className="card concept-result-item"
+                  onClick={() => pickStock(s)}
+                >
+                  <div style={{ fontWeight: 600 }}>
+                    {s.stock_name}
+                    <span style={{ fontSize: "12px", color: "var(--text-3)", marginLeft: "8px" }}>{s.stock_code}</span>
+                  </div>
+                  <div style={{ fontSize: "13px", color: "var(--text-2)" }}>
+                    {s.fund_count} 只基金持有
+                    {s.pe && ` · PE ${s.pe}`}
+                    {s.val_pct != null && ` · 分位 ${s.val_pct}%`}
+                  </div>
                 </div>
               ))}
             </div>
@@ -202,7 +305,13 @@ export default function CognitionPage() {
           在这个产业链里，你最相信哪个环节会先受益？
         </p>
 
-        {loading && <p>加载产业链...</p>}
+        {loading && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <SkeletonCard lines={1} />
+            <SkeletonCard lines={2} />
+            <SkeletonCard lines={2} />
+          </div>
+        )}
 
         {!loading && links.length === 0 && isCustom && (
           <p style={{ color: "var(--text-2)" }}>
@@ -288,9 +397,10 @@ export default function CognitionPage() {
     const scrolled = useScrollSpy(sectionIds);
 
     return (
-      <div className="main">
-        {/* 选择摘要 */}
-        <div className="cognition-selection-bar">
+      <CognitionErrorBoundary>
+        <div className="main">
+          {/* 选择摘要 */}
+          <div className="cognition-selection-bar">
           <div className="cognition-selection-info">
             <span>方向：<strong>{result.direction}</strong></span>
             <span className="cognition-selection-sep">|</span>
@@ -304,8 +414,24 @@ export default function CognitionPage() {
           </div>
         </div>
 
-        {loading && <p>分析中...</p>}
-        {error && <p style={{ color: "var(--neg)" }}>{error}</p>}
+        {loading && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px", margin: "16px 0" }}>
+            <SkeletonCard lines={2} />
+            <div style={{ display: "flex", gap: "12px" }}>
+              <SkeletonCard lines={1} />
+              <SkeletonCard lines={1} />
+              <SkeletonCard lines={1} />
+              <SkeletonCard lines={1} />
+            </div>
+            <SkeletonCard lines={4} />
+            <SkeletonCard lines={4} />
+          </div>
+        )}
+        {error && (
+          <div style={{ color: "var(--neg)", padding: "12px 16px", background: "var(--neg-soft)", borderRadius: "var(--r)", marginTop: "12px" }}>
+            {error}
+          </div>
+        )}
 
         {/* 顶部KPI条（4个并排卡片） */}
         <KpiBar
@@ -314,7 +440,7 @@ export default function CognitionPage() {
         />
 
         {/* 三面板布局：左导航 / 中结果 / 右详情 */}
-        <div className="cognition-three-panel">
+        <div className="cognition-three-panel fade-in-up">
           {/* 左侧导航 */}
           <SideNav
             active={scrolled}
@@ -517,43 +643,59 @@ export default function CognitionPage() {
               <div style={{ fontWeight: 600, marginBottom: "8px" }}>组合方案</div>
               <p style={{ color: "var(--text-2)", marginBottom: "12px" }}>{pf.rationale}</p>
 
-              {/* 仓位权重进度条 */}
-              <div className="portfolio-weight-bar">
-                <div className="portfolio-weight-fill portfolio-weight-cognition" style={{ width: `${pf.suggested_weight}%` }}>
-                  认知 {fmt(pf.suggested_weight, "%")}
-                </div>
-                <div className="portfolio-weight-fill portfolio-weight-defense" style={{ width: `${pf.defense_weight}%` }}>
-                  防守 {fmt(pf.defense_weight, "%")}
-                </div>
-                <div className="portfolio-weight-fill portfolio-weight-cash" style={{ width: `${pf.cash_pct}%` }}>
-                  现金 {fmt(pf.cash_pct, "%")}
+              {/* 仓位配置环形图 + 进度条 */}
+              <div style={{ display: "flex", gap: "24px", alignItems: "center", flexWrap: "wrap" }}>
+                <DonutChart
+                  data={[
+                    { name: "认知仓位", value: pf.suggested_weight || 0, color: "#3b82f6" },
+                    { name: "防守仓位", value: pf.defense_weight || 0, color: "#10b981" },
+                    { name: "现金", value: pf.cash_pct || 0, color: "#e5e7eb" },
+                  ]}
+                  size={160}
+                  innerRadius={40}
+                  outerRadius={65}
+                  centerLabel="总投资"
+                  centerValue={`${(pf.total_invested || 0).toFixed(0)}%`}
+                />
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  {/* 仓位权重进度条 */}
+                  <div className="portfolio-weight-bar">
+                    <div className="portfolio-weight-fill portfolio-weight-cognition" style={{ width: `${pf.suggested_weight}%` }}>
+                      认知 {fmt(pf.suggested_weight, "%")}
+                    </div>
+                    <div className="portfolio-weight-fill portfolio-weight-defense" style={{ width: `${pf.defense_weight}%` }}>
+                      防守 {fmt(pf.defense_weight, "%")}
+                    </div>
+                    <div className="portfolio-weight-fill portfolio-weight-cash" style={{ width: `${pf.cash_pct}%` }}>
+                      现金 {fmt(pf.cash_pct, "%")}
+                    </div>
+                  </div>
+                  {/* 配置清单 */}
+                  {pf.top_funds && pf.top_funds.length > 0 && (
+                    <table className="table-v2" style={{ marginTop: "12px" }}>
+                      <thead>
+                        <tr>
+                          <th>代码</th>
+                          <th>名称</th>
+                          <th>匹配度</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pf.top_funds.map((f, i) => {
+                          const ff = f as Record<string, unknown>;
+                          return (
+                            <tr key={i}>
+                              <td>{String(ff.fund_code ?? "")}</td>
+                              <td>{String(ff.fund_name ?? "")}</td>
+                              <td>{fmt(ff.match_pct as number | null, "%")}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </div>
-
-              {/* 配置清单 */}
-              {pf.top_funds && pf.top_funds.length > 0 && (
-                <table className="table-v2" style={{ marginTop: "12px" }}>
-                  <thead>
-                    <tr>
-                      <th>代码</th>
-                      <th>名称</th>
-                      <th>匹配度</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pf.top_funds.map((f, i) => {
-                      const ff = f as Record<string, unknown>;
-                      return (
-                        <tr key={i}>
-                          <td>{String(ff.fund_code ?? "")}</td>
-                          <td>{String(ff.fund_name ?? "")}</td>
-                          <td>{fmt(ff.match_pct as number | null, "%")}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
 
               {/* 防守基金 */}
               {pf.defense_fund && (
@@ -566,7 +708,7 @@ export default function CognitionPage() {
 
               {/* 持仓重叠度分析 */}
               {pf.overlap_analysis && pf.overlap_analysis.max_overlap_pct > 0 && (
-                <div style={{ marginTop: "12px", padding: "8px 12px", background: "var(--bg-2)", borderRadius: "6px", fontSize: "13px" }}>
+                <div style={{ marginTop: "12px", padding: "8px 12px", background: "var(--surface-2)", borderRadius: "6px", fontSize: "13px" }}>
                   <span style={{ color: "var(--text-3)" }}>持仓重叠度：</span>
                   {pf.overlap_analysis.high_overlap_pairs.length > 0 ? (
                     <span style={{ color: "var(--warn)" }}>
@@ -578,6 +720,83 @@ export default function CognitionPage() {
                   )}
                 </div>
               )}
+
+              {/* 组合级风险指标 */}
+              {pf.metrics && (() => {
+                const m = pf.metrics;
+                const hp = m.holdings_penetration || [];
+                const ie = m.industry_exposure || [];
+                return (
+                  <>
+                    {/* KPI 卡片 */}
+                    <div style={{ display: "flex", gap: "12px", marginTop: "16px", flexWrap: "wrap" }}>
+                      {m.portfolio_pe != null && (
+                        <div className="kpi-box" style={{ minWidth: "120px" }}>
+                          <div className="kpi-label">组合加权PE</div>
+                          <div className="kpi-value">{m.portfolio_pe}</div>
+                        </div>
+                      )}
+                      {m.portfolio_volatility != null && (
+                        <div className="kpi-box" style={{ minWidth: "120px" }}>
+                          <div className="kpi-label">年化波动率</div>
+                          <div className="kpi-value">{fmt(m.portfolio_volatility, "%")}</div>
+                        </div>
+                      )}
+                      {m.portfolio_max_drawdown != null && (
+                        <div className="kpi-box" style={{ minWidth: "120px" }}>
+                          <div className="kpi-label">最大回撤</div>
+                          <div className="kpi-value" style={{ color: "var(--neg)" }}>{fmt(m.portfolio_max_drawdown, "%")}</div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 持仓穿透条形图 */}
+                    {hp.length > 0 && (
+                      <div style={{ marginTop: "16px" }}>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-2)", marginBottom: "8px" }}>持仓穿透 Top 10</div>
+                        <HorizontalBarChart
+                          data={hp.slice(0, 10).map(h => ({
+                            name: h.stock_name || h.stock_code,
+                            value: h.weight,
+                          }))}
+                          height={280}
+                          color="#6366f1"
+                        />
+                      </div>
+                    )}
+
+                    {/* 行业暴露条形图 */}
+                    {ie.length > 0 && (
+                      <div style={{ marginTop: "16px" }}>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-2)", marginBottom: "8px" }}>行业暴露</div>
+                        <HorizontalBarChart
+                          data={ie.map(ind => ({
+                            name: ind.name,
+                            value: ind.weight,
+                          }))}
+                          height={200}
+                          color="#10b981"
+                        />
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* 导出按钮 */}
+              <button
+                className="btn"
+                style={{ marginTop: "12px" }}
+                disabled={exporting}
+                onClick={() => {
+                  setExporting(true);
+                  exportCognition(result)
+                    .catch(() => {})
+                    .finally(() => setExporting(false));
+                }}
+              >
+                {exporting ? "导出中..." : "导出 Excel"}
+              </button>
             </section>
           </div>
 
@@ -586,7 +805,8 @@ export default function CognitionPage() {
             <FundDetailPanel fund={selectedFund} />
           </div>
         </div>
-      </div>
+        </div>
+      </CognitionErrorBoundary>
     );
   }
 
