@@ -1,48 +1,33 @@
 import { NavLink, Route, Routes, Navigate, useLocation } from "react-router-dom";
-import RunsPage from "./pages/RunsPage";
-import RunDetailPage from "./pages/RunDetailPage";
-import RunDiffPage from "./pages/RunDiffPage";
 import FundReportPage from "./pages/FundReportPage";
 import ReadyPoolPage from "./pages/ReadyPoolPage";
 import SearchPage from "./pages/SearchPage";
-import ReviewQueuePage from "./pages/ReviewQueuePage";
-import PortfolioWorkbenchPage from "./pages/PortfolioWorkbenchPage";
 import ComparePage from "./pages/ComparePage";
+import CognitionPage from "./pages/CognitionPage";
 import { useEffect } from "react";
 
 const NAV_GROUPS = [
   {
+    title: "选基",
+    links: [
+      { to: "/cognition", label: "认知选基" },
+    ],
+  },
+  {
     title: "研究",
     links: [
+      { to: "/compare", label: "竞品横评" },
       { to: "/explorer", label: "风格总览" },
       { to: "/search", label: "风格筛选" },
-      { to: "/compare", label: "竞品横评" },
-    ],
-  },
-  {
-    title: "组合",
-    links: [
-      { to: "/portfolio", label: "组合工作台" },
-      { to: "/review-queue", label: "复核队列" },
-    ],
-  },
-  {
-    title: "运维",
-    links: [
-      { to: "/runs", label: "批次管理" },
-      { to: "/diff", label: "批次对比" },
     ],
   },
 ];
 
 const CRUMB_MAP: Record<string, string> = {
+  cognition: "认知选基",
+  compare: "竞品横评",
   explorer: "风格总览",
   search: "风格筛选",
-  compare: "竞品横评",
-  portfolio: "组合工作台",
-  "review-queue": "复核队列",
-  runs: "批次",
-  diff: "对比",
   funds: "基金",
 };
 
@@ -52,8 +37,8 @@ function Sidebar() {
       <div className="app-sidebar-brand">
         <span className="logo">FE</span>
         <div className="name">
-          <strong>基金风格研究台</strong>
-          <small>Fund Label Engine</small>
+          <strong>基金选基台</strong>
+          <small>Fund Insight</small>
         </div>
       </div>
       <nav>
@@ -61,7 +46,7 @@ function Sidebar() {
           <div key={group.title}>
             <div className="nav-section-title">{group.title}</div>
             {group.links.map((l) => (
-              <NavLink key={l.to} to={l.to} end={l.to === "/explorer"}>
+              <NavLink key={l.to} to={l.to} end={l.to === "/cognition"}>
                 {l.label}
               </NavLink>
             ))}
@@ -82,7 +67,7 @@ function Topbar() {
     <div className="app-topbar">
       <div className="breadcrumb">
         {segments.length === 0 ? (
-          <strong>基金风格研究台</strong>
+          <strong>基金选基台</strong>
         ) : (
           segments.map((s, i) => (
             <span key={i} style={{ display: "inline-flex", gap: 5 }}>
@@ -109,17 +94,18 @@ export default function App() {
         <Topbar />
         <main className="main">
           <Routes>
-            <Route path="/" element={<Navigate to="/explorer" replace />} />
-            <Route path="/explorer" element={<ReadyPoolPage />} />
-            <Route path="/portfolio" element={<PortfolioWorkbenchPage />} />
-            <Route path="/runs" element={<RunsPage />} />
-            <Route path="/ready-pool" element={<Navigate to="/explorer" replace />} />
-            <Route path="/runs/:runId" element={<RunDetailPage />} />
-            <Route path="/runs/:runId/funds/:fundCode" element={<FundReportPage />} />
-            <Route path="/diff" element={<RunDiffPage />} />
-            <Route path="/search" element={<SearchPage />} />
+            <Route path="/" element={<Navigate to="/cognition" replace />} />
+            <Route path="/cognition" element={<CognitionPage />} />
             <Route path="/compare" element={<ComparePage />} />
-            <Route path="/review-queue" element={<ReviewQueuePage />} />
+            <Route path="/explorer" element={<ReadyPoolPage />} />
+            <Route path="/search" element={<SearchPage />} />
+            <Route path="/runs/:runId/funds/:fundCode" element={<FundReportPage />} />
+            {/* 兼容旧路由 */}
+            <Route path="/ready-pool" element={<Navigate to="/explorer" replace />} />
+            <Route path="/portfolio" element={<Navigate to="/cognition" replace />} />
+            <Route path="/runs" element={<Navigate to="/cognition" replace />} />
+            <Route path="/diff" element={<Navigate to="/cognition" replace />} />
+            <Route path="/review-queue" element={<Navigate to="/cognition" replace />} />
           </Routes>
         </main>
       </div>

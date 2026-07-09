@@ -894,3 +894,216 @@ export async function applyPortfolioRoleReviewSuggestions(
     payload as unknown as Record<string, unknown>
   );
 }
+
+// ===================================================================
+// 认知引擎
+// ===================================================================
+export interface ThemeInfo {
+  key: string;
+  name: string;
+  belief: string;
+  logic_chain: string[];
+  chain_links: string[];
+  defense_theme: string | null;
+}
+
+// === 认知引擎（5步推导） ===
+export interface ChainLink {
+  link_name: string;
+  pe: number | null;
+  growth_pct: number | null;
+  peg: number | null;
+  val_pct: number | null;
+  roe: number | null;
+  dividend_yield: number | null;
+  expectation_gap: string;  // positive/neutral/negative/unknown
+  gap_reason: string;
+  score: number;
+  certainty: string;
+  elasticity: string;
+  matched_weight: number;
+  matched_stocks: string[];
+  benefit_logic: string;
+}
+
+export interface Evidence {
+  claim: string;
+  source: string;
+  source_type: "chain_analysis" | "market_data" | "estimate" | "trend";
+  raw_data?: Record<string, unknown>;
+  context?: string;
+}
+
+export interface ReasoningChainNode {
+  step: string;
+  description: string;
+  evidence_ref: string;
+}
+
+export interface CognitionValidation {
+  supporting_evidence: Evidence[];
+  opposing_evidence: Evidence[];
+  warnings: Evidence[];
+  verdict: string;
+  verdict_detail: string;
+  evidence_counts: { supporting: number; opposing: number };
+  reasoning_chain: ReasoningChainNode[];
+  debate?: DebateRound[];
+  cognition_feedback?: CognitionFeedback;
+}
+
+export interface DebateRound {
+  round: number;
+  bull_argument: Evidence;
+  bear_rebuttal: Evidence | null;
+  bull_response: Evidence | null;
+}
+
+export interface CognitionFeedback {
+  original_belief: string;
+  validation_verdict: string;
+  correction_suggestions: string[];
+  adjusted_belief: string;
+}
+
+export interface GateResult {
+  passed: boolean;
+  violations: string[];
+}
+
+export interface FundManager {
+  name: string;
+  tenure_days: number | null;
+  return_pct: number | null;
+  is_current: number;
+}
+
+export interface GatedOutFund {
+  fund_code: string;
+  fund_name: string;
+  match_pct: number;
+  gate: GateResult;
+}
+
+export interface OverlapAnalysis {
+  max_overlap_pct: number;
+  high_overlap_pairs: Array<[string, string, number]>;
+}
+
+export interface CognitionResponse {
+  direction: string;
+  available_links: string[];
+  belief_link: string | null;
+  conviction: string;
+  step1_judgment: {
+    direction: string;
+    belief: string;
+    level: string;
+    time_horizon: string;
+    valuation_tolerance: string;
+    key_metric: string;
+    hard_limits?: Record<string, number>;
+  };
+  step2_chain: ChainLink[];
+  step3_expectation_gap: {
+    positive: ChainLink[];
+    neutral: ChainLink[];
+    negative: ChainLink[];
+    best_link: ChainLink | null;
+    summary: string;
+  };
+  step4_fund_matches: Array<{
+    fund_code: string;
+    fund_name: string;
+    match_pct: number;
+    chain_breakdown: Record<string, number>;
+    valuation: Record<string, unknown>;
+    trend: {
+      trend: string;
+      diff: number;
+      periods: Array<{ period: string; weight: number }>;
+    };
+    gate?: GateResult;
+    manager?: FundManager;
+    holdings?: Array<{
+      stock_code: string;
+      stock_name: string;
+      weight: number;
+    }>;
+  }>;
+  gated_out_funds?: GatedOutFund[];
+  step5_validation?: CognitionValidation;
+  step5_portfolio: {
+    role: string;
+    suggested_weight: number;
+    weight_range: [number, number];
+    defense_weight: number;
+    cash_pct: number;
+    top_funds: Array<Record<string, unknown>>;
+    defense_fund: Record<string, unknown> | null;
+    rationale: string;
+    overlap_analysis?: OverlapAnalysis;
+  };
+}
+
+export async function fetchThemes(): Promise<{ themes: ThemeInfo[] }> {
+  return json("/v1/themes");
+}
+
+// 产业链环节信息（选环节阶段展示用）
+export interface ChainLinkInfo {
+  name: string;
+  stocks: string[];
+  benefit_logic: string;
+  certainty: string;
+  elasticity: string;
+}
+
+export interface DirectionLinksResponse {
+  direction: string;
+  links: ChainLinkInfo[];
+  is_custom: boolean;
+}
+
+export async function fetchDirectionLinks(direction: string): Promise<DirectionLinksResponse> {
+  return json(`/v1/cognition/${encodeURIComponent(direction)}/links`);
+}
+
+export async function postCognition(
+  direction: string,
+  beliefLink?: string,
+  conviction?: string,
+): Promise<CognitionResponse> {
+  return postJSON("/v1/cognition", {
+    theme_key: direction,
+    belief_link: beliefLink ?? null,
+    conviction: conviction ?? "medium",
+  });
+}
+
+// === 概念板块搜索 ===
+
+export interface ConceptBoard {
+  code: string;
+  name: string;
+  stock_count: number;
+}
+
+export async function searchConcepts(keyword: string): Promise<ConceptBoard[]> {
+  const r = await json(
+    `/v1/concepts/search?keyword=${encodeURIComponent(keyword)}`,
+  ) as { concepts: ConceptBoard[] };
+  return r.concepts;
+}
+
+export async function postConceptCognition(
+  conceptCode: string,
+  conceptName: string,
+  conviction?: string,
+): Promise<CognitionResponse> {
+  return postJSON("/v1/cognition/concept", {
+    concept_code: conceptCode,
+    concept_name: conceptName,
+    conviction: conviction ?? "medium",
+  });
+}

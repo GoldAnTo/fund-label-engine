@@ -585,4 +585,512 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   .main { padding: 12px; }
   .metric-grid, .portfolio-metrics, .portfolio-grid, .tier-grid { grid-template-columns: 1fr; }
   .report-head-v2 { grid-template-columns: 1fr; }
+  .cognition-evidence-grid { grid-template-columns: 1fr; }
+  .cognition-theme-grid { grid-template-columns: 1fr; }
+}
+
+/* ---- 认知引擎 ---- */
+
+/* 步骤导航条 */
+.cognition-step-nav {
+  display: flex; align-items: center; gap: 4px;
+  margin-bottom: 14px; padding: 8px 12px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.cognition-step-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: var(--r-s);
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-3); font-size: 12px; font-weight: 600;
+  cursor: default; transition: all 100ms;
+}
+.cognition-step-btn.is-clickable { cursor: pointer; }
+.cognition-step-btn.is-clickable:hover { border-color: var(--accent); color: var(--accent); }
+.cognition-step-btn.is-current {
+  background: var(--accent); color: var(--surface);
+  border-color: var(--accent);
+}
+.cognition-step-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cognition-step-num {
+  display: inline-grid; place-items: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--surface-2); color: var(--text-2);
+  font-size: 10.5px; font-weight: 800;
+}
+.cognition-step-btn.is-current .cognition-step-num {
+  background: var(--surface); color: var(--accent);
+}
+.cognition-step-arrow { color: var(--text-3); font-size: 12px; margin: 0 2px; }
+
+/* 主题卡片网格 */
+.cognition-theme-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.cognition-theme-card {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px; text-align: left;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); cursor: pointer;
+  transition: border-color 120ms, box-shadow 120ms;
+  font: inherit; color: inherit;
+}
+.cognition-theme-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px oklch(0.48 0.12 245 / 0.1);
+}
+.cognition-theme-card:disabled { opacity: 0.6; cursor: wait; }
+.cognition-theme-name { font-size: 15px; font-weight: 800; color: var(--text); }
+.cognition-theme-belief { font-size: 12px; color: var(--text-2); line-height: 1.5; }
+.cognition-theme-chain { display: flex; flex-wrap: wrap; gap: 4px; }
+.cognition-chain-tag {
+  display: inline-block; padding: 2px 7px; border-radius: var(--r-s);
+  background: var(--accent-soft); color: var(--accent-text);
+  font-size: 10.5px; font-weight: 600;
+}
+.cognition-theme-defense { margin-top: 2px; }
+
+/* 逻辑链 */
+.cognition-logic-chain {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  margin-top: 4px;
+}
+.cognition-logic-step {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: var(--r-s);
+  background: var(--surface-2); border: 1px solid var(--border);
+  font-size: 11.5px; color: var(--text);
+}
+.cognition-logic-idx {
+  display: inline-grid; place-items: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--accent); color: var(--surface);
+  font-size: 9.5px; font-weight: 800;
+}
+
+/* 证据区 */
+.cognition-evidence-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  align-items: start;
+}
+.cognition-evidence-col { padding: 14px; }
+.evidence-list {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 6px;
+}
+.evidence-item {
+  padding: 8px 10px; border-radius: var(--r-s);
+  font-size: 12px; line-height: 1.5;
+  border-left: 3px solid var(--border);
+  background: var(--surface-2);
+}
+.evidence-item-pos {
+  border-left-color: var(--pos);
+  background: var(--pos-soft);
+  color: var(--pos-text);
+}
+.evidence-item-warn {
+  border-left-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+/* 产业链分布条形图 */
+.chain-bar-wrap { display: grid; gap: 6px; }
+.chain-bar-item { display: grid; gap: 2px; }
+.chain-bar-label {
+  display: flex; justify-content: space-between;
+  font-size: 11.5px; color: var(--text-2);
+}
+.chain-bar-track {
+  height: 8px; border-radius: 4px;
+  background: var(--surface-3); overflow: hidden;
+}
+.chain-bar-fill {
+  height: 100%; border-radius: 4px;
+  background: var(--accent);
+  transition: width 200ms;
+}
+
+/* 展开详情行 */
+.cognition-detail-row td { border-top: 1px dashed var(--border) !important; }
+
+/* ============================================================
+   认知引擎 - 5步推导
+   ============================================================ */
+
+/* 方向卡片网格 */
+.cognition-direction-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.cognition-direction-card {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px; text-align: left;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); cursor: pointer;
+  transition: border-color 120ms, box-shadow 120ms;
+  font: inherit; color: inherit;
+}
+.cognition-direction-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px oklch(0.48 0.12 245 / 0.1);
+}
+.cognition-direction-card:disabled { opacity: 0.6; cursor: wait; }
+.cognition-direction-name { font-size: 16px; font-weight: 800; color: var(--text); }
+.cognition-direction-desc { font-size: 12px; color: var(--text-2); line-height: 1.5; }
+.cognition-direction-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* 认知判断徽章 */
+.judgment-badge {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text-2);
+  font-size: 11.5px; font-weight: 600; border: 1px solid var(--border);
+}
+.judgment-badge-accent {
+  background: var(--accent-soft); color: var(--accent-text);
+  border-color: oklch(0.82 0.02 250);
+}
+
+/* 预期差标签颜色 */
+.gap-tag {
+  display: inline-block; padding: 1px 8px; border-radius: var(--r-s);
+  font-size: 10.5px; font-weight: 700; white-space: nowrap;
+  background: var(--surface-2); color: var(--text-2);
+  border: 1px solid var(--border);
+}
+.gap-positive { background: var(--pos-soft); color: var(--pos-text); border-color: oklch(0.80 0.04 155); }
+.gap-neutral { background: var(--warn-soft); color: var(--warn-text); border-color: oklch(0.80 0.05 62); }
+.gap-negative { background: var(--neg-soft); color: var(--neg-text); border-color: oklch(0.80 0.05 28); }
+.gap-unknown { background: var(--surface-2); color: var(--text-3); }
+
+/* 确定性 / 弹性标签 */
+.certainty-tag, .elasticity-tag {
+  display: inline-block; padding: 1px 7px; border-radius: var(--r-s);
+  font-size: 10.5px; font-weight: 600;
+  background: var(--surface-2); color: var(--text-2);
+  border: 1px solid var(--border);
+}
+.certainty-tag { color: var(--accent-text); }
+
+/* 评分进度条 */
+.score-bar-wrap { display: flex; align-items: center; gap: 8px; }
+.score-bar-track {
+  flex: 1; height: 7px; border-radius: 4px;
+  background: var(--surface-3); overflow: hidden;
+}
+.score-bar-fill {
+  height: 100%; border-radius: 4px;
+  background: var(--accent); transition: width 200ms;
+}
+.score-bar-val {
+  font-size: 11.5px; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums; min-width: 22px; text-align: right;
+}
+
+/* 仓位权重进度条 */
+.portfolio-weight-bar {
+  display: flex; height: 16px; border-radius: var(--r-s);
+  overflow: hidden; background: var(--surface-3);
+  border: 1px solid var(--border);
+}
+.portfolio-weight-fill { height: 100%; transition: width 200ms; }
+.portfolio-weight-cognition { background: var(--accent); }
+.portfolio-weight-defense { background: var(--warn); }
+.portfolio-weight-cash { background: var(--surface-3); }
+
+.legend-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+  margin-right: 4px; vertical-align: middle;
+}
+.legend-cognition { background: var(--accent); }
+.legend-defense { background: var(--warn); }
+.legend-cash { background: var(--surface-3); border: 1px solid var(--border-2); }
+
+/* 防守基金高亮框 */
+.defense-fund-box {
+  padding: 10px 14px; border-radius: var(--r);
+  background: var(--warn-soft); border: 1px solid oklch(0.80 0.05 62);
+}
+
+/* ============================================================
+   认知引擎 - 三步交互（选方向 / 选环节+信心 / 看结果）
+   ============================================================ */
+
+/* 自定义方向输入 */
+.custom-direction-input {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 14px; padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+.custom-direction-input input {
+  flex: 1 1 240px; min-width: 160px;
+}
+
+/* 返回选方向链接 */
+.cognition-back-link {
+  display: inline-block; margin: 4px 0 10px;
+  font-size: 12px; cursor: pointer; color: var(--accent);
+}
+
+/* 环节选项列表 */
+.link-option-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px; margin-bottom: 14px;
+}
+
+/* 环节选项卡片 */
+.link-option {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 12px 14px; text-align: left;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); cursor: pointer;
+  transition: border-color 120ms, box-shadow 120ms, background 120ms;
+  font: inherit; color: inherit;
+}
+.link-option:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px oklch(0.48 0.12 245 / 0.1);
+}
+.link-option.selected {
+  border-color: var(--accent); background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.link-option-head {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.link-option-name { font-size: 13.5px; font-weight: 800; color: var(--text); margin-right: 2px; }
+.link-option-desc { font-size: 11.5px; color: var(--text-2); }
+.link-option-logic { font-size: 12px; color: var(--text-2); line-height: 1.5; }
+.link-option-stocks { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* 确定性 / 弹性 标签（选环节阶段） */
+.link-tag {
+  display: inline-block; padding: 1px 7px; border-radius: var(--r-s);
+  font-size: 10.5px; font-weight: 600; white-space: nowrap;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2);
+}
+.link-tag-cert-high { background: var(--pos-soft); color: var(--pos-text); border-color: oklch(0.80 0.04 155); }
+.link-tag-cert-medium { background: var(--warn-soft); color: var(--warn-text); border-color: oklch(0.80 0.05 62); }
+.link-tag-cert-low { background: var(--surface-2); color: var(--text-3); }
+.link-tag-elas-high { background: var(--accent-soft); color: var(--accent-text); border-color: oklch(0.82 0.02 250); }
+.link-tag-elas-medium { background: var(--surface-2); color: var(--text-3); }
+
+/* 信心选择 */
+.conviction-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 4px;
+}
+.conviction-btn {
+  padding: 4px 16px; border-radius: 999px;
+  background: var(--surface); color: var(--text-2);
+  border: 1px solid var(--border-2); font-weight: 600; font-size: 12.5px;
+}
+.conviction-btn:hover { border-color: var(--accent); color: var(--text); }
+.conviction-btn.selected {
+  background: var(--accent); color: var(--surface); border-color: var(--accent);
+}
+
+/* 结果页顶部：投资人选择摘要 */
+.cognition-selection-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.cognition-selection-info {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px;
+}
+.cognition-selection-sep { color: var(--text-3); }
+.cognition-selection-actions { display: flex; gap: 6px; }
+
+/* 按钮辅助 */
+.btn { padding: 6px 16px; border-radius: var(--r-s); border: 1px solid var(--accent); background: var(--accent); color: var(--surface); font-weight: 600; font-size: 13px; cursor: pointer; }
+.btn:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-sm { padding: 3px 10px; font-size: 12px; }
+
+/* ============================================================
+   机构级布局：KPI条 + 估值四维 + 多面板
+   ============================================================ */
+
+/* 顶部KPI条（4个并排卡片） */
+.cognition-kpi-bar {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  margin-bottom: 14px;
+}
+.cognition-kpi-card {
+  padding: 10px 14px; border-radius: var(--r);
+  background: var(--surface); border: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cognition-kpi-label {
+  font-size: 11px; color: var(--text-3); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.cognition-kpi-value {
+  font-size: 14.5px; font-weight: 700; color: var(--text);
+  line-height: 1.3;
+}
+.cognition-kpi-sub {
+  font-size: 11.5px; color: var(--text-2);
+}
+
+/* 三面板布局：左导航 / 中结果 / 右详情 */
+.cognition-three-panel {
+  display: grid; grid-template-columns: 220px 1fr 320px; gap: 12px;
+  align-items: start;
+}
+.cognition-side-nav {
+  position: sticky; top: 12px;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 12px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.cognition-side-nav-title {
+  font-size: 11px; color: var(--text-3); font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin: 4px 0 6px;
+}
+.cognition-side-nav-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: var(--r-s); cursor: pointer;
+  font-size: 13px; color: var(--text-2);
+  transition: background 120ms, color 120ms;
+}
+.cognition-side-nav-item:hover { background: var(--surface-2); color: var(--text); }
+.cognition-side-nav-item.active {
+  background: var(--accent-soft); color: var(--accent-text);
+  font-weight: 600;
+}
+.cognition-side-nav-count {
+  margin-left: auto; font-size: 11px; color: var(--text-3);
+  padding: 1px 6px; border-radius: 999px; background: var(--surface-2);
+}
+.cognition-side-nav-item.active .cognition-side-nav-count {
+  background: var(--accent); color: var(--surface);
+}
+
+.cognition-main-col { min-width: 0; }
+.cognition-detail-col {
+  position: sticky; top: 12px;
+  max-height: calc(100vh - 24px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.cognition-detail-empty {
+  padding: 24px 16px; text-align: center;
+  color: var(--text-3); font-size: 12.5px;
+  background: var(--surface); border: 1px dashed var(--border);
+  border-radius: var(--r);
+}
+
+/* 估值四维卡片（成长/护城河/竞争/绩效） */
+.valuation-quad {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  margin-bottom: 14px;
+}
+.valuation-quad-card {
+  padding: 12px 14px; border-radius: var(--r);
+  background: var(--surface); border: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 6px;
+  position: relative; overflow: hidden;
+}
+.valuation-quad-card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: var(--accent); opacity: 0.5;
+}
+.valuation-quad-card.undervalued::before { background: var(--pos); }
+.valuation-quad-card.overvalued::before { background: var(--neg); }
+.valuation-quad-card.fair::before { background: var(--warn); }
+.valuation-quad-label {
+  font-size: 11px; color: var(--text-3); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.valuation-quad-headline {
+  font-size: 18px; font-weight: 800; line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.valuation-quad-headline.pos { color: var(--pos); }
+.valuation-quad-headline.neg { color: var(--neg); }
+.valuation-quad-headline.warn { color: var(--warn); }
+.valuation-quad-spark {
+  height: 18px; display: flex; align-items: end; gap: 1.5px;
+  margin-top: 2px;
+}
+.valuation-quad-spark-bar {
+  flex: 1; min-height: 2px; border-radius: 1px;
+  background: var(--accent); opacity: 0.7;
+  transition: opacity 120ms;
+}
+.valuation-quad-spark-bar:hover { opacity: 1; }
+.valuation-quad-context {
+  font-size: 11.5px; color: var(--text-2); line-height: 1.4;
+}
+.valuation-quad-tag {
+  display: inline-block; padding: 1px 6px; border-radius: 3px;
+  font-size: 10.5px; font-weight: 700; align-self: flex-start;
+}
+.valuation-quad-tag.pos { background: var(--pos-soft); color: var(--pos-text); }
+.valuation-quad-tag.neg { background: var(--neg-soft); color: var(--neg-text); }
+.valuation-quad-tag.warn { background: var(--warn-soft); color: var(--warn-text); }
+.valuation-quad-tag.neutral { background: var(--surface-2); color: var(--text-3); }
+
+/* 选中基金详情卡 */
+.fund-detail-card {
+  padding: 12px 14px; border-radius: var(--r);
+  background: var(--surface); border: 1px solid var(--border);
+}
+.fund-detail-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.fund-detail-name {
+  font-size: 14px; font-weight: 700; color: var(--text);
+}
+.fund-detail-code {
+  font-size: 11.5px; color: var(--text-3);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.fund-detail-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 0; font-size: 12.5px;
+  border-bottom: 1px dashed var(--border);
+}
+.fund-detail-row:last-child { border-bottom: none; }
+.fund-detail-row-label { color: var(--text-3); }
+.fund-detail-row-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.fund-detail-row-value.pos { color: var(--pos); }
+.fund-detail-row-value.neg { color: var(--neg); }
+.fund-detail-section {
+  font-size: 11px; color: var(--text-3); font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin: 8px 0 4px;
+}
+.fund-detail-holdings {
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 11.5px;
+}
+.fund-detail-holding-row {
+  display: flex; justify-content: space-between;
+  padding: 2px 0; color: var(--text-2);
+}
+.fund-detail-holding-name { color: var(--text); }
+.fund-detail-holding-weight {
+  font-variant-numeric: tabular-nums; color: var(--text-2);
+}
+
+/* 基金匹配行hover高亮 */
+.cognition-fund-table tbody tr {
+  cursor: pointer; transition: background 120ms;
+}
+.cognition-fund-table tbody tr:hover { background: var(--surface-2); }
+.cognition-fund-table tbody tr.selected {
+  background: var(--accent-soft);
+}
+
+/* 响应式：窄屏退化为单列 */
+@media (max-width: 1100px) {
+  .cognition-three-panel { grid-template-columns: 1fr; }
+  .cognition-side-nav, .cognition-detail-col { position: static; }
+  .cognition-kpi-bar { grid-template-columns: repeat(2, 1fr); }
+  .valuation-quad { grid-template-columns: repeat(2, 1fr); }
 }
