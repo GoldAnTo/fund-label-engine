@@ -44,24 +44,44 @@ CREATE INDEX IF NOT EXISTS idx_concept_board_stocks_name
 
 
 def _curl_get(url: str, retries: int = 3) -> dict:
-    """用 curl 调东方财富接口，返回 JSON dict。"""
+    """用 curl 调东方财富接口，返回 JSON dict。
+
+    调用方需在解析阶段容错（空响应/限流都可能发生）。
+    """
     last_exc: Exception | None = None
     for attempt in range(retries):
         try:
-            out = subprocess.run(
-                ["curl", "-s", "--max-time", "25", "-A", "Mozilla/5.0", url],
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout
-            if not out.strip():
+            proc = subprocess.run(
+                [
+                    "curl", "-s", "--max-time", "25",
+                    "-A", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                    "-H", "Referer: https://quote.eastmoney.com/",
+                    url,
+                ],
+                capture_output=True, text=True, check=False,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(f"curl exit {proc.returncode}: {proc.stderr[:80]}")
+            if not proc.stdout.strip():
                 raise ValueError("empty body")
-            return json.loads(out)
+            return json.loads(proc.stdout)
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
-            time.sleep(2 + attempt * 2)
+            time.sleep(3 + attempt * 3)
     assert last_exc is not None
     raise last_exc
+
+
+def _diff_to_rows(data: dict) -> list[dict]:
+    """兼容东财 clist 接口中 diff 同时为 dict 和 list 两种返回格式。"""
+    if not data or data.get("data") is None:
+        return []
+    diff = data["data"].get("diff") or {}
+    if isinstance(diff, dict):
+        return [v for v in diff.values() if isinstance(v, dict)]
+    if isinstance(diff, list):
+        return [r for r in diff if isinstance(r, dict)]
+    return []
 
 
 def fetch_concept_board_list() -> list[dict[str, str]]:
@@ -70,15 +90,13 @@ def fetch_concept_board_list() -> list[dict[str, str]]:
     返回: [{"code": "BK0800", "name": "人工智能"}, ...]
     """
     url = (
-        "http://push2.eastmoney.com/api/qt/clist/get"
+        "https://push2.eastmoney.com/api/qt/clist/get"
         "?fs=m:90+t:3"
         "&fields=f12,f14"
         "&pn=1&pz=500"
     )
     data = _curl_get(url)
-    if not data or data.get("data") is None:
-        return []
-    rows = data["data"].get("diff", []) or []
+    rows = _diff_to_rows(data)
     return [
         {"code": r.get("f12", ""), "name": r.get("f14", "")}
         for r in rows
@@ -98,9 +116,7 @@ def fetch_board_stocks(board_code: str) -> list[dict[str, str]]:
         f"&pn=1&pz=500"
     )
     data = _curl_get(url)
-    if not data or data.get("data") is None:
-        return []
-    rows = data["data"].get("diff", []) or []
+    rows = _diff_to_rows(data)
     return [
         {"code": r.get("f12", ""), "name": r.get("f14", "")}
         for r in rows

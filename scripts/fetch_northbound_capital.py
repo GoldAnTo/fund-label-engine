@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS northbound_daily (
     sz_net_flow    REAL,          -- 深股通净流入（万元）
     total_net_flow REAL,         -- 合计净流入（万元）
     sh_balance    REAL,          -- 沪股通余额（万元）
-    sz_balance    REAL,          -- 深股通余额（万元）
+    sz_balance    REAL           -- 深股通余额（万元）
 );
 """
 
@@ -53,32 +53,30 @@ def fetch_daily_flow(days: int = 30) -> list[dict[str, object]]:
     """抓取北向资金每日净流入汇总数据。"""
     import akshare as ak
 
-    end_date = datetime.now().strftime("%Y%m%d")
-    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-
     records: list[dict[str, object]] = []
     try:
-        # 北向资金每日净流入
-        df = ak.stock_hsgt_north_net_flow_in_em(symbol="北上")
+        # 新版 akshare: stock_hsgt_fund_flow_summary_em
+        df = ak.stock_hsgt_fund_flow_summary_em()
         if df is not None and not df.empty:
-            # 只取最近 days 天
             df = df.tail(days)
             for _, row in df.iterrows():
-                trade_date = str(row.get("日期", "")).strip()[:10]
+                trade_date = str(row.get("交易日", row.get("日期", ""))).strip()[:10]
                 if not trade_date:
                     continue
-                net_flow = row.get("当日资金流入", None)
-                try:
-                    net_flow = float(net_flow) if net_flow and str(net_flow) != "nan" else None
-                except (ValueError, TypeError):
-                    net_flow = None
+                def _f(v):
+                    if v is None or (isinstance(v, float) and v != v):
+                        return None
+                    try:
+                        return float(v)
+                    except (ValueError, TypeError):
+                        return None
                 records.append({
                     "trade_date": trade_date,
-                    "total_net_flow": net_flow,
-                    "sh_net_flow": None,
-                    "sz_net_flow": None,
-                    "sh_balance": None,
-                    "sz_balance": None,
+                    "total_net_flow": _f(row.get("资金净流入", row.get("当日资金流入"))),
+                    "sh_net_flow": _f(row.get("沪股通净流入", row.get("沪股通-资金净流入"))),
+                    "sz_net_flow": _f(row.get("深股通净流入", row.get("深股通-资金净流入"))),
+                    "sh_balance": _f(row.get("沪股通-余额")),
+                    "sz_balance": _f(row.get("深股通-余额")),
                 })
     except Exception as exc:
         print(f"北向资金汇总数据抓取失败: {exc}", file=sys.stderr)
