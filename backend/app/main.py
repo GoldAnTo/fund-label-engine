@@ -26,6 +26,33 @@ from app.exporters import (
 )
 from app.persistence import LabelRunReader, LabelRunWriter
 
+
+class CognitionRequest(BaseModel):
+    theme_key: str
+    belief_link: str | None = None  # 投资人相信的环节
+    conviction: str = "medium"  # 信心 low/medium/high
+    time_horizon: str = "long"
+    risk_tolerance: str = "moderate"
+    max_valuation_percentile: float | None = None  # None=用chain默认硬约束
+    top_n: int = 5
+
+
+def _get_cognition_engine(app: FastAPI):
+    """延迟获取认知引擎实例"""
+    if not hasattr(app.state, "cognition_engine"):
+        from app.cognition.engine import CognitionEngine
+
+        source_db = app.state.source_db_path
+        if not source_db:
+            raise HTTPException(status_code=503, detail="Source database not configured")
+        factor_db = Path(_PROJECT_ROOT) / "data" / "stock_factors.sqlite"
+        app.state.cognition_engine = CognitionEngine(
+            source_db=source_db,
+            factor_db=str(factor_db) if factor_db.exists() else None,
+        )
+    return app.state.cognition_engine
+
+
 OBSERVE_TASK_LABEL_CODES = {
     "industry_concentration_high",
     "industry_concentration_observe",
@@ -1210,6 +1237,145 @@ def create_app(
             )
         return payload
 
+    # === 认知引擎 API ===
+    @app.get("/v1/themes")
+    def list_themes() -> dict[str, Any]:
+        """获取可用认知主题列表"""
+        from app.cognition.theme_registry import load_themes
+
+        themes = load_themes()
+        return {
+            "themes": [
+                {
+                    "key": key,
+                    "name": t["name"],
+                    "belief": t["belief"],
+                    "logic_chain": t.get("logic_chain", []),
+                    "chain_links": list(t.get("chain_links", {}).keys()),
+                    "defense_theme": t.get("defense_theme"),
+                }
+                for key, t in themes.items()
+            ]
+        }
+
+    @app.get("/v1/chains")
+    def list_chains() -> dict[str, Any]:
+        """获取可用投资方向（产业链图谱）列表"""
+        from app.cognition.chain_graph import load_chains
+
+        chains = load_chains()
+        return {
+            "chains": [
+                {
+                    "direction": key,
+                    "belief": c["judgment"]["belief"],
+                    "level": c["judgment"]["level"],
+                    "portfolio_role": c["judgment"]["portfolio_role"],
+                    "role_weight_range": c["judgment"]["role_weight_range"],
+                    "chain_links": [
+                        link["name"] for link in c.get("chain", []) if not link.get("exclude")
+                    ],
+                    "defense": c.get("defense"),
+                }
+                for key, c in chains.items()
+            ]
+        }
+
+    @app.post("/v1/cognition")
+    def run_cognition(request: CognitionRequest) -> dict[str, Any]:
+        """提交认知，返回完整的验证->穿透->估值->组合结果"""
+        engine = _get_cognition_engine(app)
+        result = engine.run(
+            direction=request.theme_key,
+            belief_link=request.belief_link,
+            conviction=request.conviction,
+            time_horizon=request.time_horizon,
+            risk_tolerance=request.risk_tolerance,
+            max_valuation_percentile=request.max_valuation_percentile,
+            top_n=request.top_n,
+        )
+        # 兼容前端：fund_matches 也作为 matches / candidates 返回
+        result["matches"] = result.get("step4_fund_matches", [])
+        result["candidates"] = result.get("step4_fund_matches", [])
+        return result
+
+    @app.get("/v1/cognition/{direction}/links")
+    def get_direction_links(direction: str) -> dict[str, Any]:
+        """获取某方向的产业链环节列表（用于前端展示可选环节）"""
+        from app.cognition.chain_graph import get_chain, load_chains
+
+        chains = load_chains()
+        chain = get_chain(direction, chains)
+        if not chain:
+            # 自定义方向，返回空列表（前端调用时会动态获取）
+            return {"direction": direction, "links": [], "is_custom": True}
+        links = []
+        for link in chain.get("chain", []):
+            if not link.get("exclude"):
+                links.append(
+                    {
+                        "name": link["name"],
+                        "stocks": link.get("stocks", []),
+                        "benefit_logic": link.get("benefit_logic", ""),
+                        "certainty": link.get("certainty", "medium"),
+                        "elasticity": link.get("elasticity", "medium"),
+                    }
+                )
+        return {"direction": direction, "links": links, "is_custom": False}
+
+    @app.get("/v1/cognition/{theme_key}/matches")
+    def get_cognition_matches(theme_key: str, top_n: int = 10) -> dict[str, Any]:
+        """获取某个认知主题的基金匹配结果"""
+        engine = _get_cognition_engine(app)
+        result = engine.run(theme_key)
+        return {
+            "direction": theme_key,
+            "belief": result.get("step1_judgment", {}).get("belief", ""),
+            "matches": result.get("step4_fund_matches", []),
+            "expectation_gap": result.get("step3_expectation_gap", {}),
+        }
+
+    # === 概念板块 API（动态主题扩展）===
+
+    class ConceptCognitionRequest(BaseModel):
+        concept_code: str
+        concept_name: str
+        conviction: str = "medium"
+        time_horizon: str = "long"
+        risk_tolerance: str = "moderate"
+        max_valuation_percentile: float | None = None
+        top_n: int = 5
+
+    @app.get("/v1/concepts/search")
+    def search_concepts(keyword: str, limit: int = 20) -> dict[str, Any]:
+        """按关键词搜索概念板块（依赖 fetch_concept_boards.py 抓取的数据）"""
+        engine = _get_cognition_engine(app)
+        concepts = engine.search_concepts(keyword, limit)
+        return {"keyword": keyword, "concepts": concepts, "count": len(concepts)}
+
+    @app.get("/v1/concepts/{concept_code}/stocks")
+    def get_concept_stocks_api(concept_code: str) -> dict[str, Any]:
+        """获取概念板块成分股列表"""
+        engine = _get_cognition_engine(app)
+        stocks = engine.get_concept_stocks(concept_code)
+        return {"concept_code": concept_code, "stocks": stocks, "count": len(stocks)}
+
+    @app.post("/v1/cognition/concept")
+    def run_concept_cognition(request: ConceptCognitionRequest) -> dict[str, Any]:
+        """用概念板块成分股运行 7 步认知转化"""
+        engine = _get_cognition_engine(app)
+        result = engine.run_concept(
+            concept_code=request.concept_code,
+            concept_name=request.concept_name,
+            conviction=request.conviction,
+            time_horizon=request.time_horizon,
+            risk_tolerance=request.risk_tolerance,
+            max_valuation_percentile=request.max_valuation_percentile,
+            top_n=request.top_n,
+        )
+        result["matches"] = result.get("step4_fund_matches", [])
+        return result
+
     # 在 API 路由之后 mount 前端静态文件
     dist_dir = _resolve_frontend_dist(frontend_dist)
     if dist_dir is not None:
@@ -1238,6 +1404,10 @@ def create_app(
 
         @app.get("/review-queue", include_in_schema=False)
         def serve_review_queue_route() -> FileResponse:
+            return _frontend_index()
+
+        @app.get("/cognition", include_in_schema=False)
+        def serve_cognition_route() -> FileResponse:
             return _frontend_index()
 
         app.mount("/", StaticFiles(directory=str(dist_dir), html=True), name="frontend")

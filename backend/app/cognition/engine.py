@@ -1,0 +1,879 @@
+"""认知引擎主模块：7步认知转化引擎。
+
+认知采集 -> 产业链拆解 -> 预期差分析 -> 资产穿透+估值门禁 -> 认知验证 -> 组合构建 -> 组合输出
+"""
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+from app.cognition.asset_mapper import calculate_holding_trend, get_holdings
+from app.cognition.chain_graph import (
+    get_all_industry_keywords,
+    get_all_stock_keywords,
+    load_chains,
+)
+from app.cognition.expectation_gap import calculate_link_expectation_gap
+from app.cognition.portfolio_builder import build_portfolio, calculate_overlap
+from app.cognition.theme_registry import load_themes
+from app.cognition.valuation_gate import calculate_valuation, check_hard_limits
+from app.cognition.validator import validate_cognition
+
+_MATCH_THRESHOLD = 5.0
+
+
+class CognitionEngine:
+    """认知驱动基金配置引擎（自动推导式）。
+
+    用法::
+
+        engine = CognitionEngine("/tmp/fle-run/source.sqlite", "data/stock_factors.sqlite")
+        result = engine.run("AI")
+        engine.close()
+    """
+
+    def __init__(self, source_db: str | Path, factor_db: str | Path) -> None:
+        self._source_db = Path(source_db)
+        self._factor_db = Path(factor_db).resolve() if factor_db else None
+        self._themes = load_themes()
+        self._chains = load_chains()
+        self._conn: sqlite3.Connection | None = None
+
+    # ------------------------------------------------------------------
+    # 连接管理
+    # ------------------------------------------------------------------
+    def _get_conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            conn = sqlite3.connect(f"file:{self._source_db}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            if self._factor_db and self._factor_db.exists():
+                conn.execute(f"ATTACH DATABASE '{self._factor_db}' AS factordb")
+            self._conn = conn
+        return self._conn
+
+    def close(self) -> None:
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    # ------------------------------------------------------------------
+    # 主题 / 方向
+    # ------------------------------------------------------------------
+    def get_themes(self) -> dict[str, dict[str, Any]]:
+        return self._themes
+
+    def get_chains(self) -> dict[str, dict[str, Any]]:
+        return self._chains
+
+    # ------------------------------------------------------------------
+    # 概念板块搜索（动态主题扩展）
+    # ------------------------------------------------------------------
+    def search_concepts(self, keyword: str, limit: int = 20) -> list[dict[str, Any]]:
+        """按关键词搜索概念板块，返回板块列表+成分股数量。
+
+        依赖 factor DB 中的 concept_board_stocks 表（由 fetch_concept_boards.py 抓取）。
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            """
+            SELECT concept_code, concept_name,
+                   COUNT(stock_code) AS stock_count
+            FROM concept_board_stocks
+            WHERE concept_name LIKE ?
+            GROUP BY concept_code, concept_name
+            ORDER BY stock_count DESC
+            LIMIT ?
+            """,
+            (f"%{keyword}%", limit),
+        ).fetchall()
+        return [
+            {"code": r[0], "name": r[1], "stock_count": r[2]}
+            for r in rows
+        ]
+
+    def get_concept_stocks(self, concept_code: str) -> list[dict[str, str]]:
+        """获取某概念板块的成分股列表。"""
+        conn = self._get_conn()
+        rows = conn.execute(
+            """
+            SELECT stock_code, stock_name
+            FROM concept_board_stocks
+            WHERE concept_code = ?
+            ORDER BY stock_name
+            """,
+            (concept_code,),
+        ).fetchall()
+        return [{"code": r[0], "name": r[1]} for r in rows]
+
+    def run_concept(
+        self,
+        concept_code: str,
+        concept_name: str,
+        conviction: str = "medium",
+        time_horizon: str = "long",
+        risk_tolerance: str = "moderate",
+        max_valuation_percentile: float | None = None,
+        top_n: int = 5,
+    ) -> dict[str, Any]:
+        """用概念板块成分股作为产业链 stocks 运行 7 步认知转化。
+
+        与 run() 的区别：用概念板块成分股替代预设的 chain stocks，
+        构建单环节产业链，judgment 使用自适应默认模板。
+        """
+        conn = self._get_conn()
+        stocks = self.get_concept_stocks(concept_code)
+        if not stocks:
+            return {
+                "direction": concept_name,
+                "error": f"概念板块 {concept_code} 无成分股数据",
+            }
+
+        stock_names = [s["name"] for s in stocks]
+
+        # 构建动态链
+        chain = {
+            "judgment": {
+                "level": "market",
+                "belief": f"我相信{concept_name}方向",
+                "time_horizon": time_horizon,
+                "valuation_tolerance": "medium",
+                "key_metric": "peg",
+                "hard_limits": {
+                    "max_valuation_percentile": max_valuation_percentile or 85,
+                    "max_peg": 2.0,
+                },
+                "portfolio_role": "satellite",
+                "role_weight_range": [5, 15],
+            },
+            "chain": [{
+                "name": concept_name,
+                "stocks": stock_names,
+                "industry_keywords": [],
+                "certainty": "medium",
+                "elasticity": "medium",
+                "benefit_logic": f"{concept_name}概念板块成分股",
+            }],
+            "defense": "dividend_defense",
+        }
+
+        # 复用 run() 的逻辑，但传入自定义 chain
+        return self._run_with_chain(
+            chain, concept_name, None, conviction,
+            time_horizon, risk_tolerance, max_valuation_percentile, top_n,
+        )
+
+    def _run_with_chain(
+        self,
+        chain: dict[str, Any],
+        direction: str,
+        belief_link: str | None,
+        conviction: str,
+        time_horizon: str,
+        risk_tolerance: str,
+        max_valuation_percentile: float | None,
+        top_n: int,
+    ) -> dict[str, Any]:
+        """用指定 chain 运行 7 步流程（供 run() 和 run_concept() 复用）。"""
+        # 临时把 chain 放进 self._chains 以复用 run() 的逻辑
+        original = self._chains.get(direction)
+        self._chains[direction] = chain
+        try:
+            return self.run(
+                direction, belief_link, conviction,
+                time_horizon, risk_tolerance,
+                max_valuation_percentile, top_n,
+            )
+        finally:
+            if original is not None:
+                self._chains[direction] = original
+            else:
+                self._chains.pop(direction, None)
+
+    # ------------------------------------------------------------------
+    # 辅助查询
+    # ------------------------------------------------------------------
+    def _get_fund_name(self, conn: sqlite3.Connection, fund_code: str) -> str:
+        row = conn.execute(
+            "SELECT fund_name FROM fund_profiles WHERE fund_code = ?", (fund_code,)
+        ).fetchone()
+        return row[0] if row else "?"
+
+    def _load_fund_codes(self, conn: sqlite3.Connection) -> list[str]:
+        rows = conn.execute(
+            "SELECT DISTINCT fund_code FROM stock_holdings ORDER BY fund_code"
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def _get_industry_pe_medians(self, conn: sqlite3.Connection) -> dict[str, float]:
+        """获取各行业PE中位数（横截面估值对比基准）。
+
+        从 factordb.stock_factor_values 和 stock_industry_map 关联计算。
+        返回: {"半导体": 45.2, "通信设备": 28.5, ...}
+        """
+        try:
+            rows = conn.execute(
+                """
+                SELECT m.industry_name, f.factor_value
+                FROM factordb.stock_factor_values f
+                JOIN stock_industry_map m ON f.stock_code = m.stock_code
+                WHERE f.factor_code = 'pe' AND f.factor_value > 0
+                    AND m.industry_name IS NOT NULL
+                """
+            ).fetchall()
+        except Exception:
+            return {}
+
+        industry_pes: dict[str, list[float]] = {}
+        for row in rows:
+            ind = row[0]
+            if ind:
+                industry_pes.setdefault(ind, []).append(row[1])
+
+        medians: dict[str, float] = {}
+        for ind, pes in industry_pes.items():
+            pes.sort()
+            n = len(pes)
+            if n > 0:
+                medians[ind] = round(
+                    pes[n // 2] if n % 2 == 1 else (pes[n // 2 - 1] + pes[n // 2]) / 2,
+                    1,
+                )
+        return medians
+
+    def _enrich_cross_sectional(
+        self,
+        holdings: list[dict[str, Any]],
+        valuation: dict[str, Any],
+        industry_medians: dict[str, float],
+    ) -> None:
+        """给估值结果增加横截面对比（vs 同行业PE中位数）。"""
+        if not industry_medians:
+            return
+
+        # 计算基金持仓的加权行业PE中位数
+        total_weight = 0.0
+        weighted_median_pe = 0.0
+        for h in holdings:
+            ind = h.get("industry_name", "")
+            w = h.get("weight", 0)
+            med = industry_medians.get(ind)
+            if med and w:
+                weighted_median_pe += med * w
+                total_weight += w
+
+        if total_weight > 0 and weighted_median_pe > 0:
+            fund_pe = valuation.get("weighted_pe")
+            industry_median = round(weighted_median_pe / total_weight, 1)
+            valuation["industry_pe_median"] = industry_median
+            if fund_pe and fund_pe > 0:
+                premium = round((fund_pe / industry_median - 1) * 100, 0)
+                valuation["pe_premium_pct"] = premium
+                if premium > 50:
+                    valuation["cross_sectional_judge"] = "显著高于同行"
+                elif premium > 20:
+                    valuation["cross_sectional_judge"] = "高于同行"
+                elif premium > -20:
+                    valuation["cross_sectional_judge"] = "与同行相当"
+                else:
+                    valuation["cross_sectional_judge"] = "低于同行"
+
+    def _load_revenue_exposure(self, conn: sqlite3.Connection) -> dict[str, dict[str, float]]:
+        """加载主营业务构成数据，用于收入暴露分析。
+
+        返回: {"300308": {"光模块": 85.2, "通信设备": 10.3}, ...}
+        如果表不存在或无数据，返回空 dict（回退到关键词匹配）。
+        """
+        try:
+            rows = conn.execute(
+                """
+                SELECT stock_code, segment_name, revenue_pct
+                FROM factordb.stock_revenue_composition
+                WHERE revenue_pct IS NOT NULL AND revenue_pct > 0
+                """
+            ).fetchall()
+        except Exception:
+            return {}
+
+        exposure: dict[str, dict[str, float]] = {}
+        for row in rows:
+            code = row[0]
+            segment = row[1]
+            pct = row[2]
+            if code and segment:
+                exposure.setdefault(code, {})[segment] = pct
+        return exposure
+
+    def _load_fund_managers(self, conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        """加载基金经理数据，用于认知验证。
+
+        返回: {"000001": {"name": "张三", "tenure_days": 1825, "return_pct": 15.2, "is_current": 1}, ...}
+        只返回在任基金经理。如果表不存在，返回空 dict。
+        """
+        try:
+            rows = conn.execute(
+                """
+                SELECT fund_code, manager_name, tenure_days, return_pct, is_current
+                FROM fund_managers
+                WHERE is_current = 1
+                ORDER BY tenure_days DESC
+                """
+            ).fetchall()
+        except Exception:
+            return {}
+
+        managers: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            fc = row[0]
+            if fc not in managers:  # 只取任职最长的在任经理
+                managers[fc] = {
+                    "name": row[1],
+                    "tenure_days": row[2],
+                    "return_pct": row[3],
+                    "is_current": row[4],
+                }
+        return managers
+
+    def _load_financial_depth(self, conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        """加载三大报表最新一期关键指标，用于财务深度验证。
+
+        返回: {"600519": {"revenue":480, "net_profit":250, "gross_margin":91.5, ...}, ...}
+        """
+        try:
+            rows = conn.execute(
+                """
+                SELECT stock_code,
+                       MAX(CASE WHEN report_type='利润表' THEN revenue END) AS revenue,
+                       MAX(CASE WHEN report_type='利润表' THEN net_profit END) AS net_profit,
+                   MAX(CASE WHEN report_type='利润表' THEN gross_margin END) AS gross_margin,
+                   MAX(CASE WHEN report_type='利润表' THEN net_margin END) AS net_margin,
+                   MAX(CASE WHEN report_type='利润表' THEN revenue_yoy END) AS revenue_yoy,
+                   MAX(CASE WHEN report_type='利润表' THEN profit_yoy END) AS profit_yoy,
+                   MAX(CASE WHEN report_type='资产负债表' THEN roe END) AS roe,
+                   MAX(CASE WHEN report_type='资产负债表' THEN debt_ratio END) AS debt_ratio,
+                   MAX(CASE WHEN report_type='现金流量表' THEN free_cashflow END) AS free_cashflow
+                FROM factordb.stock_financial_statements
+                WHERE report_date = (SELECT MAX(report_date) FROM factordb.stock_financial_statements)
+                GROUP BY stock_code
+                """
+            ).fetchall()
+        except Exception:
+            return {}
+
+        result: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            code = row[0]
+            if code:
+                result[code] = {
+                    "revenue": row[1],
+                    "net_profit": row[2],
+                    "gross_margin": row[3],
+                    "net_margin": row[4],
+                    "revenue_yoy": row[5],
+                    "profit_yoy": row[6],
+                    "roe": row[7],
+                    "debt_ratio": row[8],
+                    "free_cashflow": row[9],
+                }
+        return result
+
+    def _load_northbound_trend(self, conn: sqlite3.Connection) -> dict[str, float]:
+        """加载个股北向资金近期净流入趋势。
+
+        返回: {"600519": 5.2, ...}（正数=净流入，单位亿元）
+        """
+        try:
+            rows = conn.execute(
+                """
+                SELECT stock_code, SUM(net_buy) as total_net_buy
+                FROM factordb.northbound_capital
+                GROUP BY stock_code
+                """
+            ).fetchall()
+        except Exception:
+            return {}
+
+        return {row[0]: round(row[1] / 10000, 2) for row in rows if row[0] and row[1]}
+
+    def _load_dragon_tiger_stocks(self, conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        """加载近期龙虎榜上榜股票，用于游资动向分析。
+
+        返回: {"600519": {"date":"2026-01-15", "net_buy":2.5, "reason":"日涨幅偏离值达7%"}, ...}
+        """
+        try:
+            rows = conn.execute(
+                """
+                SELECT stock_code, MAX(trade_date) AS latest_date,
+                       AVG(net_buy) AS avg_net_buy, MAX(reason) AS reason,
+                       COUNT(*) AS hit_count
+                FROM factordb.dragon_tiger_list
+                GROUP BY stock_code
+                """
+            ).fetchall()
+        except Exception:
+            return {}
+
+        result: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            code = row[0]
+            if code:
+                result[code] = {
+                    "date": row[1],
+                    "net_buy": round(row[2] / 10000, 2) if row[2] else None,
+                    "reason": row[3],
+                    "hit_count": row[4],
+                }
+        return result
+
+    # ------------------------------------------------------------------
+    # 主流程：自动推导5步
+    # ------------------------------------------------------------------
+    def run(
+        self,
+        direction: str,
+        belief_link: str | None = None,
+        conviction: str = "medium",
+        time_horizon: str = "long",
+        risk_tolerance: str = "moderate",
+        max_valuation_percentile: float | None = None,
+        top_n: int = 5,
+    ) -> dict[str, Any]:
+        """7步认知转化：采集 -> 拆解 -> 预期差 -> 穿透+门禁 -> 验证 -> 组合 -> 输出
+
+        direction: 投资方向（预设的如"AI"，或自定义的如"新能源"）
+        belief_link: 投资人相信的产业链环节（如"光模块/连接"），None表示分析所有环节
+        conviction: 信心强度 low/medium/high
+        time_horizon: 投资周期 short/mid/long
+        risk_tolerance: 风险偏好 conservative/moderate/aggressive
+        max_valuation_percentile: 估值分位上限覆盖（None用chain默认值）
+        top_n: 返回基金数量
+        """
+        conn = self._get_conn()
+        chain = self._chains.get(direction)
+        if not chain:
+            chain = self._build_dynamic_chain(conn, direction)
+
+        judgment = chain["judgment"]
+
+        # 估值硬约束：用户可覆盖默认值
+        hard_limits = dict(judgment.get("hard_limits", {}))
+        if max_valuation_percentile is not None:
+            hard_limits["max_valuation_percentile"] = max_valuation_percentile
+
+        # === Step 1: 认知采集 ===
+        step1 = {
+            "direction": direction,
+            "belief": judgment["belief"],
+            "level": judgment["level"],
+            "time_horizon": time_horizon,
+            "conviction": conviction,
+            "risk_tolerance": risk_tolerance,
+            "valuation_tolerance": judgment["valuation_tolerance"],
+            "key_metric": judgment["key_metric"],
+            "portfolio_role": judgment["portfolio_role"],
+            "role_weight_range": judgment["role_weight_range"],
+            "hard_limits": hard_limits,
+        }
+
+        # === Step 2: 产业链拆解 ===
+        fund_codes = self._load_fund_codes(conn)
+        all_holdings: dict[str, list[dict[str, Any]]] = {}
+        for fc in fund_codes:
+            h = get_holdings(conn, fc)
+            if h:
+                all_holdings[fc] = h
+
+        # 收入暴露数据：主营业务构成（无数据时回退到关键词匹配）
+        revenue_exposure = self._load_revenue_exposure(conn)
+
+        link_analysis: list[dict[str, Any]] = []
+        for link in chain["chain"]:
+            if link.get("exclude"):
+                continue
+            if belief_link and link["name"] != belief_link:
+                continue
+            all_matched_holdings: list[dict[str, Any]] = []
+            for fc, holdings in all_holdings.items():
+                stock_kws = link.get("stocks", [])
+                ind_kws = link.get("industry_keywords", [])
+                for h in holdings:
+                    name = h.get("stock_name", "") or ""
+                    ind = h.get("industry_name", "") or ""
+                    if any(kw in name for kw in stock_kws) or any(kw in ind for kw in ind_kws):
+                        all_matched_holdings.append(h)
+
+            gap = calculate_link_expectation_gap(link, all_matched_holdings, revenue_exposure)
+            gap["benefit_logic"] = link.get("benefit_logic", "")
+            link_analysis.append(gap)
+
+        link_analysis.sort(key=lambda x: x["score"], reverse=True)
+
+        # === Step 3: 预期差分析 ===
+        positive_links = [lk for lk in link_analysis if lk["expectation_gap"] == "positive"]
+        neutral_links = [lk for lk in link_analysis if lk["expectation_gap"] == "neutral"]
+        negative_links = [lk for lk in link_analysis if lk["expectation_gap"] == "negative"]
+
+        step3 = {
+            "positive": positive_links,
+            "neutral": neutral_links,
+            "negative": negative_links,
+            "best_link": link_analysis[0] if link_analysis else None,
+            "summary": self._build_gap_summary(positive_links, negative_links, judgment),
+        }
+
+        # === Step 4: 资产穿透 + 估值门禁 ===
+        good_keywords: list[str] = []
+        good_industry_kws: list[str] = []
+        for link in chain["chain"]:
+            if link.get("exclude"):
+                continue
+            if belief_link and link["name"] != belief_link:
+                continue
+            for la in link_analysis:
+                if la["link_name"] == link["name"] and la["expectation_gap"] != "negative":
+                    good_keywords.extend(link.get("stocks", []))
+                    good_industry_kws.extend(link.get("industry_keywords", []))
+
+        fund_matches: list[dict[str, Any]] = []
+        gated_out: list[dict[str, Any]] = []
+
+        # 横截面估值基准：各行业PE中位数
+        industry_pe_medians = self._get_industry_pe_medians(conn)
+
+        for fc, holdings in all_holdings.items():
+            match = self._match_fund_to_chain(
+                holdings, good_keywords, good_industry_kws, revenue_exposure,
+            )
+            if match["match_pct"] >= _MATCH_THRESHOLD:
+                valuation = calculate_valuation(holdings)
+                # 横截面估值对比
+                self._enrich_cross_sectional(holdings, valuation, industry_pe_medians)
+                trend = calculate_holding_trend(
+                    conn,
+                    fc,
+                    {
+                        "chain_links": {
+                            "_": {
+                                "stock_keywords": good_keywords,
+                                "industry_keywords": good_industry_kws,
+                            }
+                        }
+                    },
+                )
+
+                # 估值门禁：检查硬约束
+                gate = check_hard_limits(valuation, hard_limits)
+
+                fund_data = {
+                    "fund_code": fc,
+                    "fund_name": self._get_fund_name(conn, fc),
+                    "match_pct": match["match_pct"],
+                    "chain_breakdown": match["chain_breakdown"],
+                    "valuation": valuation,
+                    "trend": trend,
+                    "gate": gate,
+                    "holdings": holdings,
+                }
+
+                if gate["passed"]:
+                    fund_matches.append(fund_data)
+                else:
+                    gated_out.append(fund_data)
+
+        fund_matches.sort(key=lambda x: x["match_pct"], reverse=True)
+        top_funds = fund_matches[:top_n]
+
+        # 加载基金经理数据
+        fund_managers = self._load_fund_managers(conn)
+        # 给基金匹配结果附带经理信息
+        for fund in top_funds:
+            mgr = fund_managers.get(fund["fund_code"])
+            if mgr:
+                fund["manager"] = mgr
+
+        # 加载财务深度、北向资金、龙虎榜数据
+        financial_depth = self._load_financial_depth(conn)
+        northbound_trend = self._load_northbound_trend(conn)
+        dragon_tiger = self._load_dragon_tiger_stocks(conn)
+
+        # === Step 5: 认知验证 ===
+        validation = validate_cognition(
+            link_analysis, top_funds, judgment,
+            fund_managers, financial_depth, northbound_trend, dragon_tiger,
+        )
+
+        # === Step 6: 组合构建 ===
+        role = judgment["portfolio_role"]
+        weight_range = judgment["role_weight_range"]
+
+        # 信心强度决定认知仓位总量
+        if conviction == "high":
+            total_cognition_weight = float(weight_range[1])
+        elif conviction == "medium":
+            total_cognition_weight = (weight_range[0] + weight_range[1]) / 2
+        else:
+            total_cognition_weight = weight_range[0] * 0.5
+
+        # 风险偏好决定防守仓位
+        if risk_tolerance == "conservative":
+            defense_weight_pct = 15.0
+        elif risk_tolerance == "aggressive":
+            defense_weight_pct = 5.0
+        else:
+            defense_weight_pct = 10.0
+
+        # 保守策略：跳过减仓基金
+        portfolio_candidates = list(fund_matches)
+        if risk_tolerance == "conservative":
+            portfolio_candidates = [
+                f for f in portfolio_candidates if f["trend"]["trend"] != "decreasing"
+            ]
+
+        # 防守基金
+        defense_fund: dict[str, Any] | None = None
+        defense_chain = self._chains.get(chain.get("defense", ""))
+        if defense_chain:
+            defense_fund = self._find_defense_fund(conn, all_holdings, defense_chain, revenue_exposure)
+
+        # 使用 portfolio_builder 构建组合（接入重叠度/相关性/估值约束）
+        portfolio = build_portfolio(
+            portfolio_candidates,
+            defense_fund,
+            corr_threshold=0.85,
+            total_cognition_weight=total_cognition_weight,
+            defense_weight_pct=defense_weight_pct,
+        )
+
+        # 持仓重叠度分析
+        overlap_analysis: list[dict[str, Any]] = []
+        selected = portfolio.get("selected_funds", [])
+        for i, fa in enumerate(selected):
+            for fb in selected[i + 1:]:
+                holdings_a = all_holdings.get(fa["fund_code"], [])
+                holdings_b = all_holdings.get(fb["fund_code"], [])
+                if holdings_a and holdings_b:
+                    overlap = calculate_overlap(holdings_a, holdings_b)
+                    overlap_analysis.append({
+                        "fund_a": fa["fund_code"],
+                        "fund_b": fb["fund_code"],
+                        **overlap,
+                    })
+
+        portfolio["role"] = role
+        portfolio["total_cognition_weight"] = round(total_cognition_weight, 1)
+        portfolio["defense_weight_pct"] = defense_weight_pct
+        portfolio["overlap_analysis"] = overlap_analysis
+        portfolio["rationale"] = self._build_portfolio_rationale(
+            judgment, positive_links, negative_links, validation
+        )
+        portfolio["gated_out"] = [
+            {
+                "fund_code": f["fund_code"],
+                "fund_name": f["fund_name"],
+                "match_pct": f["match_pct"],
+                "violations": f["gate"]["violations"],
+            }
+            for f in gated_out[:5]
+        ]
+
+        return {
+            "direction": direction,
+            "available_links": [
+                link["name"] for link in chain["chain"] if not link.get("exclude")
+            ],
+            "belief_link": belief_link,
+            "conviction": conviction,
+            "step1_judgment": step1,
+            "step2_chain": link_analysis,
+            "step3_expectation_gap": step3,
+            "step4_fund_matches": top_funds,
+            "step5_validation": validation,
+            "step5_portfolio": portfolio,
+            "gated_out_funds": [
+                {
+                    "fund_code": f["fund_code"],
+                    "fund_name": f["fund_name"],
+                    "match_pct": f["match_pct"],
+                    "violations": f["gate"]["violations"],
+                }
+                for f in gated_out[:5]
+            ],
+        }
+
+    # ------------------------------------------------------------------
+    # 自定义方向：动态构建产业链
+    # ------------------------------------------------------------------
+    def _build_dynamic_chain(
+        self, conn: sqlite3.Connection, direction: str
+    ) -> dict[str, Any]:
+        """对自定义方向，从数据库动态构建产业链。
+
+        通过 stock_industry_map 搜索行业名包含方向关键词的股票，按行业分组
+        形成产业链环节；judgment 使用自适应默认模板。
+        """
+        rows = conn.execute(
+            """
+            SELECT DISTINCT m.stock_code, m.industry_name, m.sector_group,
+                   h.stock_name
+            FROM stock_industry_map m
+            LEFT JOIN stock_holdings h ON m.stock_code = h.stock_code
+            WHERE m.industry_name LIKE ?
+            """,
+            (f"%{direction}%",),
+        ).fetchall()
+
+        # 按行业分组，形成产业链环节
+        industry_groups: dict[str, dict[str, set[str]]] = {}
+        for r in rows:
+            ind = r["industry_name"]
+            if not ind:
+                continue
+            if ind not in industry_groups:
+                industry_groups[ind] = {"stocks": set(), "codes": set()}
+            if r["stock_name"]:
+                industry_groups[ind]["stocks"].add(r["stock_name"])
+            industry_groups[ind]["codes"].add(r["stock_code"])
+
+        links: list[dict[str, Any]] = []
+        for ind, info in industry_groups.items():
+            links.append(
+                {
+                    "name": ind,
+                    "stocks": sorted(info["stocks"]),
+                    "industry_keywords": [ind],
+                    "certainty": "medium",
+                    "elasticity": "medium",
+                    "benefit_logic": f"{direction}相关",
+                }
+            )
+
+        return {
+            "judgment": {
+                "level": "market",
+                "belief": f"我相信{direction}方向",
+                "time_horizon": "mid",
+                "valuation_tolerance": "medium",
+                "key_metric": "peg",
+                "hard_limits": {
+                    "max_valuation_percentile": 85,
+                    "max_peg": 2.0,
+                },
+                "portfolio_role": "satellite",
+                "role_weight_range": [5, 15],
+            },
+            "chain": links,
+            "defense": "dividend_defense",
+        }
+
+    # ------------------------------------------------------------------
+    # 子步骤
+    # ------------------------------------------------------------------
+    def _match_fund_to_chain(
+        self,
+        holdings: list[dict[str, Any]],
+        stock_kws: list[str],
+        ind_kws: list[str],
+        revenue_data: dict[str, dict[str, float]] | None = None,
+    ) -> dict[str, Any]:
+        """计算基金对目标资产的暴露度（收入暴露分析 + 关键词回退）。
+
+        匹配优先级：
+        1. 收入暴露：如果该股票有主营业务构成数据且某业务条目匹配关键词，
+           按营收占比加权（例：中际旭创 光模块85% -> 暴露度0.85）
+        2. 关键词回退：无主营构成数据时，按股票名/行业名关键词子串匹配（暴露度1.0）
+        """
+        total_weight = sum(h["weight"] for h in holdings)
+        if total_weight == 0:
+            return {"match_pct": 0, "chain_breakdown": {}}
+
+        all_kws = stock_kws + ind_kws
+        matched_weight = 0.0
+        for h in holdings:
+            name = h.get("stock_name", "") or ""
+            ind = h.get("industry_name", "") or ""
+            code = h.get("stock_code", "")
+
+            # 1. 尝试收入暴露
+            exposure: float | None = None
+            if revenue_data and code in revenue_data:
+                for segment, pct in revenue_data[code].items():
+                    if any(kw in segment for kw in all_kws):
+                        exposure = max(exposure or 0, pct / 100.0)
+
+            if exposure is not None:
+                matched_weight += h["weight"] * exposure
+            elif any(kw in name for kw in stock_kws) or any(kw in ind for kw in ind_kws):
+                # 2. 关键词回退（暴露度1.0）
+                matched_weight += h["weight"]
+
+        return {
+            "match_pct": round(matched_weight / total_weight * 100, 1),
+            "chain_breakdown": {},
+        }
+
+    def _build_gap_summary(
+        self,
+        positive: list[dict[str, Any]],
+        negative: list[dict[str, Any]],
+        judgment: dict[str, Any],
+    ) -> str:
+        """构建预期差摘要"""
+        parts: list[str] = []
+        if positive:
+            names = "、".join(lk["link_name"] for lk in positive)
+            parts.append(f"正预期差环节：{names}（值得配置）")
+        if negative:
+            names = "、".join(lk["link_name"] for lk in negative)
+            parts.append(f"负预期差环节：{names}（暂不配置）")
+        if not positive and not negative:
+            parts.append("各环节预期差中性，按正常仓位配置")
+        return "；".join(parts)
+
+    def _build_portfolio_rationale(
+        self,
+        judgment: dict[str, Any],
+        positive: list[dict[str, Any]],
+        negative: list[dict[str, Any]],
+        validation: dict[str, Any] | None = None,
+    ) -> str:
+        """构建仓位建议的理由"""
+        role = judgment["portfolio_role"]
+        belief = judgment["belief"]
+        verdict = validation.get("verdict", "") if validation else ""
+
+        if verdict == "认知有效":
+            return f"基于'{belief}'，认知验证通过，建议{role}仓位配置"
+        elif verdict == "认知存疑":
+            return f"基于'{belief}'，但认知验证存疑，建议降低仓位或等待估值回落"
+        elif positive:
+            return f"基于'{belief}'，存在正预期差环节，建议{role}仓位配置"
+        elif negative:
+            return f"基于'{belief}'，但各环节估值偏高，建议降低仓位等待回调"
+        else:
+            return f"基于'{belief}'，估值合理，建议正常{role}仓位配置"
+
+    def _find_defense_fund(
+        self,
+        conn: sqlite3.Connection,
+        all_holdings: dict[str, list[dict[str, Any]]],
+        defense_chain: dict[str, Any],
+        revenue_data: dict[str, dict[str, float]] | None = None,
+    ) -> dict[str, Any] | None:
+        """找防守基金"""
+        stock_kws = get_all_stock_keywords(defense_chain)
+        ind_kws = get_all_industry_keywords(defense_chain)
+
+        best: dict[str, Any] | None = None
+        best_pct = 0.0
+        for fc, holdings in all_holdings.items():
+            match = self._match_fund_to_chain(holdings, stock_kws, ind_kws, revenue_data)
+            if match["match_pct"] > best_pct:
+                best_pct = match["match_pct"]
+                valuation = calculate_valuation(holdings)
+                best = {
+                    "fund_code": fc,
+                    "fund_name": self._get_fund_name(conn, fc),
+                    "match_pct": match["match_pct"],
+                    "valuation": valuation,
+                }
+        return best

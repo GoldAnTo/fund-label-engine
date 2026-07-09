@@ -1,0 +1,158 @@
+{
+  "AI": {
+    "name": "AI / 算力基础设施",
+    "belief": "我相信AI基础设施会先于应用层变现",
+    "logic_chain": [
+      "AI服务器/芯片收入确认先于大模型商业化",
+      "基础设施公司已确认大量收入，应用层仍在亏损",
+      "因此基础设施环节确定性更高"
+    ],
+    "chain_links": {
+      "光模块/连接": {
+        "industry_keywords": ["光模块", "光通信", "通信设备"],
+        "stock_keywords": ["中际旭创", "天孚通信", "新易盛", "光迅科技"]
+      },
+      "PCB/电子元件": {
+        "industry_keywords": ["电子元件", "印制电路", "电子设备"],
+        "stock_keywords": ["沪电股份", "深南电路", "生益科技", "景旺电子", "鹏鼎控股", "胜宏科技", "生益电子"]
+      },
+      "芯片设计": {
+        "industry_keywords": ["半导体", "芯片"],
+        "stock_keywords": ["寒武纪", "海光信息", "澜起科技", "紫光国微"]
+      },
+      "服务器/算力": {
+        "industry_keywords": ["计算机设备", "服务器"],
+        "stock_keywords": ["工业富联", "浪潮信息", "紫光股份"]
+      }
+    },
+    "defense_theme": "dividend_defense"
+  },
+  "innovation_drug": {
+    "name": "创新药",
+    "belief": "我相信创新药被错杀",
+    "logic_chain": [
+      "中国创新药BD交易额占全球30%，超过美国",
+      "创新药有技术含量，是生产力升级",
+      "当前估值处于历史低位"
+    ],
+    "chain_links": {
+      "创新药研发": {
+        "industry_keywords": ["医药生物", "化学制药", "生物制品"],
+        "stock_keywords": ["恒瑞医药", "百济神州", "信达生物", "君实生物", "荣昌生物"]
+      },
+      "CXO服务": {
+        "industry_keywords": ["医疗服务", "医疗研发"],
+        "stock_keywords": ["药明康德", "凯莱英", "康龙化成", "泰格医药"]
+      },
+      "医疗器械": {
+        "industry_keywords": ["医疗器械"],
+        "stock_keywords": ["迈瑞医疗", "南微医学", "联影医疗"]
+      }
+    },
+    "defense_theme": "dividend_defense"
+  },
+  "consumer": {
+    "name": "消费升级",
+    "belief": "我相信消费升级是长期趋势",
+    "logic_chain": [
+      "中国14亿人口的消费市场",
+      "消费龙头ROE持续高于市场平均",
+      "当前估值合理"
+    ],
+    "chain_links": {
+      "食品饮料": {
+        "industry_keywords": ["食品饮料", "白酒", "乳品"],
+        "stock_keywords": ["贵州茅台", "五粮液", "泸州老窖", "伊利股份", "海天味业"]
+      },
+      "家电": {
+        "industry_keywords": ["家电", "白色家电"],
+        "stock_keywords": ["美的集团", "格力电器", "海尔智家"]
+      },
+      "免税零售": {
+        "industry_keywords": ["零售", "免税"],
+        "stock_keywords": ["中国中免", "珀莱雅"]
+      }
+    },
+    "defense_theme": "dividend_defense"
+  },
+  "dividend_defense": {
+    "name": "红利低波（防守）",
+    "belief": "我需要红利低波作为防守仓位",
+    "logic_chain": [
+      "金融/能源板块估值低、股息率高",
+      "与成长板块相关性低，对冲效果好",
+      "提供安全垫"
+    ],
+    "chain_links": {
+      "银行保险": {
+        "industry_keywords": ["银行", "保险"],
+        "stock_keywords": ["招商银行", "工商银行", "中国平安", "中国太保", "宁波银行"]
+      },
+      "能源公用": {
+        "industry_keywords": ["石油", "煤炭", "电力", "公用"],
+        "stock_keywords": ["中国神华", "中国石油", "长江电力", "大秦铁路"]
+      }
+    },
+    "defense_theme": null
+  },
+  "value_investing": {
+    "name": "价值投资",
+    "belief": "我相信价值投资：好公司 at 好价格",
+    "logic_chain": [
+      "低PE+高ROE=安全边际",
+      "市场短期是投票机，长期是称重机",
+      "低估值蓝筹长期跑赢高估值题材"
+    ],
+    "chain_links": {
+      "低估值蓝筹": {
+        "industry_keywords": ["银行", "保险", "家电", "食品饮料"],
+        "stock_keywords": ["招商银行", "中国平安", "格力电器", "伊利股份"]
+      },
+      "红利低波": {
+        "industry_keywords": ["煤炭", "电力", "交通", "建筑"],
+        "stock_keywords": ["中国神华", "长江电力", "大秦铁路", "中国建筑"]
+      }
+    },
+    "defense_theme": "dividend_defense"
+  },
+  "growth_investing": {
+    "name": "成长投资",
+    "belief": "我相信成长投资：高增速消化高估值",
+    "logic_chain": [
+      "高增速可以消化高PE",
+      "技术驱动+市场空间大=长期复合增长",
+      "成长股的关键是增速持续性，不是绝对估值"
+    ],
+    "chain_links": {
+      "科技成长": {
+        "industry_keywords": ["新能源", "半导体", "通信", "芯片"],
+        "stock_keywords": ["宁德时代", "比亚迪", "中际旭创", "寒武纪"]
+      },
+      "医药成长": {
+        "industry_keywords": ["医药", "生物", "创新药"],
+        "stock_keywords": ["恒瑞医药", "药明康德", "百济神州", "信达生物"]
+      }
+    },
+    "defense_theme": "dividend_defense"
+  },
+  "contrarian_investing": {
+    "name": "逆向投资",
+    "belief": "我相信逆向投资：被错杀的好公司终将回归",
+    "logic_chain": [
+      "市场情绪过度反应，好公司被错杀",
+      "估值底部+基本面仍在=均值回归机会",
+      "逆向投资需要耐心，但赔率最好"
+    ],
+    "chain_links": {
+      "被错杀的消费": {
+        "industry_keywords": ["白酒", "食品饮料", "家电"],
+        "stock_keywords": ["贵州茅台", "五粮液", "海天味业", "美的集团"]
+      },
+      "被错杀的医药": {
+        "industry_keywords": ["医药", "医疗", "生物"],
+        "stock_keywords": ["恒瑞医药", "药明康德", "爱尔眼科", "长春高新"]
+      }
+    },
+    "defense_theme": "dividend_defense"
+  }
+}
