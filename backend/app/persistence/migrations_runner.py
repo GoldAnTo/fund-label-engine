@@ -78,17 +78,53 @@ def run_migrations(db_path: str) -> list[str]:
 
 
 def _split_statements(sql: str) -> list[str]:
-    """简单的 ; 分隔，忽略空行/注释。"""
+    """简单的 ; 分隔，忽略空行/注释。
+
+    增强:识别 CREATE TRIGGER ... BEGIN ... END; 结构,内部的 ; 不切分。
+    这是为了支持 governance_core 等需要数据库级不可变约束的 migration。
+    """
     statements: list[str] = []
     buf: list[str] = []
+    in_trigger = False
+    trigger_buf: list[str] = []
+
+    def _flush_buf() -> None:
+        if buf:
+            statements.append("\n".join(buf))
+            buf.clear()
+
+    def _flush_trigger() -> None:
+        if trigger_buf:
+            statements.append("\n".join(trigger_buf))
+            trigger_buf.clear()
+
     for line in sql.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("--"):
+            # 注释行:append 到当前 buffer
+            if in_trigger:
+                trigger_buf.append(line)
+            else:
+                buf.append(line)
             continue
+        upper = stripped.upper()
+        if not in_trigger and upper.startswith("CREATE TRIGGER"):
+            in_trigger = True
+            trigger_buf.append(line)
+            # 触发器体在 BEGIN ... END 块内
+            if "END;" in stripped.upper() or stripped.upper().endswith("END"):
+                _flush_trigger()
+                in_trigger = False
+            continue
+        if in_trigger:
+            trigger_buf.append(line)
+            if "END;" in stripped.upper():
+                _flush_trigger()
+                in_trigger = False
+            continue
+        # 普通语句
         buf.append(line)
         if stripped.endswith(";"):
-            statements.append("\n".join(buf))
-            buf = []
-    if buf:
-        statements.append("\n".join(buf))
+            _flush_buf()
+    _flush_buf()
     return statements

@@ -220,6 +220,11 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    # === 治理核心 API ===
+    from app.api.governance import router as governance_router
+
+    app.include_router(governance_router)
+
     @app.get("/v1/runs")
     def list_runs(
         limit: int = 50,

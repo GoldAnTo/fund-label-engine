@@ -1,0 +1,92 @@
+# ============================================================
+# Strategy Policy 样例 · FOF 成长型 v0（可选扩展模式）
+# ============================================================
+# 适用文档:
+#   - docs/p0/domain-language-v0.md  (字段 1:1 对齐)
+#   - docs/private-fund-investment-research-system-plan.md 第 5.1 节
+#
+# 不可变承诺:
+#   - 本文件字段命名 / 状态机与 domain-language-v0.md 完全一致
+#   - 字段值由"产品/运营"角色负责,研究员/投资经理/风控不得修改
+#   - 历史 DecisionRecord 引用本文件时,必须引用 (policy_id, version)
+#
+# 维护规则:
+#   - 修改字段值 = 新增 version,而不是修改原 version
+#   - version=1 是基线,任何破坏性变更必须 version+=1
+#   - effective_to 到期后状态切到 deprecated,不可再用
+# ============================================================
+
+policy_id: foof_growth
+version: 1
+policy_status: example
+approved_for_production: false
+business_mode: fof
+
+# --- 基础信息 ---
+strategy_name: FOF 成长型
+strategy_type: fof_growth
+market_scope:
+  - cn_a
+  - hk
+investment_horizon: P1Y            # 1 年
+benchmark: CSI300
+target_return: 0.15                # 年化 15%
+risk_budget: 0.18                  # 年化波动率 18%
+
+# --- 风险与仓位约束 ---
+maximum_drawdown: 0.20             # 最大回撤 20%
+leverage_limit: 1.0                # 不加杠杆
+liquidity_limit: P30D              # 赎回周期 ≤ 30 天
+
+position_limit:
+  single_manager: 0.20             # 单管理人上限 20%
+  single_fund: 0.15                # 单只基金上限 15%
+  single_industry: 0.30            # 单行业暴露上限 30%(穿透后)
+
+# --- 投资范围 ---
+allowed_universe:
+  - manager_type: equity_long_only
+    min_track_record_years: 3
+    min_aum_yi: 5                  # 5 亿
+  - manager_type: equity_hedged_partial
+    min_track_record_years: 3
+    min_aum_yi: 5
+
+excluded_universe:
+  - manager_blacklist: []          # 暂无,阶段 1 接入尽调后填充
+  - strategy_type_forbidden:
+      - leveraged_etf
+      - commodity_single
+
+# --- 估值容忍度 ---
+valuation_policy:
+  pe_max: 60
+  pb_max: 10
+  peg_max: 2.0
+  # 注:这些是"穿透到底层持仓后"的组合层估值上限,非单只基金
+
+# --- 监控阈值(对应 MonitoringEvent)---
+monitoring_policy:
+  holding_change:
+    single_position_drift: 0.05    # 单持仓漂移 > 5pp 触发 warning
+  industry_drift:
+    vs_benchmark: 0.10             # 行业偏离基准 > 10pp 触发 warning
+  style_drift:
+    vs_policy: 0.15                # 风格偏离政策 > 15pp 触发 warning
+  manager_change:
+    trigger: any                   # 任何基金经理变更触发 critical
+  data_stale:
+    days_threshold: 60             # 数据 60 天未更新触发 warning
+  thesis_invalidation:
+    review_days: 180               # 假设 180 天未复核触发 watching
+  risk_breach:
+    drawdown: 0.15                 # 回撤 > 15% 触发 critical
+
+# --- 生效期 ---
+effective_from: 2026-07-10
+effective_to: null                 # 长期有效,直到 deprecated
+approved_by: product_team_lead
+
+# --- 治理元数据 ---
+schema_doc: docs/p0/domain-language-v0.md
+change_policy: append_new_version
