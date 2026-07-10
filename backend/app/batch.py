@@ -496,6 +496,85 @@ def _apply_cross_sectional_percentiles(
     return replace(rule_config, **updates)
 
 
+def _write_valuation_snapshot(
+    writer: "LabelRunWriter",
+    run_id: str,
+    fund: Any,
+    result: Any,
+) -> None:
+    """从 engine result 提取估值字段，写入 fund_valuation_history。
+
+    监控面板 v1 数据源。
+    """
+    from app.label_engine.engine import EngineResult
+    if not isinstance(result, EngineResult):
+        return
+
+    # 找到所有 valuation / risk 类的 evidence item
+    val_evidence = [
+        e for e in result.evidence
+        if e.metric and (
+            "pe" in e.metric.lower()
+            or "pb" in e.metric.lower()
+            or "roe" in e.metric.lower()
+            or "val_pct" in e.metric.lower()
+            or "dividend_yield" in e.metric.lower()
+        )
+    ]
+    pe = pb = roe = div = val_pct = peg = price_in = None
+    for e in val_evidence:
+        v = e.value
+        if v is None:
+            continue
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            continue
+        m = (e.metric or "").lower()
+        if m in ("weighted_pe", "pe", "weighted_pe_ttm") and pe is None:
+            pe = v
+        elif m in ("weighted_pb", "pb") and pb is None:
+            pb = v
+        elif m in ("weighted_roe", "roe") and roe is None:
+            roe = v
+        elif m in ("weighted_dividend_yield", "dividend_yield") and div is None:
+            div = v
+        elif m in ("weighted_val_pct", "val_pct", "valuation_percentile") and val_pct is None:
+            # 数据库里是 0-1 小数（0.85 = 85%），输出时统一 0-100
+            val_pct = v * 100 if v <= 1.0 else v
+        elif m == "weighted_peg" and peg is None:
+            peg = v
+        elif m == "price_in_years" and price_in is None:
+            price_in = v
+
+    # 持仓数 + top holding weight
+    position_count = len(getattr(fund, "stock_holdings", []) or [])
+    top_holding_weight = None
+    if position_count > 0 and getattr(fund, "stock_holdings", None):
+        top_holding_weight = max(
+            (h.get("weight") or 0.0) for h in fund.stock_holdings
+        )
+
+    # as_of_date 用 run_at 截断到日
+    from datetime import datetime, UTC
+    as_of = datetime.now(UTC).strftime("%Y-%m-%d")
+
+    writer.write_valuation_snapshot(
+        run_id=run_id,
+        fund_code=fund.fund_code,
+        as_of_date=as_of,
+        weighted_pe=pe,
+        weighted_pb=pb,
+        weighted_roe=roe,
+        weighted_dividend_yield=div,
+        weighted_val_pct=val_pct,
+        weighted_peg=peg,
+        price_in_years=price_in,
+        position_count=position_count,
+        top_holding_weight=top_holding_weight,
+    )
+
+
 def run_batch(
     db_path: str | Path | None = None,
     rule_version: str = "v1",
@@ -706,6 +785,14 @@ def run_batch(
                     failure_count += 1
             result = engine.evaluate(fund)
             writer.write_result(run_id, result)
+            # 写入估值快照（监控面板 v1 数据源）
+            try:
+                _write_valuation_snapshot(writer, run_id, fund, result)
+            except Exception as snap_exc:  # noqa: BLE001
+                logger.warning(
+                    f"valuation snapshot write failed: {fund.fund_code} - {snap_exc}",
+                    extra={"run_id": run_id, "fund_code": fund.fund_code, "event": "snapshot_failure"},
+                )
             processed += 1
         except Exception as exc:  # noqa: BLE001 - 单只基金错误被隔离记录，不中断批次
             writer.write_failure(

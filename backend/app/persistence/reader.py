@@ -32,6 +32,14 @@ class LabelRunReader:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _connect_source(self) -> sqlite3.Connection:
+        """连接 source DB（用于读取原始 fund_stock_holdings / stock_industry_map）。"""
+        if not self._source_db_path:
+            return self._connect()
+        conn = sqlite3.connect(self._source_db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
     def list_runs(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -1720,6 +1728,119 @@ class LabelRunReader:
         )
         item["enabled"] = bool(item["enabled"])
         return item
+
+    def get_valuation_history(
+        self, fund_code: str, limit: int = 12
+    ) -> list[dict[str, Any]]:
+        """读取基金最近的估值快照历史（监控面板 v1 数据源）。
+
+        Args:
+            fund_code: 基金代码
+            limit: 返回的最大条数（按 as_of_date DESC）
+
+        Returns:
+            按 as_of_date DESC 排序的快照列表：
+            [{as_of_date, run_id, weighted_pe, weighted_pb, weighted_roe,
+              weighted_dividend_yield, weighted_val_pct, weighted_peg,
+              price_in_years, position_count, top_holding_weight}, ...]
+        """
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT run_id, as_of_date, weighted_pe, weighted_pb, "
+                    "weighted_roe, weighted_dividend_yield, weighted_val_pct, "
+                    "weighted_peg, price_in_years, position_count, top_holding_weight "
+                    "FROM fund_valuation_history "
+                    "WHERE fund_code = ? "
+                    "ORDER BY as_of_date DESC LIMIT ?",
+                    (fund_code, limit),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                # 表尚未通过 migration 创建
+                return []
+        return [dict(r) for r in rows]
+
+    def get_holding_history(
+        self, fund_code: str, limit_periods: int = 4
+    ) -> list[dict[str, Any]]:
+        """读取基金最近 N 个报告期的持仓（top stocks + 行业聚合）。
+
+        用于监控面板 v1 展示"持仓变化"。
+
+        Args:
+            fund_code: 基金代码
+            limit_periods: 最多返回的报告期数（按 report_period DESC）
+
+        Returns:
+            [{report_period, total_stocks, top_holdings: [...], top_industries: [...], top_sectors: [...]}, ...]
+        """
+        with self._connect_source() as conn:
+            try:
+                periods = conn.execute(
+                    "SELECT DISTINCT report_period FROM fund_stock_holdings "
+                    "WHERE fund_code = ? AND report_period IS NOT NULL "
+                    "ORDER BY report_period DESC LIMIT ?",
+                    (fund_code, limit_periods),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []
+
+            result: list[dict[str, Any]] = []
+            for (report_period,) in periods:
+                holdings_rows = conn.execute(
+                    "SELECT h.stock_code, h.stock_name, h.net_value_ratio AS weight, "
+                    "COALESCE(m.industry_name, '未知') AS industry_name, "
+                    "COALESCE(m.sector_group, 'other') AS sector_group "
+                    "FROM fund_stock_holdings h "
+                    "LEFT JOIN stock_industry_map m "
+                    "  ON h.stock_code = m.stock_code "
+                    "WHERE h.fund_code = ? AND h.report_period = ? "
+                    "ORDER BY h.net_value_ratio DESC",
+                    (fund_code, report_period),
+                ).fetchall()
+
+                if not holdings_rows:
+                    continue
+
+                # top 5 stocks
+                top_holdings = [
+                    {
+                        "stock_code": r[0],
+                        "stock_name": r[1] or "",
+                        "weight": round(r[2] or 0.0, 4),
+                    }
+                    for r in holdings_rows[:5]
+                ]
+                # 行业聚合
+                industry_weights: dict[str, float] = {}
+                sector_weights: dict[str, float] = {}
+                for r in holdings_rows:
+                    ind = r[3] or "未知"
+                    sec = r[4] or "other"
+                    w = r[2] or 0.0
+                    industry_weights[ind] = industry_weights.get(ind, 0) + w
+                    sector_weights[sec] = sector_weights.get(sec, 0) + w
+                top_industries = [
+                    {"name": k, "weight": round(v, 4)}
+                    for k, v in sorted(
+                        industry_weights.items(), key=lambda x: -x[1]
+                    )[:5]
+                ]
+                top_sectors = [
+                    {"name": k, "weight": round(v, 4)}
+                    for k, v in sorted(
+                        sector_weights.items(), key=lambda x: -x[1]
+                    )[:3]
+                ]
+
+                result.append({
+                    "report_period": report_period,
+                    "total_stocks": len(holdings_rows),
+                    "top_holdings": top_holdings,
+                    "top_industries": top_industries,
+                    "top_sectors": top_sectors,
+                })
+            return result
 
     def get_run_export(self, run_id: str) -> dict[str, Any] | None:
         """整批结果导出所需的全部数据，单次连接覆盖 5 张表。"""

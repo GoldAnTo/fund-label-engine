@@ -796,6 +796,44 @@ def create_app(
     ) -> dict[str, Any]:
         return {"rule_versions": reader.list_rule_versions()}
 
+    # === 监控面板 v1 ===
+    @app.get("/v1/monitor/fund/{fund_code}/overview")
+    def get_monitor_overview(
+        fund_code: str,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """返回单只基金的监控面板 v1 数据：估值历史 + 持仓历史 + 风险信号。
+
+        Args:
+            fund_code: 基金代码
+
+        Returns:
+            {
+              fund_code,
+              as_of_today,
+              valuation_history: [...],
+              holding_history: [...],
+              risk_signals: [{code, level, title, detail, value}, ...]
+            }
+        """
+        from app.monitor import detect_risk_signals
+        from datetime import date as _date
+
+        valuation_history = reader.get_valuation_history(fund_code, limit=12)
+        holding_history = reader.get_holding_history(fund_code, limit_periods=4)
+        signals = detect_risk_signals(
+            valuation_history=valuation_history,
+            holding_history=holding_history,
+            as_of_today=_date.today(),
+        )
+        return {
+            "fund_code": fund_code,
+            "as_of_today": _date.today().isoformat(),
+            "valuation_history": valuation_history,
+            "holding_history": holding_history,
+            "risk_signals": signals,
+        }
+
     @app.get("/v1/runs/{run_id}/funds/{fund_code}")
     def get_run_fund(
         run_id: str,

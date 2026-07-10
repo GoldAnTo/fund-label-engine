@@ -659,6 +659,58 @@ export async function postRunReplay(
   });
 }
 
+// ===================================================================
+// 监控面板 v1
+// ===================================================================
+
+export interface ValuationSnapshot {
+  run_id: string;
+  as_of_date: string;
+  weighted_pe: number | null;
+  weighted_pb: number | null;
+  weighted_roe: number | null;
+  weighted_dividend_yield: number | null;
+  weighted_val_pct: number | null;
+  weighted_peg: number | null;
+  price_in_years: number | null;
+  position_count: number | null;
+  top_holding_weight: number | null;
+}
+
+export interface HoldingPeriod {
+  report_period: string;
+  total_stocks: number;
+  top_holdings: Array<{
+    stock_code: string;
+    stock_name: string;
+    weight: number;
+  }>;
+  top_industries: Array<{ name: string; weight: number }>;
+  top_sectors: Array<{ name: string; weight: number }>;
+}
+
+export interface RiskSignal {
+  code: string;
+  level: "warning" | "info" | "critical";
+  title: string;
+  detail: string;
+  value: number;
+}
+
+export interface MonitorOverview {
+  fund_code: string;
+  as_of_today: string;
+  valuation_history: ValuationSnapshot[];
+  holding_history: HoldingPeriod[];
+  risk_signals: RiskSignal[];
+}
+
+export async function fetchMonitorOverview(
+  fundCode: string
+): Promise<MonitorOverview> {
+  return json(`/v1/monitor/fund/${encodeURIComponent(fundCode)}/overview`);
+}
+
 export async function fetchWorkbenchTasks(runId: string): Promise<WorkbenchTasksResponse> {
   return json(`/v1/runs/${runId}/workbench-tasks?limit=500`);
 }

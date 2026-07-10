@@ -697,6 +697,62 @@ class LabelRunWriter:
             )
             conn.commit()
 
+    def write_valuation_snapshot(
+        self,
+        run_id: str,
+        fund_code: str,
+        as_of_date: str,
+        weighted_pe: float | None = None,
+        weighted_pb: float | None = None,
+        weighted_roe: float | None = None,
+        weighted_dividend_yield: float | None = None,
+        weighted_val_pct: float | None = None,
+        weighted_peg: float | None = None,
+        price_in_years: float | None = None,
+        position_count: int | None = None,
+        top_holding_weight: float | None = None,
+    ) -> None:
+        """为单只基金写入一行估值快照（监控面板 v1 数据源）。
+
+        Args:
+            run_id: 关联的 batch run
+            fund_code: 基金代码
+            as_of_date: 数据日期（YYYY-MM-DD）
+            weighted_pe: 加权 PE
+            weighted_pb: 加权 PB
+            weighted_roe: 加权 ROE（小数 0.31 表示 31%）
+            weighted_dividend_yield: 加权股息率（小数）
+            weighted_val_pct: 估值分位（0-100）
+            weighted_peg: PEG
+            price_in_years: 估值隐含增长年限
+            position_count: 持仓股票数
+            top_holding_weight: 第一大重仓股权重（小数 0.10 表示 10%）
+        """
+        self.ensure_schema()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO fund_valuation_history "
+                "(run_id, fund_code, as_of_date, weighted_pe, weighted_pb, "
+                " weighted_roe, weighted_dividend_yield, weighted_val_pct, "
+                " weighted_peg, price_in_years, position_count, top_holding_weight) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_id,
+                    fund_code,
+                    as_of_date,
+                    weighted_pe,
+                    weighted_pb,
+                    weighted_roe,
+                    weighted_dividend_yield,
+                    weighted_val_pct,
+                    weighted_peg,
+                    price_in_years,
+                    position_count,
+                    top_holding_weight,
+                ),
+            )
+            conn.commit()
+
     def write_failure(
         self,
         run_id: str,

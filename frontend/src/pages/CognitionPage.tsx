@@ -27,6 +27,7 @@ import {
   ResearchBrief,
   EvidenceSummary,
   FundCandidatesTable,
+  MonitorPanel,
   type EvidenceItem,
 } from "../components/CognitionComponents";
 
@@ -92,6 +93,40 @@ export default function CognitionPage() {
   const [exporting, setExporting] = useState(false);
   // 选基 v1：用户的"我的观点"文本（仅展示，不参与模型判定）
   const [beliefNote, setBeliefNote] = useState("");
+  // 监控面板 v1：当前查看监控的基金
+  const [monitorFundCode, setMonitorFundCode] = useState<string | null>(null);
+  const [monitorData, setMonitorData] = useState<import("../api").MonitorOverview | null>(null);
+  const [monitorLoading, setMonitorLoading] = useState(false);
+  const [monitorError, setMonitorError] = useState<string | null>(null);
+
+  // 监控面板 v1：异步加载
+  useEffect(() => {
+    if (!monitorFundCode) {
+      setMonitorData(null);
+      setMonitorError(null);
+      return;
+    }
+    let cancelled = false;
+    setMonitorLoading(true);
+    setMonitorError(null);
+    import("../api").then((m) =>
+      m.fetchMonitorOverview(monitorFundCode).then(
+        (data) => {
+          if (cancelled) return;
+          setMonitorData(data);
+          setMonitorLoading(false);
+        },
+        (err) => {
+          if (cancelled) return;
+          setMonitorError(err instanceof Error ? err.message : String(err));
+          setMonitorLoading(false);
+        }
+      )
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [monitorFundCode]);
 
   useEffect(() => {
     fetchThemes().then((r) => setThemes(r.themes)).catch(() => {});
@@ -659,6 +694,10 @@ export default function CognitionPage() {
                   gatedOut={result.gated_out_funds || []}
                   onSelect={(code) => setSelectedFundCode(code)}
                   selectedCode={selectedFundCode}
+                  onMonitor={(code) =>
+                    setMonitorFundCode((prev) => (prev === code ? null : code))
+                  }
+                  monitoringCode={monitorFundCode}
                 />
               )}
             </section>
@@ -958,6 +997,16 @@ export default function CognitionPage() {
           {/* 右侧详情卡 */}
           <div className="cognition-detail-col">
             <FundDetailPanel fund={selectedFund} />
+            {monitorFundCode && (
+              <div style={{ marginTop: "12px" }}>
+                <MonitorPanel
+                  fundCode={monitorFundCode}
+                  overview={monitorData}
+                  loading={monitorLoading}
+                  error={monitorError}
+                />
+              </div>
+            )}
           </div>
         </div>
         </div>

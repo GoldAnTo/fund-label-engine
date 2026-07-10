@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CognitionResponse, ChainLink } from "../api";
+import type { CognitionResponse, ChainLink, MonitorOverview } from "../api";
 
 /* ===================================================================
    顶部 KPI 条（4 个并排卡片：认知 / 信心 / 风险 / 估值容忍）
@@ -608,6 +608,8 @@ export interface FundCandidatesTableProps {
   gatedOut?: GatedOutFund[];
   selectedCode: string | null;
   onSelect: (code: string) => void;
+  onMonitor?: (code: string) => void;
+  monitoringCode?: string | null;
 }
 
 function inferCandidateStatus(fund: FundCandidate): { status: CandidateStatus; reason?: string } {
@@ -636,6 +638,8 @@ export function FundCandidatesTable({
   gatedOut = [],
   selectedCode,
   onSelect,
+  onMonitor,
+  monitoringCode,
 }: FundCandidatesTableProps) {
   return (
     <section className="card" aria-label="认知匹配研究候选">
@@ -650,6 +654,7 @@ export function FundCandidatesTable({
             <th>持仓趋势</th>
             <th>研究结论</th>
             <th aria-label="动作"></th>
+            {onMonitor && <th aria-label="监控"></th>}
           </tr>
         </thead>
         <tbody>
@@ -700,6 +705,18 @@ export function FundCandidatesTable({
                     {selectedCode === f.fund_code ? "已选" : "查看"}
                   </button>
                 </td>
+                {onMonitor && (
+                  <td>
+                    <button
+                      type="button"
+                      className="candidate-row-button candidate-row-button-monitor"
+                      onClick={() => onMonitor(f.fund_code)}
+                      aria-label={`查看 ${f.fund_name} 监控面板`}
+                    >
+                      {monitoringCode === f.fund_code ? "监控中" : "监控"}
+                    </button>
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -718,5 +735,178 @@ export function FundCandidatesTable({
         </details>
       )}
     </section>
+  );
+}
+
+/* ===================================================================
+   MonitorPanel：监控面板 v1（设计 §9 阶段 3）
+   展示：估值历史趋势 + 持仓变化 + 风险信号
+   数据：GET /v1/monitor/fund/{code}/overview
+   =================================================================== */
+
+export interface MonitorPanelProps {
+  fundCode: string;
+  overview: MonitorOverview | null;
+  loading?: boolean;
+  error?: string | null;
+}
+
+export function MonitorPanel({ fundCode, overview, loading, error }: MonitorPanelProps) {
+  if (loading) {
+    return (
+      <div className="monitor-panel" role="status" aria-live="polite">
+        <div className="monitor-empty">加载监控数据…</div>
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="monitor-panel" role="alert">
+        <div className="monitor-empty">监控加载失败：{error}</div>
+      </div>
+    );
+  }
+  if (!overview) {
+    return (
+      <div className="monitor-panel">
+        <div className="monitor-empty">暂无监控数据</div>
+      </div>
+    );
+  }
+
+  return (
+    <section className="monitor-panel" aria-label={`基金 ${fundCode} 监控面板`}>
+      <div className="monitor-header">
+        <span className="monitor-title">监控面板</span>
+        <span className="monitor-meta">截至 {overview.as_of_today}</span>
+      </div>
+
+      {/* 风险信号 */}
+      {overview.risk_signals.length > 0 && (
+        <div className="monitor-signals">
+          {overview.risk_signals.map((s) => (
+            <div
+              key={s.code}
+              className={`monitor-signal monitor-signal-${s.level}`}
+              role="status"
+            >
+              <span className="monitor-signal-title">{s.title}</span>
+              <span className="monitor-signal-detail">{s.detail}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {overview.risk_signals.length === 0 && (
+        <div className="monitor-ok" role="status">无异常信号</div>
+      )}
+
+      {/* 估值历史 */}
+      <MonitorValuationSection history={overview.valuation_history} />
+
+      {/* 持仓历史 */}
+      <MonitorHoldingSection history={overview.holding_history} />
+    </section>
+  );
+}
+
+function MonitorValuationSection({
+  history,
+}: {
+  history: MonitorOverview["valuation_history"];
+}) {
+  return (
+    <details className="monitor-section" open>
+      <summary>估值历史（{history.length} 期）</summary>
+      {history.length === 0 ? (
+        <div className="monitor-empty">暂无估值快照</div>
+      ) : (
+        <table className="monitor-table">
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>PE</th>
+              <th>分位</th>
+              <th>PEG</th>
+              <th>隐含年限</th>
+              <th>重仓</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.map((h) => (
+              <tr key={h.run_id}>
+                <td>{h.as_of_date}</td>
+                <td>{h.weighted_pe != null ? h.weighted_pe.toFixed(1) : "—"}</td>
+                <td>
+                  {h.weighted_val_pct != null
+                    ? `${h.weighted_val_pct.toFixed(0)}%`
+                    : "—"}
+                </td>
+                <td>{h.weighted_peg != null ? h.weighted_peg.toFixed(1) : "—"}</td>
+                <td>{h.price_in_years != null ? `${h.price_in_years.toFixed(1)} 年` : "—"}</td>
+                <td>
+                  {h.top_holding_weight != null
+                    ? `${(h.top_holding_weight * 100).toFixed(1)}%`
+                    : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </details>
+  );
+}
+
+function MonitorHoldingSection({
+  history,
+}: {
+  history: MonitorOverview["holding_history"];
+}) {
+  return (
+    <details className="monitor-section">
+      <summary>持仓变化（最近 {history.length} 个报告期）</summary>
+      {history.length === 0 ? (
+        <div className="monitor-empty">暂无持仓历史</div>
+      ) : (
+        <div className="monitor-periods">
+          {history.map((p) => (
+            <div key={p.report_period} className="monitor-period">
+              <div className="monitor-period-head">
+                <strong>{p.report_period}</strong>
+                <span className="meta">{p.total_stocks} 只</span>
+              </div>
+              <table className="monitor-table monitor-table-compact">
+                <thead>
+                  <tr>
+                    <th>代码</th>
+                    <th>名称</th>
+                    <th>权重</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {p.top_holdings.map((h) => (
+                    <tr key={h.stock_code}>
+                      <td><code>{h.stock_code}</code></td>
+                      <td>{h.stock_name}</td>
+                      <td>{(h.weight * 100).toFixed(1)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {p.top_industries.length > 0 && (
+                <div className="monitor-period-aux">
+                  <span className="meta">行业：</span>
+                  {p.top_industries.map((ind) => (
+                    <span key={ind.name} className="monitor-pill">
+                      {ind.name} {(ind.weight * 100).toFixed(0)}%
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </details>
   );
 }
