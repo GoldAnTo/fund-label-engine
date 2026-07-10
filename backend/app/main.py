@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import sys
 from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -1100,6 +1102,23 @@ def create_app(
     def _clean_blocking_component(value: str) -> str:
         return value.split(":", 1)[1] if ":" in value else value
 
+    def _finding_to_dict(finding: Any) -> dict[str, Any]:
+        """把 InspectionFinding dataclass 序列化为 dict。"""
+        if hasattr(finding, "__dataclass_fields__"):
+            from dataclasses import asdict
+
+            return asdict(finding)
+        if isinstance(finding, dict):
+            return finding
+        return {
+            "severity": getattr(finding, "severity", "info"),
+            "category": getattr(finding, "category", ""),
+            "title": getattr(finding, "title", ""),
+            "detail": getattr(finding, "detail", ""),
+            "count": getattr(finding, "count", 0),
+            "samples": getattr(finding, "samples", []),
+        }
+
     def _workbench_task_action(task_type: str, reason: str) -> str:
         if task_type == "benchmark_gap":
             if reason == "benchmark_source_missing":
@@ -1241,6 +1260,135 @@ def create_app(
             "blocker_groups": eligibility["blocker_groups"][:10],
             "group_distribution": summary.get("group_distribution", []),
             "classification_distribution": summary.get("classification_distribution", []),
+        }
+
+    # ------------------------------------------------------------------
+    # 数据质量巡检（基于 source DB 静态扫描，不依赖 run 状态）
+    # ------------------------------------------------------------------
+
+    @app.get("/v1/data-quality")
+    def get_data_quality() -> dict[str, Any]:
+        """返回 source DB 数据质量综合指标和发现列表。
+
+        不依赖 run 状态——直接扫描 source DB 的 NAV / 持仓 / 因子 / 基准表。
+        供工作台顶部"数据健康"卡片和质量管理面板使用。
+        """
+        from scripts.data_quality_inspection import (
+            collect_overview,
+            inspect_benchmark_gaps,
+            inspect_factor_freshness,
+            inspect_holding_count_outliers,
+            inspect_holding_report_period_coverage,
+            inspect_holding_weight_outliers,
+            inspect_holdings_staleness,
+            inspect_nav_history,
+            inspect_nav_return_outliers,
+        )
+
+        source_db = app.state.source_db_path or app.state.db_path
+        if not source_db or not Path(source_db).exists():
+            raise HTTPException(
+                status_code=503,
+                detail="Source database is not configured or not accessible.",
+            )
+
+        findings: list[dict[str, Any]] = []
+        with sqlite3.connect(source_db) as conn:
+            conn.row_factory = sqlite3.Row
+            for f in inspect_nav_history(conn, 7):
+                findings.append(_finding_to_dict(f))
+            for f in inspect_holdings_staleness(conn, 120):
+                findings.append(_finding_to_dict(f))
+            for f in inspect_factor_freshness(conn, 7):
+                findings.append(_finding_to_dict(f))
+            for f in inspect_benchmark_gaps(conn):
+                findings.append(_finding_to_dict(f))
+            for f in inspect_nav_return_outliers(conn):
+                findings.append(_finding_to_dict(f))
+            for f in inspect_holding_weight_outliers(conn):
+                findings.append(_finding_to_dict(f))
+            for f in inspect_holding_count_outliers(conn):
+                findings.append(_finding_to_dict(f))
+            for f in inspect_holding_report_period_coverage(conn):
+                findings.append(_finding_to_dict(f))
+            overview = collect_overview(conn)
+
+        by_severity: dict[str, int] = {}
+        for f in findings:
+            by_severity[f["severity"]] = by_severity.get(f["severity"], 0) + 1
+
+        return {
+            "inspected_at": datetime.now(UTC).isoformat(),
+            "overview": overview,
+            "summary": by_severity,
+            "findings": findings,
+        }
+
+    @app.get("/v1/runs/{run_id}/data-quality")
+    def get_run_data_quality(
+        run_id: str,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """Run 维度的数据质量：基础巡检 + 该 run 的覆盖率分布。
+
+        与 ``/v1/data-quality`` 的区别：
+        - 复用基础数据质量检查
+        - 附加该 run 内的标签/分类/分组的覆盖率分布
+        """
+        if reader.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+
+        # 复用 /v1/data-quality 的基础数据
+        from scripts.data_quality_inspection import (
+            collect_overview,
+            inspect_benchmark_gaps,
+            inspect_factor_freshness,
+            inspect_holding_count_outliers,
+            inspect_holding_report_period_coverage,
+            inspect_holding_weight_outliers,
+            inspect_holdings_staleness,
+            inspect_nav_history,
+            inspect_nav_return_outliers,
+        )
+
+        source_db = app.state.source_db_path or app.state.db_path
+        findings: list[dict[str, Any]] = []
+        overview: dict[str, Any] = {}
+        if source_db and Path(source_db).exists():
+            with sqlite3.connect(source_db) as conn:
+                conn.row_factory = sqlite3.Row
+                for f in inspect_nav_history(conn, 7):
+                    findings.append(_finding_to_dict(f))
+                for f in inspect_holdings_staleness(conn, 120):
+                    findings.append(_finding_to_dict(f))
+                for f in inspect_factor_freshness(conn, 7):
+                    findings.append(_finding_to_dict(f))
+                for f in inspect_benchmark_gaps(conn):
+                    findings.append(_finding_to_dict(f))
+                for f in inspect_nav_return_outliers(conn):
+                    findings.append(_finding_to_dict(f))
+                for f in inspect_holding_weight_outliers(conn):
+                    findings.append(_finding_to_dict(f))
+                for f in inspect_holding_count_outliers(conn):
+                    findings.append(_finding_to_dict(f))
+                for f in inspect_holding_report_period_coverage(conn):
+                    findings.append(_finding_to_dict(f))
+                overview = collect_overview(conn)
+
+        # run 维度附加：coverage 分布
+        coverage = reader.get_run_coverage(run_id) if hasattr(reader, "get_run_coverage") else None
+
+        by_severity: dict[str, int] = {}
+        for f in findings:
+            by_severity[f["severity"]] = by_severity.get(f["severity"], 0) + 1
+
+        return {
+            "run_id": run_id,
+            "inspected_at": datetime.now(UTC).isoformat(),
+            "overview": overview,
+            "summary": by_severity,
+            "findings": findings,
+            "run_coverage": coverage,
         }
 
     @app.get("/v1/runs/{run_id}/workbench-tasks")

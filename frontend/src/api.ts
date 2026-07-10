@@ -507,6 +507,50 @@ export interface WorkbenchSummary {
   classification_distribution: { dimension: string; classification_code: string; classification_name: string; fund_count: number }[];
 }
 
+// ===================================================================
+// 数据质量巡检
+// ===================================================================
+
+export interface DataQualityOverview {
+  total_funds: number;
+  nav_covered_funds: number;
+  nav_missing_funds: number;
+  holding_covered_funds: number;
+  holding_missing_funds: number;
+  latest_nav_date: string | null;
+  latest_holding_period: string | null;
+  factor_stock_count: number;
+  latest_factor_as_of: string | null;
+  benchmark_resolved_funds: number;
+  benchmark_total_funds: number;
+}
+
+export interface DataQualityFinding {
+  severity: "critical" | "warning" | "info" | string;
+  category: string;
+  title: string;
+  detail: string;
+  count: number;
+  samples: string[];
+}
+
+export interface DataQualityReport {
+  inspected_at: string;
+  overview: DataQualityOverview;
+  summary: Record<string, number>;
+  findings: DataQualityFinding[];
+  run_id?: string;
+  run_coverage?: unknown;
+}
+
+export async function fetchDataQuality(): Promise<DataQualityReport> {
+  return json("/v1/data-quality");
+}
+
+export async function fetchRunDataQuality(runId: string): Promise<DataQualityReport> {
+  return json(`/v1/runs/${runId}/data-quality`);
+}
+
 export async function fetchWorkbenchTasks(runId: string): Promise<WorkbenchTasksResponse> {
   return json(`/v1/runs/${runId}/workbench-tasks?limit=500`);
 }

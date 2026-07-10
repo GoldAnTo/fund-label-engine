@@ -7,12 +7,14 @@ import {
   fetchPortfolioMatrix,
   fetchTopFunds,
   fetchWorkbenchSummary,
+  fetchDataQuality,
   downloadFile,
   type RelativeEligibilityResponse,
   type RunSummary,
   type PortfolioMatrixResponse,
   type TopFundsResponse,
   type WorkbenchSummary,
+  type DataQualityReport,
   type Run,
 } from "../api";
 import { ALL_STYLE_CODES, STYLE_GROUPS, styleTagClass, styleName } from "../styleConfig";
@@ -75,6 +77,8 @@ export default function ReadyPoolPage() {
   const [summary, setSummary] = useState<RunSummary | null>(null);
   const [workbench, setWorkbench] = useState<WorkbenchSummary | null>(null);
   const [matrix, setMatrix] = useState<PortfolioMatrixResponse | null>(null);
+  const [dataQuality, setDataQuality] = useState<DataQualityReport | null>(null);
+  const [dqOpen, setDqOpen] = useState(false);
   const [topFundsByStyle, setTopFundsByStyle] = useState<Record<string, TopFundsResponse>>({});
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -104,12 +108,14 @@ export default function ReadyPoolPage() {
       fetchRunSummary(runId),
       fetchPortfolioMatrix(runId),
       fetchWorkbenchSummary(runId).catch(() => null),
+      fetchDataQuality().catch(() => null),
     ])
-      .then(([elig, summ, mat, wb]) => {
+      .then(([elig, summ, mat, wb, dq]) => {
         setEligibility(elig);
         setSummary(summ);
         setMatrix(mat);
         setWorkbench(wb);
+        setDataQuality(dq);
       })
       .catch((e) => setError(e.message));
 
@@ -407,6 +413,65 @@ export default function ReadyPoolPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* 数据健康（点击展开） */}
+      {dataQuality && (
+        <div className="card">
+          <div className="section-head">
+            <h2>
+              数据健康
+              <span className="dq-headline" style={{ marginLeft: 10 }}>
+                {(() => {
+                  const s = dataQuality.summary || {};
+                  const crit = s.critical || 0;
+                  const warn = s.warning || 0;
+                  if (crit > 0) return <span className="dq-pill dq-pill-bad">✗ {crit} critical</span>;
+                  if (warn > 0) return <span className="dq-pill dq-pill-warn">⚠ {warn} warning</span>;
+                  return <span className="dq-pill dq-pill-ok">✓ 健康</span>;
+                })()}
+              </span>
+            </h2>
+            <div className="meta">
+              {dataQuality.overview.total_funds} 只基金 · NAV {dataQuality.overview.nav_covered_funds}/{dataQuality.overview.total_funds} · 持仓 {dataQuality.overview.holding_covered_funds}/{dataQuality.overview.total_funds}
+              <button
+                className="link-btn"
+                style={{ marginLeft: 8 }}
+                onClick={() => setDqOpen(!dqOpen)}
+              >
+                {dqOpen ? "收起详情" : "查看详情"}
+              </button>
+            </div>
+          </div>
+          {dqOpen && (
+            <div>
+              {dataQuality.findings.length === 0 ? (
+                <div className="alert alert-ok">未发现数据质量问题。</div>
+              ) : (
+                <ul className="dq-findings">
+                  {dataQuality.findings.map((f, i) => (
+                    <li key={i} className={`dq-finding dq-finding-${f.severity}`}>
+                      <div className="dq-finding-head">
+                        <span className={`dq-finding-sev sev-${f.severity}`}>
+                          {f.severity === "critical" ? "✗" : f.severity === "warning" ? "⚠" : "·"} {f.severity}
+                        </span>
+                        <span className="dq-finding-title">{f.title}</span>
+                        <span className="dq-finding-cat">{f.category}</span>
+                      </div>
+                      {f.detail && <div className="dq-finding-detail">{f.detail}</div>}
+                      {f.samples && f.samples.length > 0 && (
+                        <div className="dq-finding-samples">
+                          样本：{f.samples.slice(0, 5).join("、")}
+                          {f.samples.length > 5 && ` 等 ${f.samples.length} 个`}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       )}
 

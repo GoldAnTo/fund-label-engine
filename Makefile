@@ -35,7 +35,7 @@ RELATIVE_ELIGIBILITY_CSV ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.c
 RELATIVE_ELIGIBILITY_MD  ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.md
 READY_POOL_MD  ?= $(BENCHMARK_REPORT_DIR)/phase1-v1-ready-pool-sample.md
 
-.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark import-authorized-benchmark-components fetch-investoday-benchmark audit-benchmark audit-relative-eligibility render-ready-pool-report run-batch-v1-with-benchmark test lint lint-fix backup-db
+.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark import-authorized-benchmark-components fetch-investoday-benchmark audit-benchmark audit-relative-eligibility render-ready-pool-report render-data-quality-report run-batch-v1-with-benchmark test lint lint-fix backup-db
 
 help:
 	@echo "Available targets:"
@@ -49,6 +49,7 @@ help:
 	@echo "  make audit-benchmark    输出 benchmark 质量审计到 $(BENCHMARK_REPORT_DIR)"
 	@echo "  make audit-relative-eligibility  输出相对标签 ready 池审计"
 	@echo "  make render-ready-pool-report  渲染 8 只样本 Phase1 v1 ready pool 验收报告"
+	@echo "  make render-data-quality-report  渲染数据质量综合报告（含异常值/报告期错配/覆盖率）"
 	@echo "  make run-batch-v1-with-benchmark  先补 benchmark，再跑 v1 标签"
 	@echo "  RULE_CONFIG=$(RULE_CONFIG)"
 	@echo "  make test               跑 pytest"
@@ -166,6 +167,14 @@ render-ready-pool-report:
 	  --source-db $(SOURCE_DB) \
 	  --output-db $(OUTPUT_DB) \
 	  --out-md $(READY_POOL_MD)
+
+render-data-quality-report:
+	@mkdir -p $(BENCHMARK_REPORT_DIR)
+	$(PYTHON) scripts/render_data_quality_report.py \
+	  --db $(SOURCE_DB) \
+	  --output-db $(OUTPUT_DB) \
+	  --report $(BENCHMARK_REPORT_DIR)/data-quality.md \
+	  --json $(BENCHMARK_REPORT_DIR)/data-quality.json
 
 run-batch-v1-with-benchmark: refresh-benchmark audit-benchmark
 	@rm -f $(OUTPUT_DB)

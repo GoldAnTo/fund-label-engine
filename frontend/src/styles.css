@@ -1256,6 +1256,77 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   transform: translateY(0);
 }
 
+/* --- 数据质量卡片（ReadyPoolPage）--- */
+.dq-headline { font-size: 12px; font-weight: 500; }
+.dq-pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+.dq-pill-ok { background: color-mix(in oklch, var(--pos) 18%, transparent); color: var(--pos); }
+.dq-pill-warn { background: color-mix(in oklch, var(--warn) 18%, transparent); color: var(--warn); }
+.dq-pill-bad { background: color-mix(in oklch, var(--neg) 18%, transparent); color: var(--neg); }
+
+.dq-findings {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dq-finding {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-2);
+  border-radius: var(--r);
+  padding: 10px 14px;
+}
+.dq-finding-critical { border-left-color: var(--neg); }
+.dq-finding-warning { border-left-color: var(--warn); }
+.dq-finding-info { border-left-color: var(--text-3); }
+.dq-finding-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dq-finding-sev {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+.dq-finding-sev.sev-critical { background: var(--neg); color: white; }
+.dq-finding-sev.sev-warning { background: var(--warn); color: white; }
+.dq-finding-sev.sev-info { background: var(--text-3); color: white; }
+.dq-finding-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.dq-finding-cat {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: ui-monospace, monospace;
+  margin-left: auto;
+}
+.dq-finding-detail {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 4px;
+}
+.dq-finding-samples {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 4px;
+  font-family: ui-monospace, monospace;
+}
+
 /* --- 基准解析 KPI 行 --- */
 .benchmark-kpi-row {
   display: grid;
