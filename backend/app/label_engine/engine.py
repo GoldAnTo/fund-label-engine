@@ -34,6 +34,16 @@ class RuleConfig:
     manager_tenure_long_years: float = 5.0
     fee_low_threshold: float = 0.012
     fee_high_threshold: float = 0.025
+    # ------------------------------------------------------------------
+    # 费率分层校准（按主动/被动、A/C 份额）
+    # ------------------------------------------------------------------
+    # 主动权益类：C 份额费率更低为常态，A 份额属正常偏高，被动指数更接近费率地板
+    fee_low_threshold_active_a: float = 0.015  # 主动 A 档低位阈值
+    fee_low_threshold_active_c: float = 0.010  # 主动 C 档低位阈值
+    fee_low_threshold_passive: float = 0.006   # 被动指数低位阈值
+    fee_high_threshold_active_a: float = 0.020  # 主动 A 档高位阈值
+    fee_high_threshold_active_c: float = 0.018  # 主动 C 档高位阈值
+    fee_high_threshold_passive: float = 0.012  # 被动指数高位阈值
     industry_concentration_threshold: float = 0.60
     industry_concentration_observe_threshold: float = 0.45
     industry_diversified_top1_max: float = 0.20
@@ -79,6 +89,11 @@ class RuleConfig:
     style_stability_min_periods: int = 2
     style_drift_delta_threshold: float = 0.25
     style_recent_shift_threshold: float = 0.20
+    # 正式展示口径：样本期数 >= 这个数时，风格稳定性标签 confidence 提升
+    # 到正式档；之前保持 observe 档（与 docs/todo.md P2-3 口径一致）
+    style_stability_promotion_min_periods: int = 4
+    style_stability_observe_confidence: float = 0.6
+    style_stability_official_confidence: float = 0.85
     # ---- 扩展风格标签阈值（估值/规模/盈利质量） ----
     low_valuation_pb_max: float = 3.0
     low_valuation_pe_max: float = 20.0
@@ -624,7 +639,19 @@ DEFAULT_LABEL_DEFINITIONS = (
         "label_name": "长期收益优秀",
         "category": "return_risk",
         "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
-        "description": "区间年化收益达到规则阈值。",
+        "description": (
+            "区间年化收益达到规则阈值（绝对口径，相对基准不可用时回退）。"
+        ),
+    },
+    {
+        "label_code": "relative_return_strong",
+        "label_name": "相对收益优秀",
+        "category": "return_risk",
+        "fund_types": ",".join(sorted(SUPPORTED_ACTIVE_EQUITY_TYPES)),
+        "description": (
+            "相对业绩比较基准的超额收益达到规则阈值。"
+            "P2 改造后此口径优先于绝对收益 long_term_return_strong。"
+        ),
     },
     {
         "label_code": "excess_return_strong",
@@ -817,6 +844,11 @@ class FundInput:
     equity_position: float | None = None
     holding_report_date: str | None = None
     industry_report_date: str | None = None
+    # ------------------------------------------------------------------
+    # 费率分层校准字段
+    # ------------------------------------------------------------------
+    share_class: str | None = None  # "A" / "C" / "B" / "I" / None（无法识别）
+    is_passive: bool | None = None  # True 被动指数 / False 主动 / None 未知
 
 
 @dataclass(frozen=True)
@@ -908,10 +940,19 @@ class LabelEngine:
         """
         self._ff3_factor_loader = loader
 
-    def evaluate(self, fund: FundInput) -> EngineResult:
+    def evaluate(
+        self, fund: FundInput, features: list[FeatureValue] | None = None
+    ) -> EngineResult:
+        """评估基金标签。
+
+        Args:
+            fund: 基金输入数据
+            features: 可选，自定义特征值列表（用于单测或外部注入）。
+                     为 None 时从 fund 重新计算。
+        """
         labels: list[LabelResult] = []
         evidence: list[EvidenceItem] = []
-        features = self._calculate_features(fund)
+        features = features if features is not None else self._calculate_features(fund)
         coverage_details = self._coverage_details(fund)
         coverage = {field: detail["ok"] for field, detail in coverage_details.items()}
         coverage_ok = all(coverage.values())
@@ -2482,16 +2523,48 @@ class LabelEngine:
             )
 
         annual_return = feature_map.get(ret_key)
+        # 相对基准优先：若 annualized_excess_return_{window} 特征存在则优先用相对超额替代绝对收益口径
+        excess_key = f"annualized_excess_return_{chosen_window}"
+        excess_return = feature_map.get(excess_key)
         if (
-            annual_return
-            and float(annual_return.value) >= self._rule_config.long_term_return_threshold
+            excess_return is not None
+            and float(excess_return.value) >= self._rule_config.long_term_return_threshold
         ):
             labels.append(
                 LabelResult(
-                    label_code="long_term_return_strong",
-                    label_name="长期收益优秀",
+                    label_code="relative_return_strong",
+                    label_name="相对收益优秀",
                     category="return_risk",
-                    confidence=0.8,
+                    confidence=0.85,
+                )
+            )
+            evidence.append(
+                EvidenceItem(
+                    label_code="relative_return_strong",
+                    metric=excess_key,
+                    value=excess_return.value,
+                    threshold=self._rule_config.long_term_return_threshold,
+                    source=excess_return.source,
+                    message=(
+                        f"{chosen_window.upper()} 相对超额收益 "
+                        f"{float(excess_return.value):.2%}，"
+                        f"达到 {self._rule_config.long_term_return_threshold:.2%} 阈值。"
+                        f"已用相对基准口径替代纯绝对收益，更稳健。"
+                    ),
+                )
+            )
+        elif (
+            annual_return
+            and float(annual_return.value) >= self._rule_config.long_term_return_threshold
+        ):
+            # 回退：相对基准不可用时，使用绝对收益口径
+            labels.append(
+                LabelResult(
+                    label_code="long_term_return_strong",
+                    label_name="长期收益优秀（绝对口径）",
+                    category="return_risk",
+                    confidence=0.7,
+                    status="observe",
                 )
             )
             evidence.append(
@@ -2504,6 +2577,7 @@ class LabelEngine:
                     message=(
                         f"{chosen_window.upper()} 年化收益率 {float(annual_return.value):.2%}，"
                         f"达到 {self._rule_config.long_term_return_threshold:.2%} 阈值。"
+                        f"⚠ 相对基准不可用，当前为绝对收益口径（观察档）。"
                     ),
                 )
             )
@@ -2685,8 +2759,8 @@ class LabelEngine:
             fund.sales_service_fee or 0.0
         )
         total_fee = round(total_fee, 4)
-        low_threshold = self._rule_config.fee_low_threshold
-        high_threshold = self._rule_config.fee_high_threshold
+        # 分层校准：根据 share_class + is_passive 选阈值
+        low_threshold, high_threshold, segment = self._resolve_fee_thresholds(fund)
         if total_fee <= low_threshold:
             labels.append(
                 LabelResult(
@@ -2703,7 +2777,10 @@ class LabelEngine:
                     value=total_fee,
                     threshold=low_threshold,
                     source="fee_structures",
-                    message=f"管理费、托管费和销售服务费合计 {total_fee:.2%}，不高于 {low_threshold:.2%}。",
+                    message=(
+                        f"管理费、托管费和销售服务费合计 {total_fee:.2%}，"
+                        f"不高于 {segment} 层阈值 {low_threshold:.2%}。"
+                    ),
                 )
             )
         elif total_fee > high_threshold:
@@ -2722,9 +2799,48 @@ class LabelEngine:
                     value=total_fee,
                     threshold=high_threshold,
                     source="fee_structures",
-                    message=f"管理费、托管费和销售服务费合计 {total_fee:.2%}，高于 {high_threshold:.2%}。",
+                    message=(
+                        f"管理费、托管费和销售服务费合计 {total_fee:.2%}，"
+                        f"高于 {segment} 层阈值 {high_threshold:.2%}。"
+                    ),
                 )
             )
+
+    def _resolve_fee_thresholds(
+        self, fund: "FundInput"
+    ) -> tuple[float, float, str]:
+        """按 share_class + is_passive 解析费率高低阈值。
+
+        Returns:
+            (low_threshold, high_threshold, segment_label)
+            - segment_label: "主动-A" / "主动-C" / "被动" / "默认"（用于 evidence 描述）
+        """
+        # 被动指数优先（按规则被动更接近费率地板）
+        if fund.is_passive is True:
+            return (
+                self._rule_config.fee_low_threshold_passive,
+                self._rule_config.fee_high_threshold_passive,
+                "被动",
+            )
+        # 主动基金：A/C 份额
+        if fund.share_class and fund.share_class.upper() == "C":
+            return (
+                self._rule_config.fee_low_threshold_active_c,
+                self._rule_config.fee_high_threshold_active_c,
+                "主动-C",
+            )
+        if fund.share_class and fund.share_class.upper() in {"A", "B", "I"}:
+            return (
+                self._rule_config.fee_low_threshold_active_a,
+                self._rule_config.fee_high_threshold_active_a,
+                f"主动-{fund.share_class.upper()}",
+            )
+        # 主动但未识别份额 → 用默认阈值
+        return (
+            self._rule_config.fee_low_threshold,
+            self._rule_config.fee_high_threshold,
+            "默认",
+        )
 
     def _add_fund_size_labels(
         self,
@@ -3812,14 +3928,25 @@ class LabelEngine:
         previous_latest_style_value = float(previous["style_values"].get(latest_style, 0.0))
         latest_delta = latest_value - previous_latest_style_value
 
+        # 按样本期数决定 confidence 和 status
+        # 样本不足时：observe 档（保持观察标签）
+        # 样本足够时：official 档（可作为正式展示）
+        n_periods = len(periods)
+        if n_periods >= cfg.style_stability_promotion_min_periods:
+            style_conf = cfg.style_stability_official_confidence
+            style_status = "official"
+        else:
+            style_conf = cfg.style_stability_observe_confidence
+            style_status = "observe"
+
         if latest_style != previous_style:
             labels.append(
                 LabelResult(
                     label_code="style_drift",
                     label_name="风格漂移",
                     category="style_stability",
-                    confidence=0.7,
-                    status="observe",
+                    confidence=style_conf,
+                    status=style_status,
                 )
             )
             evidence.append(
@@ -3833,6 +3960,13 @@ class LabelEngine:
                         f"主导风格从 {previous_style} 切换为 {latest_style}；"
                         f"最新权重 {latest_value:.0%}，上一期同风格权重 "
                         f"{previous_latest_style_value:.0%}。"
+                        + (
+                            f"（基于 {n_periods} 期样本，"
+                            f"达到正式展示门槛 {cfg.style_stability_promotion_min_periods} 期）"
+                            if style_status == "official"
+                            else f"（基于 {n_periods} 期样本，"
+                            f"低于正式门槛 {cfg.style_stability_promotion_min_periods}，当前为观察档）"
+                        )
                     ),
                 )
             )
@@ -3842,8 +3976,8 @@ class LabelEngine:
                         label_code="style_recent_shift",
                         label_name="近期风格切换",
                         category="style_stability",
-                        confidence=0.7,
-                        status="observe",
+                        confidence=style_conf,
+                        status=style_status,
                     )
                 )
                 evidence.append(
@@ -3872,8 +4006,8 @@ class LabelEngine:
                     label_code="style_stable",
                     label_name="风格稳定",
                     category="style_stability",
-                    confidence=0.7,
-                    status="observe",
+                    confidence=style_conf,
+                    status=style_status,
                 )
             )
             evidence.append(
@@ -3886,6 +4020,11 @@ class LabelEngine:
                     message=(
                         f"近 {len(periods)} 期主导风格均为 {latest_style}，"
                         f"主导风格权重波动 {value_range:.0%}，未超过漂移阈值。"
+                        + (
+                            f"（基于 {n_periods} 期样本，达到正式门槛）"
+                            if style_status == "official"
+                            else f"（基于 {n_periods} 期样本，当前为观察档）"
+                        )
                     ),
                 )
             )
@@ -3895,8 +4034,8 @@ class LabelEngine:
                     label_code="style_recent_shift",
                     label_name="近期风格切换",
                     category="style_stability",
-                    confidence=0.7,
-                    status="observe",
+                    confidence=style_conf,
+                    status=style_status,
                 )
             )
             evidence.append(
