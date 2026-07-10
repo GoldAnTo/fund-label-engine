@@ -1096,6 +1096,315 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 /* ============================================================
+   认知选基 v1：研究简报 + 证据汇总 + 候选结论
+   设计 §5：仅用正/负/中性三类状态色，无侧边彩条/全局阴影/transition: all
+   ============================================================ */
+
+/* --- ResearchBrief（研究简报）--- */
+.research-brief {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.research-brief-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 10px 0;
+}
+.research-brief-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px 18px;
+  margin: 0;
+}
+.research-brief-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.research-brief-item dt {
+  font-size: 11px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+.research-brief-item dd {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+  margin: 0;
+}
+.research-brief-note {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.research-brief-note-label {
+  color: var(--text-3);
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+/* --- conviction badge（信心徽标）--- */
+.conviction-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.conviction-high {
+  background: color-mix(in oklch, var(--pos) 18%, transparent);
+  color: var(--pos);
+}
+.conviction-medium {
+  background: color-mix(in oklch, var(--warn) 18%, transparent);
+  color: var(--warn);
+}
+.conviction-low {
+  background: color-mix(in oklch, var(--neg) 18%, transparent);
+  color: var(--neg);
+}
+
+/* --- EvidenceSummary（证据汇总）--- */
+.evidence-summary {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.evidence-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 10px 0;
+}
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 1100px) {
+  .evidence-grid { grid-template-columns: 1fr; }
+}
+.evidence-col {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 10px 12px;
+}
+.evidence-col-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+.evidence-col-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.evidence-col-dot-support { background: var(--pos); }
+.evidence-col-dot-oppose { background: var(--neg); }
+.evidence-col-dot-pending { background: var(--text-3); }
+.evidence-col-title { flex: 1; }
+.evidence-col-count {
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+.evidence-empty {
+  font-size: 12px;
+  color: var(--text-3);
+  text-align: center;
+  padding: 12px 0;
+  font-style: italic;
+}
+.evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.evidence-item {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 8px 10px;
+}
+.evidence-item-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.evidence-item-detail {
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+/* --- CandidateDecision（候选结论 pill）--- */
+.candidate-decision {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.candidate-decision-continue {
+  background: color-mix(in oklch, var(--pos) 18%, transparent);
+  color: var(--pos);
+}
+.candidate-decision-observe {
+  background: color-mix(in oklch, var(--warn) 18%, transparent);
+  color: var(--warn);
+}
+.candidate-decision-insufficient {
+  background: color-mix(in oklch, var(--text-3) 18%, transparent);
+  color: var(--text-3);
+}
+.candidate-decision-excluded {
+  background: color-mix(in oklch, var(--neg) 18%, transparent);
+  color: var(--neg);
+}
+.candidate-decision-reason {
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+/* --- 认知页表单语义化 + :focus-visible --- */
+.cognition-form input,
+.cognition-form textarea,
+.cognition-form select,
+.cognition-form button {
+  font: inherit;
+}
+.cognition-form label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+.cognition-form input[type="text"],
+.cognition-form input[type="search"],
+.cognition-form textarea,
+.cognition-form select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+.cognition-form input:focus,
+.cognition-form textarea:focus,
+.cognition-form select:focus,
+.cognition-form button:focus,
+.cognition-form [role="button"]:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.cognition-form button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.cognition-form button:hover {
+  border-color: var(--accent);
+}
+.cognition-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- aria-live error region --- */
+.cognition-aria-live {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+/* --- 候选表无障碍 + 状态色 --- */
+.candidate-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.candidate-table th,
+.candidate-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.candidate-table th {
+  font-size: 11px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+.candidate-row-button {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  border-radius: var(--r);
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.candidate-row-button:hover {
+  filter: brightness(1.1);
+}
+
+/* --- 空状态（无候选）--- */
+.cognition-empty-state {
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--r);
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-2);
+}
+.cognition-empty-state-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.cognition-empty-state-detail {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* ============================================================
    v3 增强：骨架动画、卡片深度、暗色模式
    借鉴 Wealthfolio / Ghostfolio 设计语言
    ============================================================ */

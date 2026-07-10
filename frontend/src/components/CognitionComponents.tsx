@@ -420,3 +420,303 @@ export function useScrollSpy(ids: string[], offset = 100): string {
 
   return active;
 }
+
+/* ===================================================================
+   ResearchBrief（研究简报）：方向、用户观点、环节、信心、周期
+   放在结果页顶部，紧跟 KpiBar
+   =================================================================== */
+
+export interface ResearchBriefProps {
+  direction: string;
+  beliefNote?: string | null;
+  chainLabel?: string | null;
+  convictionLabel: string;
+  convictionLevel: "high" | "medium" | "low" | string;
+  timeHorizon: string;
+  valuationToleranceLabel: string;
+  asOfDate?: string | null;
+}
+
+export function ResearchBrief(props: ResearchBriefProps) {
+  return (
+    <section
+      className="research-brief"
+      aria-label="研究简报"
+    >
+      <h3 className="research-brief-title">研究简报</h3>
+      <dl className="research-brief-grid">
+        <div className="research-brief-item">
+          <dt>方向</dt>
+          <dd>{props.direction || "—"}</dd>
+        </div>
+        <div className="research-brief-item">
+          <dt>信心</dt>
+          <dd>
+            <span className={`conviction-badge conviction-${props.convictionLevel}`}>
+              {props.convictionLabel}
+            </span>
+          </dd>
+        </div>
+        <div className="research-brief-item">
+          <dt>时间周期</dt>
+          <dd>{props.timeHorizon || "—"}</dd>
+        </div>
+        <div className="research-brief-item">
+          <dt>估值容忍</dt>
+          <dd>{props.valuationToleranceLabel}</dd>
+        </div>
+        {props.chainLabel && (
+          <div className="research-brief-item">
+            <dt>产业链环节</dt>
+            <dd>{props.chainLabel}</dd>
+          </div>
+        )}
+        {props.asOfDate && (
+          <div className="research-brief-item">
+            <dt>数据日期</dt>
+            <dd>{props.asOfDate}</dd>
+          </div>
+        )}
+      </dl>
+      {props.beliefNote && (
+        <div className="research-brief-note">
+          <span className="research-brief-note-label">我的观点：</span>
+          <span>{props.beliefNote}</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ===================================================================
+   EvidenceSummary（证据汇总）：支持、反对、待验证 三类
+   数据从 CognitionResponse.step3_expectation_gap + step5_validation 整理
+   =================================================================== */
+
+export interface EvidenceItem {
+  category: "support" | "oppose" | "pending";
+  title: string;
+  detail: string;
+}
+
+export interface EvidenceSummaryProps {
+  items: EvidenceItem[];
+}
+
+export function EvidenceSummary({ items }: EvidenceSummaryProps) {
+  const support = items.filter((i) => i.category === "support");
+  const oppose = items.filter((i) => i.category === "oppose");
+  const pending = items.filter((i) => i.category === "pending");
+
+  return (
+    <section className="evidence-summary" aria-label="证据汇总">
+      <h3 className="evidence-title">证据汇总</h3>
+      <div className="evidence-grid">
+        <EvidenceColumn kind="support" title="支持认知" items={support} />
+        <EvidenceColumn kind="oppose" title="反对 / 警惕" items={oppose} />
+        <EvidenceColumn kind="pending" title="待验证" items={pending} />
+      </div>
+    </section>
+  );
+}
+
+function EvidenceColumn({
+  kind,
+  title,
+  items,
+}: {
+  kind: "support" | "oppose" | "pending";
+  title: string;
+  items: EvidenceItem[];
+}) {
+  return (
+    <div className={`evidence-col evidence-col-${kind}`}>
+      <div className="evidence-col-head">
+        <span className={`evidence-col-dot evidence-col-dot-${kind}`} aria-hidden="true" />
+        <span className="evidence-col-title">{title}</span>
+        <span className="evidence-col-count">{items.length}</span>
+      </div>
+      {items.length === 0 ? (
+        <div className="evidence-empty">暂无</div>
+      ) : (
+        <ul className="evidence-list">
+          {items.map((it, i) => (
+            <li key={i} className="evidence-item">
+              <div className="evidence-item-title">{it.title}</div>
+              {it.detail && <div className="evidence-item-detail">{it.detail}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* ===================================================================
+   CandidateDecision（研究结论）：把匹配、估值门禁、数据状态合成短结论
+   4 类：可继续研究 / 估值待观察 / 数据不足 / 已剔除
+   =================================================================== */
+
+export type CandidateStatus = "continue" | "observe" | "insufficient" | "excluded";
+
+export interface CandidateDecisionProps {
+  status: CandidateStatus;
+  reason?: string;
+}
+
+const STATUS_LABEL: Record<CandidateStatus, string> = {
+  continue: "可继续研究",
+  observe: "估值待观察",
+  insufficient: "数据不足",
+  excluded: "已剔除",
+};
+
+export function CandidateDecision({ status, reason }: CandidateDecisionProps) {
+  return (
+    <span className={`candidate-decision candidate-decision-${status}`} role="status">
+      {STATUS_LABEL[status]}
+      {reason && <span className="candidate-decision-reason"> · {reason}</span>}
+    </span>
+  );
+}
+
+/* ===================================================================
+   FundCandidatesTable：研究候选表
+   设计 §4.3：候选表名称为"认知匹配研究候选"，不使用"推荐基金"
+   每行：基金名称、匹配度、核心产业链/股票暴露、估值门禁、研究结论
+   表格行使用 button 打开右侧详情（避免点击 <tr>）
+   =================================================================== */
+
+export interface FundCandidate {
+  fund_code: string;
+  fund_name: string;
+  match_pct: number;
+  chain_breakdown?: Record<string, number>;
+  valuation?: Record<string, unknown>;
+  trend?: { trend: string; diff: number; periods?: Array<{ period: string; weight: number }> };
+  gate?: { passed: boolean; violations: string[] };
+}
+
+export interface GatedOutFund {
+  fund_code: string;
+  fund_name: string;
+  reason?: string;
+}
+
+export interface FundCandidatesTableProps {
+  funds: FundCandidate[];
+  gatedOut?: GatedOutFund[];
+  selectedCode: string | null;
+  onSelect: (code: string) => void;
+}
+
+function inferCandidateStatus(fund: FundCandidate): { status: CandidateStatus; reason?: string } {
+  // 估值门禁违例 → 估值待观察
+  if (fund.gate && !fund.gate.passed) {
+    const violations = fund.gate.violations || [];
+    return {
+      status: "observe",
+      reason: violations[0] || "未通过估值门禁",
+    };
+  }
+  // 估值数据缺失 → 数据不足
+  const v = fund.valuation || {};
+  if (v.weighted_pe == null && v.weighted_val_pct == null) {
+    return { status: "insufficient", reason: "估值数据缺失" };
+  }
+  // 匹配度过低 → 数据不足
+  if (fund.match_pct < 5) {
+    return { status: "insufficient", reason: "匹配度过低" };
+  }
+  return { status: "continue" };
+}
+
+export function FundCandidatesTable({
+  funds,
+  gatedOut = [],
+  selectedCode,
+  onSelect,
+}: FundCandidatesTableProps) {
+  return (
+    <section className="card" aria-label="认知匹配研究候选">
+      <h3 className="research-brief-title">认知匹配研究候选</h3>
+      <table className="candidate-table">
+        <thead>
+          <tr>
+            <th>基金</th>
+            <th>匹配度</th>
+            <th>核心暴露</th>
+            <th>估值</th>
+            <th>持仓趋势</th>
+            <th>研究结论</th>
+            <th aria-label="动作"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {funds.map((f) => {
+            const { status, reason } = inferCandidateStatus(f);
+            const chainStr = f.chain_breakdown
+              ? Object.entries(f.chain_breakdown)
+                  .sort((a, b) => (b[1] as number) - (a[1] as number))
+                  .slice(0, 2)
+                  .map(([k, v]) => `${k} ${(v as number).toFixed(0)}%`)
+                  .join(" · ")
+              : "—";
+            const v = f.valuation || {};
+            const pe = v.weighted_pe != null ? `PE ${Number(v.weighted_pe).toFixed(0)}` : "—";
+            const valPct = v.weighted_val_pct != null ? `分位 ${v.weighted_val_pct}%` : "—";
+            const trendStr = f.trend
+              ? f.trend.trend === "increasing"
+                ? "↑ 加仓"
+                : f.trend.trend === "decreasing"
+                ? "↓ 减仓"
+                : f.trend.trend === "stable"
+                ? "→ 持平"
+                : "数据不足"
+              : "—";
+            return (
+              <tr key={f.fund_code}>
+                <td>
+                  <div style={{ fontWeight: 600 }}>{f.fund_name}</div>
+                  <div style={{ fontSize: "11px", color: "var(--text-3)" }}>{f.fund_code}</div>
+                </td>
+                <td>{f.match_pct.toFixed(0)}%</td>
+                <td style={{ fontSize: "11px" }}>{chainStr}</td>
+                <td style={{ fontSize: "11px" }}>
+                  <div>{pe}</div>
+                  <div style={{ color: "var(--text-3)" }}>{valPct}</div>
+                </td>
+                <td style={{ fontSize: "11px" }}>{trendStr}</td>
+                <td>
+                  <CandidateDecision status={status} reason={reason} />
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    className="candidate-row-button"
+                    onClick={() => onSelect(f.fund_code)}
+                    aria-label={`查看 ${f.fund_name} 详情`}
+                  >
+                    {selectedCode === f.fund_code ? "已选" : "查看"}
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {gatedOut.length > 0 && (
+        <details style={{ marginTop: "12px", fontSize: "12px", color: "var(--text-3)" }}>
+          <summary style={{ cursor: "pointer" }}>已剔除候选（{gatedOut.length} 只，被估值门禁或数据缺失挡住）</summary>
+          <ul style={{ marginTop: "6px", paddingLeft: "20px" }}>
+            {gatedOut.map((g) => (
+              <li key={g.fund_code}>
+                {g.fund_name}（{g.fund_code}）{g.reason ? ` · ${g.reason}` : ""}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
+}

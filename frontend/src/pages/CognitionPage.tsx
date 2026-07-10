@@ -24,6 +24,10 @@ import {
   SideNav,
   FundDetailPanel,
   useScrollSpy,
+  ResearchBrief,
+  EvidenceSummary,
+  FundCandidatesTable,
+  type EvidenceItem,
 } from "../components/CognitionComponents";
 
 const CERTAINTY_LABEL: Record<string, string> = { high: "高确定性", medium: "中确定性", low: "低确定性" };
@@ -86,6 +90,8 @@ export default function CognitionPage() {
   const [stockResults, setStockResults] = useState<StockSearchResult[]>([]);
   const [stockLoading, setStockLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // 选基 v1：用户的"我的观点"文本（仅展示，不参与模型判定）
+  const [beliefNote, setBeliefNote] = useState("");
 
   useEffect(() => {
     fetchThemes().then((r) => setThemes(r.themes)).catch(() => {});
@@ -192,31 +198,39 @@ export default function CognitionPage() {
   // === 阶段1：选方向 ===
   if (step === 1) {
     return (
-      <div className="main">
+      <div className="main cognition-form">
         <h2 style={{ marginBottom: "4px" }}>你相信什么？</h2>
         <p style={{ color: "var(--text-3)", marginBottom: "24px" }}>
           选择一个方向，系统帮你从认知推导到基金配置
         </p>
 
-        <div className="cognition-direction-grid">
+        <div className="cognition-direction-grid" role="listbox" aria-label="预设主题">
           {themes.map((t) => (
-            <div key={t.key} className="card theme-card cognition-direction-card" onClick={() => pickDirection(t.key)}>
+            <button
+              key={t.key}
+              type="button"
+              className="card theme-card cognition-direction-card"
+              onClick={() => pickDirection(t.key)}
+              aria-label={`选择方向：${t.name}`}
+            >
               <div style={{ fontWeight: 600, marginBottom: "6px" }}>{t.name}</div>
               <div style={{ fontSize: "13px", color: "var(--text-2)" }}>{t.belief}</div>
-            </div>
+            </button>
           ))}
         </div>
 
         <div style={{ marginTop: "24px" }}>
-          <div style={{ fontSize: "13px", color: "var(--text-3)", marginBottom: "8px" }}>
+          <label htmlFor="cognition-concept-kw" style={{ fontSize: "13px", color: "var(--text-3)", marginBottom: "8px" }}>
             搜索概念板块（300+主题动态匹配）：
-          </div>
+          </label>
           <input
+            id="cognition-concept-kw"
             className="custom-direction-input"
             style={{ width: "100%" }}
             value={conceptKeyword}
             onChange={(e) => setConceptKeyword(e.target.value)}
             placeholder="输入关键词搜索，如：AI、芯片、创新药、白酒、新能源..."
+            aria-label="概念板块搜索关键词"
           />
           {conceptLoading && <p style={{ fontSize: "13px", color: "var(--text-3)", marginTop: "4px" }}>搜索中...</p>}
           {conceptResults.length > 0 && (
@@ -236,15 +250,17 @@ export default function CognitionPage() {
         </div>
 
         <div style={{ marginTop: "24px" }}>
-          <div style={{ fontSize: "13px", color: "var(--text-3)", marginBottom: "8px" }}>
+          <label htmlFor="cognition-stock-kw" style={{ fontSize: "13px", color: "var(--text-3)", marginBottom: "8px" }}>
             搜索个股（找持有该股票占比最高的基金）：
-          </div>
+          </label>
           <input
+            id="cognition-stock-kw"
             className="custom-direction-input"
             style={{ width: "100%" }}
             value={stockKeyword}
             onChange={(e) => setStockKeyword(e.target.value)}
             placeholder="输入股票名称或代码，如：贵州茅台、中际旭创、寒武纪..."
+            aria-label="个股搜索关键词"
           />
           {stockLoading && <p style={{ fontSize: "13px", color: "var(--text-3)", marginTop: "4px" }}>搜索中...</p>}
           {stockResults.length > 0 && (
@@ -271,24 +287,46 @@ export default function CognitionPage() {
         </div>
 
         <div style={{ marginTop: "24px" }}>
-          <div style={{ fontSize: "13px", color: "var(--text-3)", marginBottom: "8px" }}>
+          <label htmlFor="cognition-custom" style={{ fontSize: "13px", color: "var(--text-3)", marginBottom: "8px" }}>
             或者输入你关注的方向：
-          </div>
+          </label>
           <div style={{ display: "flex", gap: "8px" }}>
             <input
+              id="cognition-custom"
               className="custom-direction-input"
               value={customInput}
               onChange={(e) => setCustomInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && customInput.trim() && pickDirection(customInput.trim())}
               placeholder="例如：新能源、军工、人形机器人..."
+              aria-label="自定义方向"
             />
             <button
+              type="button"
               className="btn"
               disabled={!customInput.trim()}
               onClick={() => pickDirection(customInput.trim())}
             >
               确认
             </button>
+          </div>
+        </div>
+
+        {/* v1 选基："我的观点" 文本框（仅展示，不参与模型判定） */}
+        <div style={{ marginTop: "24px" }}>
+          <label htmlFor="cognition-belief-note" style={{ fontSize: "13px", color: "var(--text-3)", marginBottom: "8px" }}>
+            我的观点（可选，1000 字内，仅在结果页研究简报中显示）：
+          </label>
+          <textarea
+            id="cognition-belief-note"
+            className="custom-direction-input"
+            style={{ width: "100%", minHeight: "60px", fontFamily: "inherit", resize: "vertical" }}
+            value={beliefNote}
+            onChange={(e) => setBeliefNote(e.target.value.slice(0, 1000))}
+            placeholder="例如：受益于国产替代 + 下游需求扩张 + 估值合理..."
+            aria-describedby="belief-note-help"
+          />
+          <div id="belief-note-help" style={{ fontSize: "11px", color: "var(--text-3)", marginTop: "4px" }}>
+            观点只作为研究简报显示，不影响现有引擎判定
           </div>
         </div>
       </div>
@@ -393,8 +431,64 @@ export default function CognitionPage() {
       : null;
 
     // 章节列表（左侧导航）
-    const sectionIds = ["sec-judgment", "sec-quad", "sec-chain", "sec-funds", "sec-gated", "sec-validation", "sec-portfolio"];
+    // 选基 v1：精简为 4 段（设计 §4-§5）
+    const sectionIds = ["sec-brief", "sec-evidence", "sec-candidates", "sec-portfolio"];
     const scrolled = useScrollSpy(sectionIds);
+
+    // 把 step3 + step5 validation 整理为支持/反对/待验证三类证据
+    const evidenceItems: EvidenceItem[] = [];
+    if (result.step5_validation) {
+      for (const ev of result.step5_validation.supporting_evidence || []) {
+        evidenceItems.push({
+          category: "support",
+          title: ev.claim || ev.source,
+          detail: [ev.context, ev.source].filter(Boolean).join(" · "),
+        });
+      }
+      for (const ev of result.step5_validation.opposing_evidence || []) {
+        evidenceItems.push({
+          category: "oppose",
+          title: ev.claim || ev.source,
+          detail: [ev.context, ev.source].filter(Boolean).join(" · "),
+        });
+      }
+    }
+    // step3 expectation gap 拆分为三类（设计 §4.2 反对/支持/待验证）
+    if (gap) {
+      if (gap.negative && gap.negative.length > 0) {
+        evidenceItems.push({
+          category: "oppose",
+          title: `负向预期差（${gap.negative.length} 条）`,
+          detail: gap.negative.map((c) => c.link_name).slice(0, 3).join("、"),
+        });
+      }
+      if (gap.positive && gap.positive.length > 0) {
+        evidenceItems.push({
+          category: "support",
+          title: `正向预期差（${gap.positive.length} 条）`,
+          detail: gap.positive.map((c) => c.link_name).slice(0, 3).join("、"),
+        });
+      }
+      if ((gap.neutral && gap.neutral.length > 0) || (!gap.best_link)) {
+        evidenceItems.push({
+          category: "pending",
+          title: "中性 / 数据不足",
+          detail: gap.summary || "需要等待更多数据验证",
+        });
+      }
+    }
+
+    // 候选状态映射（设计 §4.3）
+    // portfolio.top_funds 为实际入选（build_portfolio 返回的 selected_funds）
+    const hasCandidates = (pf?.top_funds?.length ?? 0) > 0;
+
+    // 副作用：滚动到顶部章节
+    const scrollToSection = (id: string) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    };
 
     return (
       <CognitionErrorBoundary>
@@ -409,9 +503,14 @@ export default function CognitionPage() {
             <span>信心：<strong>{result.conviction === "high" ? "高" : result.conviction === "low" ? "低" : "中"}</strong></span>
           </div>
           <div className="cognition-selection-actions">
-            <button className="btn btn-sm" onClick={() => setStep(2)}>换环节</button>
-            <button className="btn btn-sm" onClick={reset}>换方向</button>
+            <button type="button" className="btn btn-sm" onClick={() => setStep(2)}>换环节</button>
+            <button type="button" className="btn btn-sm" onClick={reset}>换方向</button>
           </div>
+        </div>
+
+        {/* aria-live 错误区域（设计 §5 + §7） */}
+        <div role="alert" aria-live="assertive" className="cognition-aria-live">
+          {error || ""}
         </div>
 
         {loading && (
@@ -428,7 +527,7 @@ export default function CognitionPage() {
           </div>
         )}
         {error && (
-          <div style={{ color: "var(--neg)", padding: "12px 16px", background: "var(--neg-soft)", borderRadius: "var(--r)", marginTop: "12px" }}>
+          <div role="alert" className="cognition-error" style={{ color: "var(--neg)", padding: "12px 16px", background: "var(--neg-soft)", borderRadius: "var(--r)", marginTop: "12px" }}>
             {error}
           </div>
         )}
@@ -439,25 +538,41 @@ export default function CognitionPage() {
           conviction={result.conviction ?? "medium"}
         />
 
+        {/* v1 选基：研究简报（设计 §4.1 - §4.2） */}
+        <div id="sec-brief">
+          <ResearchBrief
+            direction={result.direction}
+            beliefNote={beliefNote || null}
+            chainLabel={result.belief_link ?? null}
+            convictionLabel={result.conviction === "high" ? "高" : result.conviction === "low" ? "低" : "中"}
+            convictionLevel={result.conviction ?? "medium"}
+            timeHorizon={j.time_horizon}
+            valuationToleranceLabel={
+              (j.valuation_tolerance === "high" ? "宽松" : j.valuation_tolerance === "low" ? "严格" : "中性")
+            }
+            asOfDate={null}
+          />
+        </div>
+
         {/* 三面板布局：左导航 / 中结果 / 右详情 */}
         <div className="cognition-three-panel fade-in-up">
-          {/* 左侧导航 */}
+          {/* 左侧导航：选基 v1 仅滚动/高亮，不写 ID 到基金状态 */}
           <SideNav
             active={scrolled}
-            onSelect={(id) => setSelectedFundCode(id)}
+            onSelect={(id) => scrollToSection(id)}
             sections={[
-              { id: "sec-judgment", label: "认知判断" },
-              { id: "sec-quad", label: "估值四维" },
-              { id: "sec-chain", label: "受益链路", count: result.step2_chain.length },
-              { id: "sec-funds", label: "匹配基金", count: result.step4_fund_matches.length },
-              ...(result.gated_out_funds && result.gated_out_funds.length > 0
-                ? [{ id: "sec-gated", label: "门禁拦截", count: result.gated_out_funds.length }]
-                : []),
-              ...(result.step5_validation
-                ? [{ id: "sec-validation", label: "认知验证",
-                    count: result.step5_validation.supporting_evidence.length + result.step5_validation.opposing_evidence.length }]
-                : []),
-              { id: "sec-portfolio", label: "组合方案" },
+              { id: "sec-brief", label: "研究简报" },
+              { id: "sec-evidence", label: "证据汇总", count: evidenceItems.length },
+              {
+                id: "sec-candidates",
+                label: "研究候选",
+                count: result.step4_fund_matches.length,
+              },
+              {
+                id: "sec-portfolio",
+                label: "组合草案",
+                count: pf?.top_funds?.length ?? 0,
+              },
             ]}
           />
 
@@ -521,6 +636,30 @@ export default function CognitionPage() {
               </table>
               {gap.summary && (
                 <p style={{ marginTop: "8px", color: "var(--text-2)", fontSize: "13px" }}>{gap.summary}</p>
+              )}
+            </section>
+
+            {/* v1 选基：证据汇总（设计 §4.2 - §4.3） */}
+            <section id="sec-evidence" style={{ marginBottom: "12px" }}>
+              <EvidenceSummary items={evidenceItems} />
+            </section>
+
+            {/* v1 选基：研究候选（设计 §4.3） */}
+            <section id="sec-candidates" style={{ marginBottom: "12px" }}>
+              {result.step4_fund_matches.length === 0 ? (
+                <div className="cognition-empty-state" role="status">
+                  <div className="cognition-empty-state-title">当前没有合格研究候选</div>
+                  <div className="cognition-empty-state-detail">
+                    所有匹配基金都未通过估值门禁或数据缺失。建议调整方向、产业链环节或估值容忍度。
+                  </div>
+                </div>
+              ) : (
+                <FundCandidatesTable
+                  funds={result.step4_fund_matches}
+                  gatedOut={result.gated_out_funds || []}
+                  onSelect={(code) => setSelectedFundCode(code)}
+                  selectedCode={selectedFundCode}
+                />
               )}
             </section>
 
@@ -638,10 +777,17 @@ export default function CognitionPage() {
               </section>
             )}
 
-            {/* 第5步：组合方案 */}
+            {/* v1 选基：组合草案（设计 §4.4，默认折叠 + 标注"研究草案，非交易指令"） */}
             <section id="sec-portfolio" className="card" style={{ marginBottom: "12px" }}>
-              <div style={{ fontWeight: 600, marginBottom: "8px" }}>组合方案</div>
-              <p style={{ color: "var(--text-2)", marginBottom: "12px" }}>{pf.rationale}</p>
+              {hasCandidates ? (
+                <details>
+                  <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                    查看组合草案（研究草案，非交易指令）
+                  </summary>
+                  <p style={{ color: "var(--text-3)", fontSize: "12px", marginTop: "6px" }}>
+                    下方为基于认知的组合研究草案，不构成投资建议。认知仓位、估值数据日期、组合穿透均按当前最新数据计算。
+                  </p>
+                  <p style={{ color: "var(--text-2)", marginTop: "12px", marginBottom: "12px" }}>{pf.rationale}</p>
 
               {/* 仓位配置环形图 + 进度条 */}
               <div style={{ display: "flex", gap: "24px", alignItems: "center", flexWrap: "wrap" }}>
@@ -797,6 +943,15 @@ export default function CognitionPage() {
               >
                 {exporting ? "导出中..." : "导出 Excel"}
               </button>
+                </details>
+              ) : (
+                <div className="cognition-empty-state" role="status">
+                  <div className="cognition-empty-state-title">没有合格组合</div>
+                  <div className="cognition-empty-state-detail">
+                    候选为空时不展示可执行组合。请先调整方向、产业链环节或估值容忍度。
+                  </div>
+                </div>
+              )}
             </section>
           </div>
 

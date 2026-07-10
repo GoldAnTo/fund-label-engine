@@ -82,7 +82,25 @@ def build_portfolio(
 
     候选基金按匹配度排序，依次选入（跳过相关性过高的），
     估值/趋势约束决定单只上限，认知仓位合计 total_cognition_weight%，防守仓位 defense_weight_pct%。
+
+    无候选时（candidates 为空或全部 match_pct < 5）：
+    - 不生成防守基金占位（避免展示"默认防守组合"误导用户）
+    - 返回空 selected + 100% cash
+    - 调用方应通过 selected_funds 长度判断是否有可投组合
     """
+    # 短路：candidates 为空 → 立即返回空组合，不选防守基金
+    # （设计文档 §4.4：无候选时不形成默认防守组合）
+    if not candidates:
+        return {
+            "selected_funds": [],
+            "defense_position": None,
+            "cash_pct": 100.0,
+            "total_invested": 0.0,
+            "suggested_weight": 0.0,
+            "defense_weight": 0.0,
+            "no_candidates": True,
+        }
+
     candidates.sort(key=lambda x: x["match_pct"], reverse=True)
 
     selected: list[dict[str, Any]] = []
@@ -272,6 +290,10 @@ def calculate_portfolio_metrics(
         h["weight"] = round(h["weight"] * 100, 2)
 
     # --- 4. 行业暴露 ---
+    # 注意：line 290 已把 h["weight"] 转为 percentage (e.g. 1.1 = 1.1%)
+    # 所以 industry_weights 累加的也是 percentage，不应该再 * 100
+    # 这是 P0 修复：原代码 * 100 导致 industry_exposure / sector_exposure
+    # 数字比真实值大 100 倍（例如真实 2.3% 显示成 230.0%）
     industry_weights: dict[str, float] = {}
     sector_weights: dict[str, float] = {}
     for h in stock_map.values():
@@ -282,12 +304,12 @@ def calculate_portfolio_metrics(
         sector_weights[sec] = sector_weights.get(sec, 0) + w
 
     industry_exposure = sorted(
-        [{"name": k, "weight": round(v * 100, 1)} for k, v in industry_weights.items()],
+        [{"name": k, "weight": round(v, 1)} for k, v in industry_weights.items()],
         key=lambda x: x["weight"],
         reverse=True,
     )[:8]
     sector_exposure = sorted(
-        [{"name": k, "weight": round(v * 100, 1)} for k, v in sector_weights.items()],
+        [{"name": k, "weight": round(v, 1)} for k, v in sector_weights.items()],
         key=lambda x: x["weight"],
         reverse=True,
     )[:6]

@@ -1752,3 +1752,118 @@ def test_dragon_tiger_evidence_in_validation(tmp_path: Path) -> None:
         assert has_lhb, "应该有龙虎榜警告"
     finally:
         engine.close()
+
+
+# ===========================================================================
+# 认知选基 v1：百分比单位 + 无候选不产默认防守
+# 设计文档 §6：必须修复组合穿透暴露的百分比单位
+# 设计文档 §4.4 + §6：无候选时不形成默认防守组合
+# ===========================================================================
+
+
+def test_build_portfolio_no_candidates_returns_no_defense() -> None:
+    """无候选时返回空 selected + 100% cash + no_candidates=True，不选防守基金。"""
+    result = build_portfolio([], defense_fund=None)
+    assert result["selected_funds"] == []
+    assert result["defense_position"] is None
+    assert result["cash_pct"] == 100.0
+    assert result["total_invested"] == 0.0
+    assert result["suggested_weight"] == 0.0
+    assert result["defense_weight"] == 0.0
+    assert result["no_candidates"] is True
+
+
+def test_build_portfolio_ignores_defense_fund_when_empty() -> None:
+    """无候选时即使传入 defense_fund 也应被忽略（短路在 first 行）。"""
+    defense = {
+        "fund_code": "000999",
+        "fund_name": "防守基金",
+        "match_pct": 50,
+        "valuation": {"weighted_pe": 10},
+    }
+    result = build_portfolio([], defense_fund=defense)
+    # defense_fund 不应被赋 weight（避免展示默认防守组合）
+    assert defense.get("weight") is None
+    assert result["selected_funds"] == []
+    assert result["no_candidates"] is True
+
+
+def test_calculate_portfolio_metrics_industry_exposure_is_percentage() -> None:
+    """行业暴露数字应是百分比（不是 double-percentage）。
+
+    修复前：industry_weights 累加 percentage (e.g. 1.1)，
+    `round(v * 100, 1)` 把它转成 110.0
+    真实 exposure 1.1% 显示成 110.0% (bug)
+
+    修复后：line 303 改为 round(v, 1)，直接返回 percentage
+    """
+    import sqlite3
+    from app.cognition.portfolio_builder import calculate_portfolio_metrics
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE nav_history (fund_code TEXT, nav_date TEXT, daily_growth_rate REAL)"
+    )
+
+    # selected 基金自身带 holdings（line 250 从 f.get("holdings") 读取）
+    selected = [
+        {
+            "fund_code": "000001",
+            "fund_name": "测试基金",
+            "match_pct": 80,
+            "weight": 25.0,  # 25% 仓位
+            "valuation": {"weighted_pe": 20, "weighted_val_pct": 50},
+            "holdings": [
+                {"stock_code": "600000", "stock_name": "A", "weight": 0.05, "industry_name": "金融", "sector_group": "金融"},
+                {"stock_code": "600001", "stock_name": "B", "weight": 0.05, "industry_name": "金融", "sector_group": "金融"},
+                {"stock_code": "600002", "stock_name": "C", "weight": 0.05, "industry_name": "科技", "sector_group": "科技"},
+            ],
+        }
+    ]
+    metrics = calculate_portfolio_metrics(conn, selected, defense_fund=None, all_holdings=None)
+
+    # 验证 industry_exposure 数字是合理百分比 (0-100)
+    # 真实 exposure: 0.25 * 0.05 * 2 = 2.5% (金融), 0.25 * 0.05 = 1.25% (科技)
+    industry = {x["name"]: x["weight"] for x in metrics["industry_exposure"]}
+    assert "金融" in industry
+    assert "科技" in industry
+    # 修复 bug 前：金融会显示成 250.0, 科技 125.0（错）
+    # 修复后：金融 ~2.5, 科技 ~1.25
+    assert industry["金融"] < 10, f"金融 exposure 应 < 10%，实际 {industry['金融']}"
+    assert industry["科技"] < 10, f"科技 exposure 应 < 10%，实际 {industry['科技']}"
+    assert industry["金融"] > 0
+    assert industry["科技"] > 0
+
+    # 同样验证 sector_exposure
+    sector = {x["name"]: x["weight"] for x in metrics["sector_exposure"]}
+    assert all(v < 10 for v in sector.values()), f"sector 数字应 < 10，实际 {sector}"
+
+
+def test_calculate_portfolio_metrics_holdings_penetration_is_percentage() -> None:
+    """holdings_penetration.weight 应是 percentage（0-100 范围）。"""
+    import sqlite3
+    from app.cognition.portfolio_builder import calculate_portfolio_metrics
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE nav_history (fund_code TEXT, nav_date TEXT, daily_growth_rate REAL)"
+    )
+    selected = [
+        {
+            "fund_code": "000001",
+            "fund_name": "X",
+            "match_pct": 80,
+            "weight": 25.0,  # 25% 仓位
+            "valuation": {"weighted_pe": 20},
+            "holdings": [
+                {"stock_code": "600000", "stock_name": "A", "weight": 0.10, "industry_name": "金融", "sector_group": "金融"},
+            ],
+        }
+    ]
+    metrics = calculate_portfolio_metrics(conn, selected, defense_fund=None, all_holdings=None)
+    hp = metrics["holdings_penetration"]
+    assert len(hp) == 1
+    # 0.25 * 0.10 = 0.025 (2.5%)
+    assert hp[0]["weight"] < 10, f"持仓穿透应是百分比，实际 {hp[0]['weight']}"
+    assert hp[0]["weight"] > 0
+    assert 0 < hp[0]["weight"] < 5
