@@ -4,6 +4,7 @@ import ReadyPoolPage from "./pages/ReadyPoolPage";
 import SearchPage from "./pages/SearchPage";
 import ComparePage from "./pages/ComparePage";
 import CognitionPage from "./pages/CognitionPage";
+import LabelDefinitionsPage from "./pages/LabelDefinitionsPage";
 import { useEffect } from "react";
 
 const NAV_GROUPS = [
@@ -21,6 +22,12 @@ const NAV_GROUPS = [
       { to: "/search", label: "风格筛选" },
     ],
   },
+  {
+    title: "治理",
+    links: [
+      { to: "/label-definitions", label: "规则定义" },
+    ],
+  },
 ];
 
 const CRUMB_MAP: Record<string, string> = {
@@ -29,6 +36,7 @@ const CRUMB_MAP: Record<string, string> = {
   explorer: "风格总览",
   search: "风格筛选",
   funds: "基金",
+  "label-definitions": "规则定义",
 };
 
 function Sidebar() {
@@ -100,7 +108,7 @@ export default function App() {
             <Route path="/explorer" element={<ReadyPoolPage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/runs/:runId/funds/:fundCode" element={<FundReportPage />} />
-            {/* 兼容旧路由 */}
+            <Route path="/label-definitions" element={<LabelDefinitionsPage />} />
             <Route path="/ready-pool" element={<Navigate to="/explorer" replace />} />
             <Route path="/portfolio" element={<Navigate to="/cognition" replace />} />
             <Route path="/runs" element={<Navigate to="/cognition" replace />} />

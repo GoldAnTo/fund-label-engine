@@ -551,6 +551,114 @@ export async function fetchRunDataQuality(runId: string): Promise<DataQualityRep
   return json(`/v1/runs/${runId}/data-quality`);
 }
 
+// ===================================================================
+// 规则定义管理 - 扩展（启停 / 批量 / 变更日志 / 回放）
+// ===================================================================
+
+export async function setLabelEnabled(
+  labelCode: string,
+  ruleVersion: string,
+  enabled: boolean,
+  operator: string,
+  reason?: string
+): Promise<{
+  label_code: string;
+  label_name: string;
+  rule_version: string;
+  previous_enabled: boolean;
+  new_enabled: boolean;
+  change_type: "enable" | "disable" | "no_change";
+  operator: string;
+  reason?: string;
+}> {
+  return postJSON(`/v1/label-definitions/${labelCode}/${ruleVersion}/enable`, {
+    enabled,
+    operator,
+    reason,
+  });
+}
+
+export async function bulkSetLabelEnabled(
+  ruleVersion: string,
+  labelCodes: string[],
+  enabled: boolean,
+  operator: string,
+  reason?: string
+): Promise<{
+  rule_version: string;
+  enabled: boolean;
+  total: number;
+  changed_count: number;
+  results: unknown[];
+  errors: { label_code: string; error: string }[];
+}> {
+  return postJSON("/v1/label-definitions/bulk-enable", {
+    rule_version: ruleVersion,
+    label_codes: labelCodes,
+    enabled,
+    operator,
+    reason,
+  });
+}
+
+export interface LabelEnableChange {
+  audit_id: string;
+  operator: string;
+  target_id: string;
+  source_ip: string | null;
+  payload: {
+    label_code: string;
+    rule_version: string;
+    previous_enabled: boolean;
+    new_enabled: boolean;
+    reason?: string;
+  };
+}
+
+export interface LabelEnableChangesResponse {
+  rule_version: string | null;
+  limit: number;
+  changes: LabelEnableChange[];
+}
+
+export async function fetchLabelEnableChanges(
+  ruleVersion?: string,
+  limit = 50
+): Promise<LabelEnableChangesResponse> {
+  const params = new URLSearchParams();
+  if (ruleVersion) params.set("rule_version", ruleVersion);
+  params.set("limit", String(limit));
+  return json(`/v1/label-definitions/changes?${params.toString()}`);
+}
+
+// ===================================================================
+// 规则回放
+// ===================================================================
+
+export interface RunReplayResponse {
+  source_run_id: string;
+  new_run_id: string;
+  rule_version: string;
+  data_as_of: string;
+  processed: number;
+  operator: string;
+  note: string;
+}
+
+export async function postRunReplay(
+  sourceRunId: string,
+  ruleVersion: string,
+  dataAsOf?: string,
+  operator = "manual"
+): Promise<RunReplayResponse> {
+  return postJSON("/v1/runs/replay", {
+    source_run_id: sourceRunId,
+    rule_version: ruleVersion,
+    data_as_of: dataAsOf,
+    operator,
+  });
+}
+
 export async function fetchWorkbenchTasks(runId: string): Promise<WorkbenchTasksResponse> {
   return json(`/v1/runs/${runId}/workbench-tasks?limit=500`);
 }

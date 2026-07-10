@@ -8,6 +8,8 @@ import {
   fetchTopFunds,
   fetchWorkbenchSummary,
   fetchDataQuality,
+  fetchRuleVersions,
+  postRunReplay,
   downloadFile,
   type RelativeEligibilityResponse,
   type RunSummary,
@@ -16,6 +18,7 @@ import {
   type WorkbenchSummary,
   type DataQualityReport,
   type Run,
+  type RuleVersionInfo,
 } from "../api";
 import { ALL_STYLE_CODES, STYLE_GROUPS, styleTagClass, styleName } from "../styleConfig";
 
@@ -79,6 +82,11 @@ export default function ReadyPoolPage() {
   const [matrix, setMatrix] = useState<PortfolioMatrixResponse | null>(null);
   const [dataQuality, setDataQuality] = useState<DataQualityReport | null>(null);
   const [dqOpen, setDqOpen] = useState(false);
+  const [ruleVersions, setRuleVersions] = useState<RuleVersionInfo[]>([]);
+  const [replayTarget, setReplayTarget] = useState<string>("");
+  const [replayBusy, setReplayBusy] = useState(false);
+  const [replayResult, setReplayResult] = useState<{ new_run_id: string; processed: number } | null>(null);
+  const [replayError, setReplayError] = useState<string | null>(null);
   const [topFundsByStyle, setTopFundsByStyle] = useState<Record<string, TopFundsResponse>>({});
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -95,6 +103,16 @@ export default function ReadyPoolPage() {
         if (rs.length > 0) setRunId(rs[0].run_id);
       })
       .catch((e) => setError(e.message));
+    fetchRuleVersions()
+      .then((r) => {
+        setRuleVersions(r);
+        // 默认选中"非当前" 的最近版本，方便回放
+        if (r.length > 1) setReplayTarget(r[1].rule_version);
+        else if (r.length === 1) setReplayTarget(r[0].rule_version);
+      })
+      .catch(() => {
+        /* ignore */
+      });
   }, []);
 
   // 当前批次数据
@@ -272,6 +290,61 @@ export default function ReadyPoolPage() {
               </option>
             ))}
           </select>
+        )}
+      </div>
+
+      {/* 规则回放 */}
+      <div className="card replay-card">
+        <div className="replay-head">
+          <div>
+            <h2>规则回放</h2>
+            <p className="meta">
+              用指定规则版本在当前批次的数据基础上重新跑一遍，结果写入新 run_id。可用来验证规则改动。
+            </p>
+          </div>
+          <div className="replay-form">
+            <label className="field">
+              <span>目标规则版本</span>
+              <select
+                value={replayTarget}
+                onChange={(e) => setReplayTarget(e.target.value)}
+                disabled={ruleVersions.length === 0}
+              >
+                {ruleVersions.map((v) => (
+                  <option key={v.rule_version} value={v.rule_version}>
+                    {v.rule_version}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="btn btn-accent"
+              disabled={!runId || !replayTarget || replayBusy}
+              onClick={async () => {
+                if (!runId || !replayTarget) return;
+                setReplayBusy(true);
+                setReplayError(null);
+                setReplayResult(null);
+                try {
+                  const r = await postRunReplay(runId, replayTarget);
+                  setReplayResult({ new_run_id: r.new_run_id, processed: r.processed });
+                } catch (e) {
+                  setReplayError(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setReplayBusy(false);
+                }
+              }}
+            >
+              {replayBusy ? "回放中…" : "执行回放"}
+            </button>
+          </div>
+        </div>
+        {replayError && <div className="alert alert-bad">回放失败：{replayError}</div>}
+        {replayResult && (
+          <div className="alert alert-ok">
+            ✅ 回放成功 → 新 run_id <code>{replayResult.new_run_id}</code>（处理{" "}
+            {replayResult.processed} 只基金）。可在批次下拉框中切换查看。
+          </div>
         )}
       </div>
 

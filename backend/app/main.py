@@ -13,7 +13,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Body, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -123,6 +123,27 @@ class RunRequest(BaseModel):
     rule_version: str = "v1"
 
 
+class RunReplayRequest(BaseModel):
+    source_run_id: str
+    rule_version: str
+    data_as_of: str | None = None
+    operator: str = "system"
+
+
+class LabelEnableRequest(BaseModel):
+    enabled: bool
+    operator: str = "unknown"
+    reason: str | None = None
+
+
+class BulkLabelEnableRequest(BaseModel):
+    rule_version: str
+    label_codes: list[str]
+    enabled: bool
+    operator: str = "unknown"
+    reason: str | None = None
+
+
 class PortfolioRoleReviewRequest(BaseModel):
     fund_code: str
     role_code: str
@@ -205,6 +226,118 @@ def create_app(
         reader: LabelRunReader = Depends(get_reader),
     ) -> dict[str, list[dict]]:
         return {"runs": reader.list_runs(limit=limit)}
+
+    @app.post("/v1/runs/replay", status_code=201)
+    def replay_run(
+        request: RunReplayRequest = Body(...),
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """规则回放：在历史 run 的数据基础上用指定 rule_version 重算。
+
+        适用场景：
+        - 用新规则版本重算历史批次的标签，对比差异
+        - 校验规则改动的实际影响（无需修改生产批次）
+        - 事故修复后的快速回算
+
+        Args:
+            request: 包含 source_run_id、目标 rule_version、可选 data_as_of
+
+        行为：
+        - 不修改 source_run 的结果
+        - 创建新 run_id，结果写入相同 output_db
+        - 返回新 run_id 与 source_run_id 的对照
+        """
+        payload = request
+        if not payload.source_run_id:
+            raise HTTPException(
+                status_code=400,
+                detail="source_run_id is required",
+            )
+        source_run = reader.get_run(payload.source_run_id)
+        if source_run is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"source run not found: {payload.source_run_id}",
+            )
+
+        source_db = app.state.source_db_path
+        output_db = app.state.output_db_path
+        if not source_db or not output_db:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Replay endpoint requires FLE_SOURCE_DB and FLE_OUTPUT_DB "
+                    "(or FLE_DB_PATH for both)."
+                ),
+            )
+
+        # 解析数据日期：优先用 payload.data_as_of，否则用 source run 的 data_as_of
+        if payload.data_as_of:
+            data_as_of = payload.data_as_of
+        else:
+            data_as_of = source_run.get("data_as_of") or source_run.get("run_at", "")[:10]
+
+        # 解析 source：直接复用 source run 的 source 字段
+        source_kind = source_run.get("source") or "auto"
+        # 兼容：funddata / engine / auto
+
+        try:
+            if source_db == output_db:
+                run_id, processed = run_batch(
+                    db_path=source_db,
+                    rule_version=payload.rule_version,
+                    source=source_kind,
+                )
+            else:
+                run_id, processed = run_batch(
+                    source_db=source_db,
+                    output_db=output_db,
+                    rule_version=payload.rule_version,
+                    source=source_kind,
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        # 记录回放关系（audit_log）
+        try:
+            writer = LabelRunWriter(
+                output_db, rule_version=payload.rule_version
+            )
+            writer.write_audit_log(
+                audit_id=f"replay-{run_id}",
+                run_id=run_id,
+                actor=payload.operator or "system",
+                action="run_replay",
+                target_type="run",
+                target_id=payload.source_run_id,
+                payload_json=__import__("json").dumps(
+                    {
+                        "source_run_id": payload.source_run_id,
+                        "target_rule_version": payload.rule_version,
+                        "data_as_of": data_as_of,
+                        "processed_count": processed,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        except Exception:
+            # 审计失败不影响主流程
+            pass
+
+        return {
+            "source_run_id": payload.source_run_id,
+            "new_run_id": run_id,
+            "rule_version": payload.rule_version,
+            "data_as_of": data_as_of,
+            "processed": processed,
+            "operator": payload.operator or "system",
+            "note": (
+                "新 run 已写入 output_db。请用 /v1/runs/{new_run_id} 查看，"
+                "或 /v1/runs/diff?base={source_run_id}&target={new_run_id} 对比差异。"
+            ),
+        }
 
     @app.post("/v1/runs", status_code=201)
     def trigger_run(request: RunRequest | None = None) -> dict[str, Any]:
@@ -565,6 +698,97 @@ def create_app(
             "rule_version": rule_version,
             "definitions": reader.list_label_definitions(rule_version),
         }
+
+    # === 规则启停 API ===
+
+    @app.post("/v1/label-definitions/{label_code}/{rule_version}/enable")
+    def post_label_definition_enable(
+        label_code: str,
+        rule_version: str,
+        request: LabelEnableRequest = Body(...),
+        writer: LabelRunWriter = Depends(get_writer),
+    ) -> dict[str, Any]:
+        """启用/禁用单条 label 定义。
+
+        - enabled=False 时该 label 在下次 batch 中不参与计算
+        - 历史 run 的结果保留可查
+        - 写入 audit_log，可在 /v1/label-definitions/changes 查到
+        """
+        payload = request
+        try:
+            return writer.set_label_enabled(
+                label_code=label_code,
+                rule_version=rule_version,
+                enabled=payload.enabled,
+                operator=payload.operator,
+                reason=payload.reason,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/v1/label-definitions/bulk-enable")
+    def post_label_definition_bulk_enable(
+        request: BulkLabelEnableRequest = Body(...),
+        writer: LabelRunWriter = Depends(get_writer),
+    ) -> dict[str, Any]:
+        """批量启用/禁用一组 label 定义。"""
+        payload = request
+        results: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        for label_code in payload.label_codes:
+            try:
+                results.append(
+                    writer.set_label_enabled(
+                        label_code=label_code,
+                        rule_version=payload.rule_version,
+                        enabled=payload.enabled,
+                        operator=payload.operator,
+                        reason=payload.reason,
+                    )
+                )
+            except ValueError as exc:
+                errors.append({"label_code": label_code, "error": str(exc)})
+        changed = [r for r in results if r["change_type"] != "no_change"]
+        return {
+            "rule_version": payload.rule_version,
+            "enabled": payload.enabled,
+            "operator": payload.operator,
+            "total": len(payload.label_codes),
+            "changed_count": len(changed),
+            "results": results,
+            "errors": errors,
+        }
+
+    @app.get("/v1/label-definitions/changes")
+    def list_label_definition_changes(
+        rule_version: str | None = None,
+        limit: int = 100,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """查询 label 启停审计日志（最近 limit 条，按 rowid 倒序）。"""
+        changes = reader.get_label_enable_changes(
+            rule_version=rule_version, limit=limit
+        )
+        return {
+            "rule_version": rule_version,
+            "limit": limit,
+            "changes": changes,
+        }
+
+    @app.get("/v1/label-definitions/{label_code}/{rule_version}")
+    def get_label_definition(
+        label_code: str,
+        rule_version: str,
+        reader: LabelRunReader = Depends(get_reader),
+    ) -> dict[str, Any]:
+        """查询单条 label 定义的完整字段。"""
+        definition = reader.get_label_definition(label_code, rule_version)
+        if definition is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"label definition not found: {label_code}@{rule_version}",
+            )
+        return definition
 
     @app.get("/v1/rule-versions")
     def list_rule_versions(
@@ -1718,6 +1942,10 @@ def create_app(
 
         @app.get("/cognition", include_in_schema=False)
         def serve_cognition_route() -> FileResponse:
+            return _frontend_index()
+
+        @app.get("/label-definitions", include_in_schema=False)
+        def serve_label_definitions_route() -> FileResponse:
             return _frontend_index()
 
         app.mount("/", StaticFiles(directory=str(dist_dir), html=True), name="frontend")

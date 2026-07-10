@@ -1650,6 +1650,77 @@ class LabelRunReader:
                 return []
         return [dict(row) for row in rows]
 
+    def get_label_enable_changes(
+        self,
+        rule_version: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """读取 label 定义启停的审计日志。
+
+        Args:
+            rule_version: 可选过滤（从 payload_json 中解析匹配）
+            limit: 返回最大条数
+        """
+        import json as _json
+
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT audit_id, actor, target_id, payload_json, source_ip, "
+                    "rowid, ROWID "
+                    "FROM audit_log WHERE action = 'label_enable_change' "
+                    "ORDER BY rowid DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []
+
+        changes: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload = _json.loads(row["payload_json"]) if row["payload_json"] else {}
+            except (TypeError, ValueError):
+                payload = {}
+            if rule_version and payload.get("rule_version") != rule_version:
+                continue
+            changes.append(
+                {
+                    "audit_id": row["audit_id"],
+                    "operator": row["actor"],
+                    "target_id": row["target_id"],
+                    "source_ip": row["source_ip"],
+                    "payload": payload,
+                }
+            )
+        return changes
+
+    def get_label_definition(
+        self, label_code: str, rule_version: str
+    ) -> dict[str, Any] | None:
+        """读取单条 label 定义的完整信息。"""
+        import json as _json
+
+        with self._connect() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT label_code, label_name, category, fund_types, "
+                    "rule_version, enabled, description, thresholds_json "
+                    "FROM label_definitions "
+                    "WHERE label_code = ? AND rule_version = ?",
+                    (label_code, rule_version),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                return None
+        if row is None:
+            return None
+        item = dict(row)
+        thresholds_raw = item.pop("thresholds_json", None)
+        item["thresholds"] = (
+            _json.loads(thresholds_raw) if thresholds_raw else None
+        )
+        item["enabled"] = bool(item["enabled"])
+        return item
+
     def get_run_export(self, run_id: str) -> dict[str, Any] | None:
         """整批结果导出所需的全部数据，单次连接覆盖 5 张表。"""
         with self._connect() as conn:

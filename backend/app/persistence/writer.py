@@ -581,6 +581,90 @@ class LabelRunWriter:
             )
             conn.commit()
 
+    def set_label_enabled(
+        self,
+        label_code: str,
+        rule_version: str,
+        enabled: bool,
+        operator: str,
+        reason: str | None = None,
+        source_ip: str | None = None,
+    ) -> dict[str, Any]:
+        """启用/禁用某条 label 定义。
+
+        持久化到 label_definitions.enabled，同时写入审计日志。
+        返回变更详情（含 change_type: enable/disable/no_change）。
+        """
+        import json as _json
+        import uuid
+
+        self.ensure_schema()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT enabled, label_name FROM label_definitions "
+                "WHERE label_code = ? AND rule_version = ?",
+                (label_code, rule_version),
+            ).fetchone()
+            if row is None:
+                raise ValueError(
+                    f"label definition not found: "
+                    f"label_code={label_code!r} rule_version={rule_version!r}"
+                )
+            previous_enabled = bool(row["enabled"])
+            new_value = 1 if enabled else 0
+            if previous_enabled == enabled:
+                return {
+                    "label_code": label_code,
+                    "label_name": row["label_name"],
+                    "rule_version": rule_version,
+                    "previous_enabled": previous_enabled,
+                    "new_enabled": enabled,
+                    "change_type": "no_change",
+                    "operator": operator,
+                }
+
+            conn.execute(
+                "UPDATE label_definitions SET enabled = ? "
+                "WHERE label_code = ? AND rule_version = ?",
+                (new_value, label_code, rule_version),
+            )
+
+            payload = {
+                "label_code": label_code,
+                "rule_version": rule_version,
+                "previous_enabled": previous_enabled,
+                "new_enabled": enabled,
+                "reason": reason,
+            }
+            conn.execute(
+                "INSERT INTO audit_log "
+                "(audit_id, run_id, actor, action, target_type, target_id, "
+                "payload_json, source_ip) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    f"label-enable-{uuid.uuid4().hex[:12]}",
+                    None,
+                    operator,
+                    "label_enable_change",
+                    "label_definition",
+                    f"{label_code}@{rule_version}",
+                    _json.dumps(payload, ensure_ascii=False),
+                    source_ip,
+                ),
+            )
+            conn.commit()
+
+        return {
+            "label_code": label_code,
+            "label_name": row["label_name"],
+            "rule_version": rule_version,
+            "previous_enabled": previous_enabled,
+            "new_enabled": enabled,
+            "change_type": "enable" if enabled else "disable",
+            "operator": operator,
+            "reason": reason,
+        }
+
     def write_audit_log(
         self,
         audit_id: str,
@@ -632,10 +716,15 @@ class LabelRunWriter:
             conn.commit()
 
     def _seed_label_definitions(self, conn: sqlite3.Connection) -> None:
+        """种子 label_definitions 行（仅在新行不存在时插入）。
+
+        使用 INSERT OR IGNORE 避免覆盖用户对 enabled 字段的更改。
+        如果用户修改了 enabled = 0，下次 ensure_schema() 不会再重置为 1。
+        """
         for item in DEFAULT_LABEL_DEFINITIONS:
             thresholds = self._rule_config.thresholds_for(item["label_code"])
             conn.execute(
-                "INSERT OR REPLACE INTO label_definitions "
+                "INSERT OR IGNORE INTO label_definitions "
                 "(label_code, label_name, category, fund_types, rule_version, "
                 " enabled, description, thresholds_json) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
