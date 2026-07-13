@@ -26,7 +26,7 @@ import json
 import sqlite3
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +52,7 @@ AS_OF_DATE = "2026-03-31"  # 与 seed_sample_db.py 中的 report_date 对齐
 # 工具
 # ============================================================
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _short_id(prefix: str) -> str:
@@ -373,7 +373,7 @@ def render_report(
     lines.append(f"> 生成时间:`{_now_iso()}`")
     lines.append(f"> data_snapshot_id:`{snapshot_id}`")
     lines.append(f"> strategy_policy_id + version:`{policy_id}` + `v{policy_version}`")
-    lines.append(f"> business_mode:`private_strategy`(主业务)")
+    lines.append("> business_mode:`private_strategy`(主业务)")
     lines.append(f"> sample_db:`{SOURCE_DB}`(来源:`scripts/seed_sample_db.py`)")
     lines.append("")
     lines.append("---")
@@ -480,8 +480,8 @@ def render_report(
 # ============================================================
 def _ensure_governance_db(gov_db: Path) -> None:
     """初始化 governance DB:跑 migration + 同步策略。"""
-    from app.persistence.migrations_runner import run_migrations
     from app.persistence.governance import GovernanceRepository
+    from app.persistence.migrations_runner import run_migrations
 
     run_migrations(str(gov_db))
 
@@ -539,7 +539,7 @@ def persist_scenarios(
     返回增强后的 scenarios,包含真实的 research_input_id / thesis_id / candidate_set_id。
     """
     from app.persistence.governance import GovernanceRepository
-    from app.services.governance_service import GovernanceService, DuplicateResearchInputError
+    from app.services.governance_service import DuplicateResearchInputError, GovernanceService
 
     repo = GovernanceRepository(gov_db)
     service = GovernanceService(repo)
@@ -569,7 +569,6 @@ def persist_scenarios(
     for i, sc in enumerate(scenarios):
         suffix = chr(ord("a") + i)  # a, b, c
         ri_id = f"ri_{run_id}_{suffix}"
-        th_id = f"th_{run_id}_{suffix}"
 
         # 1. 创建 ResearchInput
         try:
@@ -590,7 +589,6 @@ def persist_scenarios(
             )
             sc["persisted_research_input_id"] = ri_id
             sc["persist_status"] = "created"
-            is_new = True
         except DuplicateResearchInputError:
             # 重复(409):上次已落库,跳过 thesis/candidate 创建
             sc["persisted_research_input_id"] = ri_id
@@ -651,9 +649,8 @@ def verify_via_api(scenarios: list[dict[str, Any]], gov_db: Path) -> list[dict[s
 
     使用 TestClient 直接调用 GET /v1/governance/candidate-sets/{cs_id}。
     """
-    from fastapi.testclient import TestClient
     from app.main import create_app
-    from app.persistence.governance import GovernanceRepository
+    from fastapi.testclient import TestClient
 
     app = create_app(source_db_path=str(gov_db), output_db_path=str(gov_db))
     # 清除可能缓存的 service(确保用新 DB)
@@ -901,7 +898,7 @@ def main() -> int:
         ]
     finally:
         engine.close()
-    print(f"[4/5] 3 scenarios executed")
+    print("[4/5] 3 scenarios executed")
 
     # 4. 持久化(如果启用)
     if args.persist:
@@ -949,8 +946,10 @@ def main() -> int:
                     print(f"    tier_counts={vr['tier_counts']}")
 
     # 5. 生成报告
+    # --priority 时使用 v2 策略版本，与实际持久化版本一致
+    report_policy_version = 2 if args.priority else policy_version
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    report_md = render_report(snapshot_id, policy_id, policy_version, scenarios)
+    report_md = render_report(snapshot_id, policy_id, report_policy_version, scenarios)
     REPORT_PATH.write_text(report_md, encoding="utf-8")
     print(f"[5/5] report written: {REPORT_PATH}")
 

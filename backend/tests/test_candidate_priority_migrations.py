@@ -452,3 +452,61 @@ class TestCandidatePriorityMigration:
             "SELECT candidate_status FROM candidate_sets WHERE candidate_id = 'can_test1'"
         ).fetchone()
         assert row[0] == "reviewed"
+
+
+# ============================================================
+# 0017 旧库升级测试
+# ============================================================
+class Test0017Upgrade:
+    """验证已执行 0016 的旧库通过 0017 获得新列。"""
+
+    def test_old_db_upgrade_gets_unrelated_fund_count(self, fresh_db: Path):
+        """旧库（只跑到 0016）升级到 0017 后，candidate_set_headers 有 unrelated_fund_count。"""
+        # 1. 模拟旧库：只跑到 0016
+        _run_migrations_up_to(str(fresh_db), "0016_candidate_priority_v0")
+
+        # 2. 确认 0016 没有 unrelated_fund_count
+        conn = sqlite3.connect(str(fresh_db))
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(candidate_set_headers)").fetchall()]
+        assert "unrelated_fund_count" not in cols
+        conn.close()
+
+        # 3. 插入一条旧格式的 header（没有 unrelated_fund_count）
+        conn = sqlite3.connect(str(fresh_db))
+        _insert_base_data(conn)
+        _insert_header(conn)
+        conn.commit()
+        conn.close()
+
+        # 4. 运行全部 migration（包括 0017）
+        run_migrations(str(fresh_db))
+
+        # 5. 验证列存在
+        conn = sqlite3.connect(str(fresh_db))
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(candidate_set_headers)").fetchall()]
+        assert "unrelated_fund_count" in cols
+
+        # 6. 验证旧数据默认值为 0
+        row = conn.execute(
+            "SELECT unrelated_fund_count FROM candidate_set_headers WHERE candidate_set_id = 'cs_test1'"
+        ).fetchone()
+        assert row[0] == 0
+        conn.close()
+
+    def test_new_db_has_unrelated_fund_count(self, fresh_db: Path):
+        """新库从头运行全部 migration，unrelated_fund_count 存在。"""
+        run_migrations(str(fresh_db))
+        conn = sqlite3.connect(str(fresh_db))
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(candidate_set_headers)").fetchall()]
+        assert "unrelated_fund_count" in cols
+        conn.close()
+
+    def test_0017_idempotent_rerun(self, fresh_db: Path):
+        """0017 已执行后，重复运行 migration 不会报错。"""
+        run_migrations(str(fresh_db))
+        # 再次运行不应该报错
+        run_migrations(str(fresh_db))
+        conn = sqlite3.connect(str(fresh_db))
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(candidate_set_headers)").fetchall()]
+        assert "unrelated_fund_count" in cols
+        conn.close()

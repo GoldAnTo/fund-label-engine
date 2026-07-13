@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS candidate_set_headers (
     scanned_fund_count INTEGER NOT NULL,
     mapped_candidate_count INTEGER NOT NULL,
     unmapped_due_to_data_count INTEGER NOT NULL,
-    unrelated_fund_count INTEGER NOT NULL DEFAULT 0,
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (thesis_id, data_snapshot_id, source_method_version)
