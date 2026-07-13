@@ -26,6 +26,47 @@ export async function downloadFile(url: string, fallbackName: string): Promise<v
 // 治理 API: CandidateSet + PriorityRun
 // ============================================================
 
+export interface ThesisDetail {
+  thesis_id: string;
+  title: string;
+  belief_statement: string;
+  time_horizon: string | null;
+  status: string;
+  owner: string;
+  as_of_date: string | null;
+  created_at: string;
+  next_review_at: string | null;
+  supporting_evidence: unknown[] | null;
+  opposing_evidence: unknown[] | null;
+  key_metrics: unknown[] | null;
+  catalysts: unknown[] | null;
+  invalidation_conditions: unknown[] | null;
+}
+
+export interface ResearchInputDetail {
+  user_input_id: string;
+  input_type: string;
+  business_mode: string;
+  raw_text: string;
+  structured_intent: Record<string, unknown> | null;
+  actor_role: string;
+  actor_id: string | null;
+  request_source: string;
+  as_of_date: string | null;
+  created_at: string;
+}
+
+export interface CandidateSetHeaderStats {
+  candidate_set_id: string;
+  source_method_version: string;
+  scanned_fund_count: number;
+  mapped_candidate_count: number;
+  unmapped_due_to_data_count: number;
+  unrelated_fund_count: number;
+  created_by: string;
+  created_at: string;
+}
+
 export interface PriorityRunDetail {
   priority_run_id: string;
   thesis_id: string;
@@ -43,6 +84,9 @@ export interface PriorityRunDetail {
   created_by: string;
   created_at: string;
   candidates_by_tier: Record<string, PriorityCandidate[]>;
+  thesis: ThesisDetail | null;
+  research_input: ResearchInputDetail | null;
+  candidate_set_header: CandidateSetHeaderStats | null;
 }
 
 export interface PriorityCandidate {

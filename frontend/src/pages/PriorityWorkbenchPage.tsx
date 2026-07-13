@@ -8,6 +8,25 @@ import {
   type PriorityRunSummary,
 } from "../api";
 
+// 请求来源中文映射
+const REQUEST_SOURCE_LABELS: Record<string, string> = {
+  research_meeting: "研究会议",
+  ad_hoc_research: "临时研究",
+  portfolio_review: "组合复核",
+  risk_review: "风险复核",
+};
+
+// 投资假设状态中文映射
+const THESIS_STATUS_LABELS: Record<string, string> = {
+  draft: "草稿",
+  researching: "研究中",
+  validated: "已验证",
+  approved: "已批准",
+  watching: "观察中",
+  invalidated: "已失效",
+  closed: "已关闭",
+};
+
 // 五档固定顺序
 const TIER_ORDER = [
   "research_now",
@@ -239,6 +258,33 @@ export default function PriorityWorkbenchPage() {
       {/* 顶部信息条 */}
       {detail && (
         <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+          {/* 投资假设原文 */}
+          {detail.thesis && (
+            <div style={{ marginBottom: 14 }}>
+              <h2 style={{ margin: "0 0 6px" }}>{detail.thesis.title || "投资假设"}</h2>
+              <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--text-2)", lineHeight: 1.6 }}>
+                {detail.thesis.belief_statement}
+              </p>
+              {/* 研究请求原文 */}
+              {detail.research_input?.raw_text && (
+                <div
+                  style={{
+                    padding: "8px 10px",
+                    background: "var(--surface-2)",
+                    borderRadius: "var(--r-s)",
+                    fontSize: 12,
+                    color: "var(--text-3)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  <strong style={{ color: "var(--text-2)" }}>研究请求：</strong>
+                  {detail.research_input.raw_text}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 元数据网格 */}
           <div className="kv priority-meta-grid">
             <dt>Thesis ID</dt>
             <dd style={{ fontFamily: "ui-monospace, monospace" }}>
@@ -256,11 +302,94 @@ export default function PriorityWorkbenchPage() {
             <dd style={{ fontFamily: "ui-monospace, monospace" }}>
               {fmtText(detail.ranking_method_version)}
             </dd>
-            <dt>评估候选数</dt>
-            <dd>{detail.evaluated_candidate_count}</dd>
-            <dt>合格候选数</dt>
-            <dd>{detail.eligible_candidate_count}</dd>
+            <dt>PriorityRun ID</dt>
+            <dd style={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>
+              {fmtText(detail.priority_run_id)}
+            </dd>
+            <dt>CandidateSet ID</dt>
+            <dd style={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>
+              {fmtText(detail.candidate_set_id)}
+            </dd>
+            <dt>创建人</dt>
+            <dd>{fmtText(detail.created_by)}</dd>
+            <dt>创建时间</dt>
+            <dd>{detail.created_at?.slice(0, 19).replace("T", " ") || "-"}</dd>
           </div>
+
+          {/* 投资假设状态条 */}
+          {detail.thesis && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 12,
+                marginTop: 10,
+                fontSize: 12,
+                color: "var(--text-2)",
+              }}
+            >
+              {detail.thesis.status && (
+                <span>
+                  状态：<strong>{THESIS_STATUS_LABELS[detail.thesis.status] ?? detail.thesis.status}</strong>
+                </span>
+              )}
+              {detail.thesis.time_horizon && (
+                <span>时间范围：<strong>{detail.thesis.time_horizon}</strong></span>
+              )}
+              {detail.thesis.owner && (
+                <span>研究员：<strong>{detail.thesis.owner}</strong></span>
+              )}
+              {detail.thesis.as_of_date && (
+                <span>截止日期：<strong>{detail.thesis.as_of_date}</strong></span>
+              )}
+              {detail.thesis.next_review_at && (
+                <span>下次复审：<strong>{detail.thesis.next_review_at.slice(0, 10)}</strong></span>
+              )}
+              {detail.research_input && (
+                <span>
+                  来源：<strong>{REQUEST_SOURCE_LABELS[detail.research_input.request_source] ?? detail.research_input.request_source}</strong>
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* 候选集统计 */}
+          {detail.candidate_set_header && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 16,
+                marginTop: 10,
+                padding: "8px 12px",
+                background: "var(--surface-2)",
+                borderRadius: "var(--r-s)",
+                fontSize: 12,
+              }}
+            >
+              <span>扫描基金：<strong>{detail.candidate_set_header.scanned_fund_count}</strong></span>
+              <span>映射候选：<strong>{detail.candidate_set_header.mapped_candidate_count}</strong></span>
+              <span>数据不足：<strong>{detail.candidate_set_header.unmapped_due_to_data_count}</strong></span>
+              <span>不相关：<strong>{detail.candidate_set_header.unrelated_fund_count}</strong></span>
+              <span className="muted">
+                Source: {detail.candidate_set_header.source_method_version}
+              </span>
+            </div>
+          )}
+
+          {/* 失效条件 */}
+          {detail.thesis?.invalidation_conditions &&
+            Array.isArray(detail.thesis.invalidation_conditions) &&
+            detail.thesis.invalidation_conditions.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <h3 style={{ margin: "0 0 4px", color: "var(--neg-text)" }}>失效条件</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--text-2)" }}>
+                  {detail.thesis.invalidation_conditions.map((c, i) => (
+                    <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
           {/* 非生产警告条 */}
           {!detail.approved_for_production && (

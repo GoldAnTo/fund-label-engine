@@ -597,7 +597,16 @@ class CognitionGovernanceService:
     # 查询服务
     # ----------------------------------------------------------
     def get_priority_run(self, priority_run_id: str) -> dict[str, Any] | None:
-        """查询 PriorityRun 详情，按固定五档分组返回候选列表。"""
+        """查询 PriorityRun 详情，按固定五档分组返回候选列表。
+
+        返回内容包含：
+        - PriorityRun 本体（ID、状态、统计、创建人/时间）
+        - CandidateSet header 统计（scanned/mapped/unmapped/unrelated）
+        - Thesis 详情（标题、信念陈述、时间范围、失效条件、关键指标等）
+        - ResearchInput 原文（raw_text、structured_intent、来源、请求人）
+        - 策略批准状态
+        - 按五档分组的候选列表
+        """
         run = self._priority_repo.get_run(priority_run_id)
         if run is None:
             return None
@@ -624,6 +633,67 @@ class CognitionGovernanceService:
             except Exception:
                 pass
 
+        # 查询 CandidateSet header 统计
+        header = self._governance_repo.get_candidate_set_header(run["candidate_set_id"])
+
+        # 查询 Thesis 详情
+        thesis = self._governance_repo.get_thesis(run["thesis_id"])
+
+        # 查询 ResearchInput 原文
+        research_input = None
+        if thesis:
+            research_input = self._governance_repo.get_research_input(thesis.get("user_input_id"))
+
+        # 构建 Thesis 摘要（只返回前端需要的字段）
+        thesis_detail: dict[str, Any] | None = None
+        if thesis:
+            thesis_detail = {
+                "thesis_id": thesis.get("thesis_id"),
+                "title": thesis.get("title"),
+                "belief_statement": thesis.get("belief_statement"),
+                "time_horizon": thesis.get("time_horizon"),
+                "status": thesis.get("status"),
+                "owner": thesis.get("owner"),
+                "as_of_date": thesis.get("as_of_date"),
+                "created_at": thesis.get("created_at"),
+                "next_review_at": thesis.get("next_review_at"),
+                "supporting_evidence": thesis.get("supporting_evidence"),
+                "opposing_evidence": thesis.get("opposing_evidence"),
+                "key_metrics": thesis.get("key_metrics"),
+                "catalysts": thesis.get("catalysts"),
+                "invalidation_conditions": thesis.get("invalidation_conditions"),
+            }
+
+        # 构建 ResearchInput 摘要
+        research_input_detail: dict[str, Any] | None = None
+        if research_input:
+            research_input_detail = {
+                "user_input_id": research_input.get("user_input_id"),
+                "input_type": research_input.get("input_type"),
+                "business_mode": research_input.get("business_mode"),
+                "raw_text": research_input.get("raw_text"),
+                "structured_intent": research_input.get("structured_intent"),
+                "actor_role": research_input.get("actor_role"),
+                "actor_id": research_input.get("actor_id"),
+                "request_source": research_input.get("request_source"),
+                "as_of_date": research_input.get("as_of_date"),
+                "created_at": research_input.get("created_at"),
+            }
+
+        # 构建 CandidateSet header 统计
+        header_stats: dict[str, Any] | None = None
+        if header:
+            header_stats = {
+                "candidate_set_id": header.get("candidate_set_id"),
+                "source_method_version": header.get("source_method_version"),
+                "scanned_fund_count": header.get("scanned_fund_count"),
+                "mapped_candidate_count": header.get("mapped_candidate_count"),
+                "unmapped_due_to_data_count": header.get("unmapped_due_to_data_count"),
+                "unrelated_fund_count": header.get("unrelated_fund_count", 0),
+                "created_by": header.get("created_by"),
+                "created_at": header.get("created_at"),
+            }
+
         return {
             "priority_run_id": run["priority_run_id"],
             "thesis_id": run["thesis_id"],
@@ -641,6 +711,9 @@ class CognitionGovernanceService:
             "created_by": run["created_by"],
             "created_at": run["created_at"],
             "candidates_by_tier": tiers,
+            "thesis": thesis_detail,
+            "research_input": research_input_detail,
+            "candidate_set_header": header_stats,
         }
 
     def list_priority_runs(self, thesis_id: str) -> list[dict[str, Any]]:
