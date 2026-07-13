@@ -357,14 +357,14 @@ def test_fit_score_and_normalized_match_pct(
 # ============================================================
 # 配置解析
 # ============================================================
-def test_parse_policy_missing_field_raises_configuration_error() -> None:
-    """配置缺失字段抛 CandidatePriorityConfigurationError。"""
-    policy_row = {
-        "candidate_priority": {
+def _make_policy_row(candidate_priority: dict | None = None) -> dict:
+    """构造真实 YAML 同步后的策略行结构（valuation_policy 在顶层）。"""
+    if candidate_priority is None:
+        candidate_priority = {
             "method_version": "fund_priority_v0",
             "source_method_version": "fund_candidate_evidence_v0",
             "asset_type": "fund",
-            # minimum_target_holding_weight 缺失
+            "minimum_target_holding_weight": 0.03,
             "minimum_disclosed_holding_weight": 0.10,
             "minimum_factor_coverage_weight": 0.50,
             "maximum_holding_age_days": 180,
@@ -372,57 +372,191 @@ def test_parse_policy_missing_field_raises_configuration_error() -> None:
             "require_manager_identity": True,
             "require_holding_report_date": True,
             "required_evidence": ["business_logic"],
-            "allowed_asset_types": ["fund"],
-            "excluded_asset_codes": [],
-            "valuation_policy": {"max_pe": 60, "max_pb": 10},
-            "approved_for_production": False,
-        },
+        }
+    return {
+        "candidate_priority": candidate_priority,
         "valuation_policy": {"max_pe": 60, "max_pb": 10},
-        "allowed_universe": ["fund"],
-        "excluded_universe": [],
+        "allowed_universe": {"asset_types": ["fund"]},
+        "excluded_universe": [{"reason": "test", "assets": []}],
         "approved_for_production": False,
     }
+
+
+def test_parse_policy_success_with_top_level_fields() -> None:
+    """真实 YAML 结构：valuation_policy / allowed_universe / excluded_universe 在顶层。"""
+    policy = parse_candidate_priority_policy(_make_policy_row())
+    assert policy.method_version == "fund_priority_v0"
+    assert policy.source_method_version == "fund_candidate_evidence_v0"
+    assert policy.valuation_policy == {"max_pe": 60, "max_pb": 10}
+    assert policy.allowed_asset_types == ("fund",)
+    assert policy.excluded_asset_codes == ()
+    assert policy.approved_for_production is False
+
+
+def test_parse_policy_excluded_universe_extracts_asset_codes() -> None:
+    """excluded_universe 列表中提取 asset codes。"""
+    row = _make_policy_row()
+    row["excluded_universe"] = [
+        {"reason": "黑名单", "assets": ["001001", "001002"]},
+        {"reason": "合规", "assets": ["001003"]},
+    ]
+    policy = parse_candidate_priority_policy(row)
+    assert policy.excluded_asset_codes == ("001001", "001002", "001003")
+
+
+def test_parse_policy_missing_field_raises_configuration_error() -> None:
+    """配置缺失字段抛 CandidatePriorityConfigurationError。"""
+    cp = {
+        "method_version": "fund_priority_v0",
+        "source_method_version": "fund_candidate_evidence_v0",
+        "asset_type": "fund",
+        # minimum_target_holding_weight 缺失
+        "minimum_disclosed_holding_weight": 0.10,
+        "minimum_factor_coverage_weight": 0.50,
+        "maximum_holding_age_days": 180,
+        "valuation_breach_mode": "watch",
+        "require_manager_identity": True,
+        "require_holding_report_date": True,
+        "required_evidence": ["business_logic"],
+    }
     with pytest.raises(CandidatePriorityConfigurationError):
-        parse_candidate_priority_policy(policy_row)
+        parse_candidate_priority_policy(_make_policy_row(cp))
 
 
 def test_parse_policy_none_field_raises_configuration_error() -> None:
     """配置字段为 None 抛 CandidatePriorityConfigurationError。"""
-    policy_row = {
-        "candidate_priority": {
-            "method_version": "fund_priority_v0",
-            "source_method_version": "fund_candidate_evidence_v0",
-            "asset_type": "fund",
-            "minimum_target_holding_weight": None,
-            "minimum_disclosed_holding_weight": 0.10,
-            "minimum_factor_coverage_weight": 0.50,
-            "maximum_holding_age_days": 180,
-            "valuation_breach_mode": "watch",
-            "require_manager_identity": True,
-            "require_holding_report_date": True,
-            "required_evidence": ["business_logic"],
-            "allowed_asset_types": ["fund"],
-            "excluded_asset_codes": [],
-            "valuation_policy": {"max_pe": 60, "max_pb": 10},
-            "approved_for_production": False,
-        },
-        "valuation_policy": {"max_pe": 60, "max_pb": 10},
-        "allowed_universe": ["fund"],
-        "excluded_universe": [],
-        "approved_for_production": False,
+    cp = {
+        "method_version": "fund_priority_v0",
+        "source_method_version": "fund_candidate_evidence_v0",
+        "asset_type": "fund",
+        "minimum_target_holding_weight": None,
+        "minimum_disclosed_holding_weight": 0.10,
+        "minimum_factor_coverage_weight": 0.50,
+        "maximum_holding_age_days": 180,
+        "valuation_breach_mode": "watch",
+        "require_manager_identity": True,
+        "require_holding_report_date": True,
+        "required_evidence": ["business_logic"],
     }
     with pytest.raises(CandidatePriorityConfigurationError):
-        parse_candidate_priority_policy(policy_row)
+        parse_candidate_priority_policy(_make_policy_row(cp))
 
 
 def test_parse_policy_none_candidate_priority_raises_configuration_error() -> None:
     """candidate_priority 为 None 抛 CandidatePriorityConfigurationError。"""
-    policy_row = {
-        "candidate_priority": None,
-        "valuation_policy": {"max_pe": 60, "max_pb": 10},
-        "allowed_universe": ["fund"],
-        "excluded_universe": [],
-        "approved_for_production": False,
-    }
+    row = _make_policy_row()
+    row["candidate_priority"] = None
     with pytest.raises(CandidatePriorityConfigurationError):
-        parse_candidate_priority_policy(policy_row)
+        parse_candidate_priority_policy(row)
+
+
+def test_parse_policy_missing_valuation_policy_raises_configuration_error() -> None:
+    """顶层 valuation_policy 缺失抛 CandidatePriorityConfigurationError。"""
+    row = _make_policy_row()
+    del row["valuation_policy"]
+    with pytest.raises(CandidatePriorityConfigurationError):
+        parse_candidate_priority_policy(row)
+
+
+# ============================================================
+# P1a: 空估值误判 + 估值分位字段名
+# ============================================================
+def test_has_valuation_data_none_values_returns_false() -> None:
+    """weighted_pe 和 weighted_pb 都为 None 时，认为估值数据不存在。"""
+    assert CandidatePriorityEngine._has_valuation_data(
+        {"weighted_pe": None, "weighted_pb": None}
+    ) is False
+
+
+def test_has_valuation_data_one_valid_value_returns_true() -> None:
+    """只要有一个有效值就认为估值数据存在。"""
+    assert CandidatePriorityEngine._has_valuation_data(
+        {"weighted_pe": 30, "weighted_pb": None}
+    ) is True
+    assert CandidatePriorityEngine._has_valuation_data(
+        {"weighted_pe": None, "weighted_pb": 3}
+    ) is True
+
+
+def test_has_valuation_data_empty_dict_returns_false() -> None:
+    """空 dict 认为估值数据不存在。"""
+    assert CandidatePriorityEngine._has_valuation_data({}) is False
+
+
+def test_valuation_gate_checks_weighted_val_pct(
+    evidence: FundCandidateEvidence, policy: CandidatePriorityPolicy
+) -> None:
+    """估值门禁检查 weighted_val_pct 字段（CognitionEngine 输出字段名）。"""
+    # 需要 weighted_pe 非 None 才能通过数据门禁
+    ev = replace(evidence, valuation={"weighted_pe": 30, "weighted_val_pct": 90})
+    engine = CandidatePriorityEngine()
+    result = engine.evaluate_one(ev, policy)
+    assert result.priority_tier == "valuation_watch"
+    assert "valuation_soft_breach" in result.reason_codes
+
+
+def test_valuation_gate_checks_valuation_percentile(
+    evidence: FundCandidateEvidence, policy: CandidatePriorityPolicy
+) -> None:
+    """估值门禁也兼容 valuation_percentile 字段名。"""
+    # 需要 weighted_pe 非 None 才能通过数据门禁
+    ev = replace(evidence, valuation={"weighted_pe": 30, "valuation_percentile": 90})
+    engine = CandidatePriorityEngine()
+    result = engine.evaluate_one(ev, policy)
+    assert result.priority_tier == "valuation_watch"
+    assert "valuation_soft_breach" in result.reason_codes
+
+
+def test_none_valuation_values_lead_to_data_insufficient(
+    evidence: FundCandidateEvidence, policy: CandidatePriorityPolicy
+) -> None:
+    """weighted_pe 和 weighted_pb 为 None 时 -> valuation_data_missing -> data_insufficient。"""
+    ev = replace(evidence, valuation={"weighted_pe": None, "weighted_pb": None})
+    engine = CandidatePriorityEngine()
+    result = engine.evaluate_one(ev, policy)
+    assert result.priority_tier == "data_insufficient"
+    assert "valuation_data_missing" in result.reason_codes
+
+
+# ============================================================
+# 真实 YAML 闭环测试
+# ============================================================
+def test_real_yaml_closed_loop(tmp_path) -> None:
+    """真实 YAML 闭环: migration -> sync_strategy_policies -> Repository 查询 -> parse -> 成功。"""
+    from pathlib import Path
+
+    from app.persistence.governance import GovernanceRepository
+    from app.persistence.migrations_runner import run_migrations
+
+    from scripts.sync_strategy_policies import sync_yaml_to_db
+
+    yaml_path = (
+        Path(__file__).resolve().parents[2]
+        / "config"
+        / "strategy_policy"
+        / "private_equity_growth_v1.yaml"
+    )
+    assert yaml_path.exists(), f"YAML 文件不存在: {yaml_path}"
+
+    db_path = tmp_path / "gov.sqlite"
+    run_migrations(str(db_path))
+
+    # 使用真实 YAML 同步脚本写入策略
+    sync_yaml_to_db(yaml_path, db_path)
+
+    # 通过 Repository 查询策略
+    repo = GovernanceRepository(db_path)
+    policy_row = repo.get_strategy_policy("private_equity_growth", 2)
+    assert policy_row is not None, "策略未找到"
+
+    # 解析策略
+    policy = parse_candidate_priority_policy(policy_row)
+    assert policy.method_version == "fund_priority_v0"
+    assert policy.source_method_version == "fund_candidate_evidence_v0"
+    assert policy.asset_type == "fund"
+    assert policy.minimum_target_holding_weight == 0.03
+    assert policy.valuation_policy is not None
+    assert policy.valuation_policy.get("max_pe") == 60
+    assert policy.valuation_policy.get("max_pb") == 10
+    assert "fund" in policy.allowed_asset_types
+    assert policy.approved_for_production is False

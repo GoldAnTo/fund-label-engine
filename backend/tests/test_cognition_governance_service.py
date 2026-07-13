@@ -134,7 +134,8 @@ def _make_engine_factory(batch: FundCandidateEvidenceBatch):
     return factory
 
 
-# 完整的 candidate_priority 配置 JSON
+# 完整的 candidate_priority 配置 JSON（不含 valuation_policy / allowed_asset_types /
+# excluded_asset_codes / approved_for_production，这些从 policy_row 顶层读取）
 _CANDIDATE_PRIORITY_CONFIG = {
     "method_version": "fund_priority_v0",
     "source_method_version": "fund_candidate_evidence_v0",
@@ -152,16 +153,25 @@ _CANDIDATE_PRIORITY_CONFIG = {
         "valuation",
         "catalyst_or_expectation_gap",
     ],
-    "allowed_asset_types": ["fund"],
-    "excluded_asset_codes": [],
-    "valuation_policy": {
-        "max_pe": 60,
-        "max_pb": 10,
-        "max_peg": 2.0,
-        "max_valuation_percentile": 85,
-    },
-    "approved_for_production": False,
 }
+
+# 估值策略（写入 valuation_policy_json 列，从顶层读取）
+_VALUATION_POLICY_CONFIG = {
+    "max_pe": 60,
+    "max_pb": 10,
+    "max_peg": 2.0,
+    "max_valuation_percentile": 85,
+}
+
+# 允许的投资标的范围（写入 allowed_universe_json 列）
+_ALLOWED_UNIVERSE_CONFIG = {
+    "asset_types": ["fund"],
+}
+
+# 排除的投资标的范围（写入 excluded_universe_json 列）
+_EXCLUDED_UNIVERSE_CONFIG = [
+    {"reason": "test", "assets": []},
+]
 
 
 def _intent(
@@ -210,13 +220,20 @@ def gov_db(tmp_path: Path, source_file: Path, factor_file: Path) -> Path:
     conn = sqlite3.connect(str(db))
     conn.execute("PRAGMA foreign_keys = ON")
 
-    # 插入 strategy_policies (带 candidate_priority_json)
+    # 插入 strategy_policies (带 candidate_priority_json, valuation_policy_json, allowed_universe_json, excluded_universe_json)
     conn.execute(
         "INSERT INTO strategy_policies "
-        "(policy_id, version, business_mode, policy_status, strategy_name, strategy_type, "
-        "candidate_priority_json) "
-        "VALUES ('p1', 1, 'private_strategy', 'active', '测试策略', 'equity_long_only', ?)",
-        (json.dumps(_CANDIDATE_PRIORITY_CONFIG, ensure_ascii=False),),
+        "(policy_id, version, business_mode, policy_status, approved_for_production, "
+        "strategy_name, strategy_type, "
+        "candidate_priority_json, valuation_policy_json, "
+        "allowed_universe_json, excluded_universe_json) "
+        "VALUES ('p1', 1, 'private_strategy', 'active', 0, '测试策略', 'equity_long_only', ?, ?, ?, ?)",
+        (
+            json.dumps(_CANDIDATE_PRIORITY_CONFIG, ensure_ascii=False),
+            json.dumps(_VALUATION_POLICY_CONFIG, ensure_ascii=False),
+            json.dumps(_ALLOWED_UNIVERSE_CONFIG, ensure_ascii=False),
+            json.dumps(_EXCLUDED_UNIVERSE_CONFIG, ensure_ascii=False),
+        ),
     )
 
     # 插入 data_snapshots

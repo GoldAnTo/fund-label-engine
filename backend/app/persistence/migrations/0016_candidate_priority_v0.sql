@@ -141,6 +141,22 @@ BEGIN
     SELECT RAISE(ABORT, 'candidate_sets.candidate_evidence_json is immutable');
 END;
 
+-- candidate_set_headers 关键字段不可变（整行不可变）
+CREATE TRIGGER trg_candidate_set_headers_immutable
+BEFORE UPDATE ON candidate_set_headers
+FOR EACH ROW
+BEGIN
+    SELECT RAISE(ABORT, 'candidate_set_headers is immutable after creation');
+END;
+
+-- candidate_sets 冻结字段不可变（fit_score, asset_code, asset_type, candidate_set_id, thesis_id, data_snapshot_id, candidate_evidence_json）
+CREATE TRIGGER trg_candidate_sets_frozen_fields_immutable
+BEFORE UPDATE OF fit_score, asset_code, asset_type, candidate_set_id, thesis_id, data_snapshot_id, candidate_evidence_json ON candidate_sets
+FOR EACH ROW
+BEGIN
+    SELECT RAISE(ABORT, 'candidate_sets frozen fields are immutable');
+END;
+
 -- i) 重建视图(增加 candidate_evidence_json 列)
 CREATE VIEW v_candidate_set_full AS
 SELECT

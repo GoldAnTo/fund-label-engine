@@ -137,6 +137,8 @@ class CandidatePriorityResult:
 # ============================================================
 # 配置解析
 # ============================================================
+# candidate_priority 内部必需字段（不含 valuation_policy / allowed_asset_types /
+# excluded_asset_codes / approved_for_production，这些从 policy_row 顶层读取）
 _POLICY_REQUIRED_FIELDS = (
     "method_version",
     "source_method_version",
@@ -149,10 +151,6 @@ _POLICY_REQUIRED_FIELDS = (
     "require_manager_identity",
     "require_holding_report_date",
     "required_evidence",
-    "allowed_asset_types",
-    "excluded_asset_codes",
-    "valuation_policy",
-    "approved_for_production",
 )
 
 
@@ -169,6 +167,10 @@ def parse_candidate_priority_policy(policy_row: dict[str, Any]) -> CandidatePrio
 
     只做类型校验与转换，不补阈值。
     candidate_priority 为 None 或缺少必需字段或字段为 None 时抛出配置错误。
+
+    真实 YAML 把 valuation_policy / allowed_universe / excluded_universe /
+    approved_for_production 放在策略顶层，同步脚本把它们分别存为独立 JSON 列。
+    本函数从 policy_row 顶层读取这些字段。
     """
     raw = policy_row.get("candidate_priority")
     if raw is None:
@@ -186,7 +188,7 @@ def parse_candidate_priority_policy(policy_row: dict[str, Any]) -> CandidatePrio
             "candidate_priority 必须是字典或 JSON 字符串"
         )
 
-    # 校验所有必需字段存在且非 None
+    # 校验 candidate_priority 内部必需字段（不含 valuation_policy 等）
     for field_name in _POLICY_REQUIRED_FIELDS:
         if field_name not in raw:
             raise CandidatePriorityConfigurationError(
@@ -201,6 +203,48 @@ def parse_candidate_priority_policy(policy_row: dict[str, Any]) -> CandidatePrio
             f"valuation_breach_mode 取值非法: {breach_mode!r}"
         )
 
+    # 从 policy_row 顶层读取 valuation_policy
+    valuation_policy = policy_row.get("valuation_policy")
+    if valuation_policy is None:
+        raise CandidatePriorityConfigurationError("valuation_policy 配置缺失")
+    if isinstance(valuation_policy, str):
+        try:
+            valuation_policy = json.loads(valuation_policy)
+        except json.JSONDecodeError as exc:
+            raise CandidatePriorityConfigurationError(
+                f"valuation_policy 不是合法 JSON: {exc}"
+            ) from exc
+    if not isinstance(valuation_policy, dict):
+        raise CandidatePriorityConfigurationError(
+            "valuation_policy 必须是字典或 JSON 字符串"
+        )
+
+    # 从 policy_row 顶层读取 approved_for_production
+    approved_for_production = bool(policy_row.get("approved_for_production", 0))
+
+    # 从 policy_row 顶层读取 allowed_universe（含 asset_types 列表）
+    allowed_universe = policy_row.get("allowed_universe")
+    if isinstance(allowed_universe, str):
+        allowed_universe = json.loads(allowed_universe)
+    if allowed_universe and isinstance(allowed_universe, dict):
+        allowed_asset_types = tuple(allowed_universe.get("asset_types", []))
+    else:
+        allowed_asset_types = tuple(raw.get("allowed_asset_types", ()))
+
+    # 从 policy_row 顶层读取 excluded_universe（列表格式，每项有 reason 和 assets）
+    excluded_universe = policy_row.get("excluded_universe")
+    if isinstance(excluded_universe, str):
+        excluded_universe = json.loads(excluded_universe)
+    excluded_asset_codes: tuple[str, ...] = ()
+    if excluded_universe and isinstance(excluded_universe, list):
+        for item in excluded_universe:
+            if isinstance(item, dict):
+                assets = item.get("assets", [])
+                excluded_asset_codes = excluded_asset_codes + tuple(assets)
+    # 回退：检查 candidate_priority 内部是否有 excluded_asset_codes
+    if not excluded_asset_codes and raw.get("excluded_asset_codes"):
+        excluded_asset_codes = tuple(raw["excluded_asset_codes"])
+
     return CandidatePriorityPolicy(
         method_version=str(raw["method_version"]),
         source_method_version=str(raw["source_method_version"]),
@@ -213,10 +257,10 @@ def parse_candidate_priority_policy(policy_row: dict[str, Any]) -> CandidatePrio
         require_manager_identity=bool(raw["require_manager_identity"]),
         require_holding_report_date=bool(raw["require_holding_report_date"]),
         required_evidence=tuple(raw["required_evidence"]),
-        allowed_asset_types=tuple(raw["allowed_asset_types"]),
-        excluded_asset_codes=tuple(raw["excluded_asset_codes"]),
-        valuation_policy=dict(raw["valuation_policy"]),
-        approved_for_production=bool(raw["approved_for_production"]),
+        allowed_asset_types=allowed_asset_types,
+        excluded_asset_codes=excluded_asset_codes,
+        valuation_policy=valuation_policy,
+        approved_for_production=approved_for_production,
     )
 
 
@@ -436,10 +480,12 @@ class CandidatePriorityEngine:
 
     @staticmethod
     def _has_valuation_data(valuation: dict[str, Any]) -> bool:
-        """检查估值数据是否包含 weighted_pe 或 weighted_pb。"""
+        """检查估值数据是否包含有效的 weighted_pe 或 weighted_pb（值非 None）。"""
         if not valuation:
             return False
-        return "weighted_pe" in valuation or "weighted_pb" in valuation
+        weighted_pe = valuation.get("weighted_pe")
+        weighted_pb = valuation.get("weighted_pb")
+        return weighted_pe is not None or weighted_pb is not None
 
     # ----------------------------------------------------------
     # 估值软门禁
@@ -471,8 +517,8 @@ class CandidatePriorityEngine:
         if peg is not None and max_peg is not None and peg > max_peg:
             soft_breach = True
 
-        # 检查估值分位
-        percentile = valuation.get("valuation_percentile")
+        # 检查估值分位 - 同时检查两种可能的字段名
+        percentile = valuation.get("weighted_val_pct") or valuation.get("valuation_percentile")
         max_percentile = vp.get("max_valuation_percentile")
         if percentile is not None and max_percentile is not None and percentile > max_percentile:
             soft_breach = True

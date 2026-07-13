@@ -392,3 +392,63 @@ class TestCandidatePriorityMigration:
         assert result["tiers"][0]["name"] == "tier1"
         assert result["thresholds"]["minimum_target_holding_weight"] == 0.03
         assert "earnings_or_cashflow" in result["required_evidence"]
+
+    def test_candidate_set_headers_immutable(self, conn_with_data):
+        """candidate_set_headers 整行不可变，UPDATE 抛 IntegrityError。"""
+        c = conn_with_data
+        _insert_header(c)
+        c.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            c.execute(
+                "UPDATE candidate_set_headers SET scanned_fund_count = 999 "
+                "WHERE candidate_set_id = 'cs_test1'"
+            )
+            c.commit()
+
+    def test_candidate_sets_frozen_fields_immutable(self, conn_with_data):
+        """candidate_sets 冻结字段（fit_score, asset_code 等）不可变。"""
+        c = conn_with_data
+        _insert_header(c)
+        _insert_candidate(c)
+        c.commit()
+
+        # fit_score 不可变
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            c.execute(
+                "UPDATE candidate_sets SET fit_score = 0.99 "
+                "WHERE candidate_id = 'can_test1'"
+            )
+            c.commit()
+
+        # asset_code 不可变
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            c.execute(
+                "UPDATE candidate_sets SET asset_code = '999999' "
+                "WHERE candidate_id = 'can_test1'"
+            )
+            c.commit()
+
+        # asset_type 不可变
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            c.execute(
+                "UPDATE candidate_sets SET asset_type = 'stock' "
+                "WHERE candidate_id = 'can_test1'"
+            )
+            c.commit()
+
+    def test_candidate_sets_non_frozen_fields_can_update(self, conn_with_data):
+        """candidate_sets 非冻结字段（candidate_status, reviewed_at）可以更新。"""
+        c = conn_with_data
+        _insert_header(c)
+        _insert_candidate(c)
+        c.commit()
+        # candidate_status 可以更新
+        c.execute(
+            "UPDATE candidate_sets SET candidate_status = 'reviewed' "
+            "WHERE candidate_id = 'can_test1'"
+        )
+        c.commit()
+        row = c.execute(
+            "SELECT candidate_status FROM candidate_sets WHERE candidate_id = 'can_test1'"
+        ).fetchone()
+        assert row[0] == "reviewed"

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -220,11 +219,30 @@ class CognitionGovernanceService:
 
         try:
             # 8. 调用 build_fund_candidate_evidence
+            # 优先用 thesis / research_input 的 as_of_date，否则用 snapshot 的 created_at
             as_of_date = (
                 thesis.get("as_of_date")
                 or research_input.get("as_of_date")
-                or date.today().isoformat()
             )
+            if not as_of_date:
+                snapshot_created = snapshot.get("created_at") or ""
+                as_of_date = snapshot_created[:10] if snapshot_created else None
+            if not as_of_date:
+                raise GovernanceError(
+                    "缺少 as_of_date: thesis、research_input 和 snapshot 都没有有效日期"
+                )
+
+            # 从 target_assets 提取点名基金代码
+            target_assets = research_input.get("target_assets") or []
+            explicitly_named: list[str] = []
+            for asset in target_assets:
+                if isinstance(asset, dict) and asset.get("asset_type") == "fund":
+                    code = asset.get("asset_code") or asset.get("code")
+                    if code:
+                        explicitly_named.append(code)
+                elif isinstance(asset, str):
+                    explicitly_named.append(asset)
+
             batch: FundCandidateEvidenceBatch = engine.build_fund_candidate_evidence(
                 direction=intent["direction"],
                 belief_link=intent.get("belief_link"),
@@ -233,6 +251,7 @@ class CognitionGovernanceService:
                 risk_tolerance=intent["risk_tolerance"],
                 data_snapshot_id=data_snapshot_id,
                 as_of_date=as_of_date,
+                explicitly_named_fund_codes=explicitly_named,
             )
 
             # 9. 在事务中写入
@@ -386,6 +405,18 @@ class CognitionGovernanceService:
                 f"method_version {policy.method_version!r} 不一致"
             )
 
+        # 10b. 校验策略 source_method_version 与 CandidateSet header 的 source_method_version 一致
+        if (
+            policy.source_method_version
+            and header.get("source_method_version")
+            and policy.source_method_version != header.get("source_method_version")
+        ):
+            raise GovernanceError(
+                f"策略 source_method_version {policy.source_method_version!r} "
+                f"与 CandidateSet source_method_version "
+                f"{header.get('source_method_version')!r} 不一致"
+            )
+
         # 11. 检查幂等键
         existing_run_id = self._priority_repo.get_existing_run_id(
             candidate_set_id=candidate_set_id,
@@ -454,6 +485,9 @@ class CognitionGovernanceService:
                     "result_type": result_type,
                     "evaluated_candidate_count": len(results),
                     "eligible_candidate_count": eligible_count,
+                    "scanned_fund_count": header.get("scanned_fund_count"),
+                    "mapped_candidate_count": header.get("mapped_candidate_count"),
+                    "unmapped_due_to_data_count": header.get("unmapped_due_to_data_count"),
                     "tier_counts": tier_counts,
                     "created_by": actor_id,
                 }

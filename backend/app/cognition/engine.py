@@ -603,10 +603,17 @@ class CognitionEngine:
         return row[0] if row else "?"
 
     def _load_fund_codes(self, conn: sqlite3.Connection) -> list[str]:
-        rows = conn.execute(
-            "SELECT DISTINCT fund_code FROM stock_holdings ORDER BY fund_code"
-        ).fetchall()
-        return [r[0] for r in rows]
+        """加载所有基金代码，复用 HoldingSourceAdapter。"""
+        from app.cognition.holding_source import (
+            HoldingSourceAdapter,
+            HoldingSourceUnavailableError,
+        )
+
+        try:
+            adapter = HoldingSourceAdapter(conn)
+            return adapter.list_fund_codes()
+        except HoldingSourceUnavailableError:
+            return []
 
     def _get_industry_pe_medians(self, conn: sqlite3.Connection) -> dict[str, float]:
         """获取各行业PE中位数（横截面估值对比基准）。
@@ -1313,6 +1320,31 @@ class CognitionEngine:
             all_candidates.append(evidence)
             if not gate["passed"]:
                 valuation_gated.append(evidence)
+
+        # 点名但无持仓的基金加入候选（评价为 data_insufficient）
+        existing_codes = {c.fund_code for c in all_candidates}
+        for code in explicitly_named_fund_codes:
+            if code not in existing_codes:
+                fund_name = self._get_fund_name(conn, code)
+                all_candidates.append(
+                    FundCandidateEvidence(
+                        fund_code=code,
+                        fund_name=fund_name if fund_name != "?" else None,
+                        matched_holding_weight=0.0,
+                        disclosed_holding_weight=0.0,
+                        normalized_match_pct=0.0,
+                        holding_report_date=None,
+                        holding_age_days=None,
+                        factor_coverage_weight=0.0,
+                        valuation={},
+                        holding_trend={},
+                        manager_identity=None,
+                        evidence_types={},
+                        policy_conflicts=(),
+                        data_snapshot_id=data_snapshot_id,
+                        asset_type="fund",
+                    )
+                )
 
         return FundCandidateEvidenceBatch(
             all_candidates=tuple(all_candidates),

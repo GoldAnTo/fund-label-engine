@@ -5,10 +5,10 @@
     -> CandidatePriorityRun -> CandidatePriorityResult -> API reverse lookup
 
 使用真实的认知数据库(_make_cognition_db),不使用 Mock。
+使用真实 YAML 同步脚本(sync_strategy_policies)写入策略。
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 
@@ -28,60 +28,24 @@ from fastapi.testclient import TestClient
 # 从 test_cognition_engine 导入认知数据库构建辅助函数
 from test_cognition_engine import _make_cognition_db
 
+from scripts.sync_strategy_policies import sync_yaml_to_db
 
 # ============================================================
 # 策略配置辅助
 # ============================================================
-def _candidate_priority_config() -> dict:
-    """候选优先级策略配置(写入 candidate_priority_json 列)。"""
-    return {
-        "method_version": "fund_priority_v0",
-        "source_method_version": "fund_candidate_evidence_v0",
-        "asset_type": "fund",
-        "minimum_target_holding_weight": 0.01,
-        "minimum_disclosed_holding_weight": 0.05,
-        "minimum_factor_coverage_weight": 0.30,
-        "maximum_holding_age_days": 365,
-        "valuation_breach_mode": "watch",
-        "require_manager_identity": False,
-        "require_holding_report_date": True,
-        "required_evidence": [
-            "business_logic",
-            "earnings_or_cashflow",
-            "valuation",
-            "catalyst_or_expectation_gap",
-        ],
-        "allowed_asset_types": ["fund"],
-        "excluded_asset_codes": [],
-        "valuation_policy": {
-            "max_pe": 60,
-            "max_pb": 10,
-            "max_peg": 2.0,
-            "max_valuation_percentile": 85,
-        },
-        "approved_for_production": False,
-    }
+# 使用真实 YAML 同步脚本写入策略，不再手工构造
 
-
-def _valuation_policy_config() -> dict:
-    """估值策略配置(写入 valuation_policy_json 列)。"""
-    return {
-        "status": "example",
-        "method": "relative_and_absolute",
-        "max_pe": 60,
-        "max_pb": 10,
-        "max_peg": 2.0,
-        "max_valuation_percentile": 85,
-    }
+# 真实 YAML 文件路径（private_equity_growth v2）
+_YAML_PATH = Path(__file__).resolve().parents[2] / "config" / "strategy_policy" / "private_equity_growth_v1.yaml"
 
 
 # ============================================================
 # 测试 1: 完整链路首次运行
 # ============================================================
-def test_first_run_complete_chain(tmp_path: Path) -> dict:
-    """完整链路首次运行。
+def _build_complete_chain(tmp_path: Path) -> dict:
+    """完整链路构建 helper，返回 ids dict。
 
-    本函数既是一个独立测试,也被后续测试复用以构建基础数据。
+    本函数不是测试，供后续测试复用以构建基础数据。
     """
     # 1. 创建认知数据库(source + factor)
     source_db, factor_db = _make_cognition_db(tmp_path)
@@ -91,20 +55,10 @@ def test_first_run_complete_chain(tmp_path: Path) -> dict:
     run_migrations(str(gov_db))
 
     # 3. 插入基础数据
+    # 使用真实 YAML 同步脚本写入策略
+    sync_yaml_to_db(_YAML_PATH, gov_db)
     conn = sqlite3.connect(str(gov_db))
     conn.execute("PRAGMA foreign_keys = ON")
-    # 策略(含 candidate_priority_json 和 valuation_policy_json)
-    conn.execute(
-        """INSERT INTO strategy_policies
-        (policy_id, version, business_mode, policy_status, approved_for_production,
-         strategy_name, strategy_type, candidate_priority_json, valuation_policy_json)
-        VALUES ('private_equity_growth', 2, 'private_strategy', 'example', 0,
-        '私募成长', 'equity_long_only', ?, ?)""",
-        (
-            json.dumps(_candidate_priority_config(), ensure_ascii=False),
-            json.dumps(_valuation_policy_config(), ensure_ascii=False),
-        ),
-    )
     # 快照(指向认知数据库路径)
     conn.execute(
         "INSERT INTO data_snapshots (snapshot_id, source_db_path, factor_db_path) "
@@ -174,6 +128,22 @@ def test_first_run_complete_chain(tmp_path: Path) -> dict:
     )
     priority_run_id = pr_result["priority_run_id"]
 
+    return {
+        "user_input_id": user_input_id,
+        "thesis_id": thesis_id,
+        "candidate_set_id": candidate_set_id,
+        "priority_run_id": priority_run_id,
+        "gov_db": str(gov_db),
+        "pr_result": pr_result,
+        "cog_gov_service": cog_gov_service,
+    }
+
+
+def test_first_run_complete_chain(tmp_path: Path) -> None:
+    """完整链路首次运行。"""
+    ids = _build_complete_chain(tmp_path)
+    pr_result = ids["pr_result"]
+
     # 9. 验证结果
     assert pr_result["result_type"] in ("ranked_candidates", "no_eligible_candidate")
     assert pr_result["evaluated_candidate_count"] > 0
@@ -181,11 +151,12 @@ def test_first_run_complete_chain(tmp_path: Path) -> dict:
     assert pr_result["approved_for_production"] is False
 
     # 10. 反查
-    run_detail = cog_gov_service.get_priority_run(priority_run_id)
+    cog_gov_service = ids["cog_gov_service"]
+    run_detail = cog_gov_service.get_priority_run(ids["priority_run_id"])
     assert run_detail is not None
-    assert run_detail["priority_run_id"] == priority_run_id
-    assert run_detail["thesis_id"] == thesis_id
-    assert run_detail["candidate_set_id"] == candidate_set_id
+    assert run_detail["priority_run_id"] == ids["priority_run_id"]
+    assert run_detail["thesis_id"] == ids["thesis_id"]
+    assert run_detail["candidate_set_id"] == ids["candidate_set_id"]
 
     # 11. 验证五档分组存在(实际字段名为 candidates_by_tier)
     for tier in (
@@ -197,21 +168,13 @@ def test_first_run_complete_chain(tmp_path: Path) -> dict:
     ):
         assert tier in run_detail.get("candidates_by_tier", {})
 
-    return {
-        "user_input_id": user_input_id,
-        "thesis_id": thesis_id,
-        "candidate_set_id": candidate_set_id,
-        "priority_run_id": priority_run_id,
-        "gov_db": str(gov_db),
-    }
-
 
 # ============================================================
 # 测试 2: 重复运行不重复
 # ============================================================
 def test_repeat_run_does_not_duplicate(tmp_path: Path) -> None:
     """同参数重复运行不创建新记录。"""
-    ids = test_first_run_complete_chain(tmp_path)
+    ids = _build_complete_chain(tmp_path)
 
     # 重新创建 service
     gov_db = Path(ids["gov_db"])
@@ -245,7 +208,7 @@ def test_repeat_run_does_not_duplicate(tmp_path: Path) -> None:
 # ============================================================
 def test_new_snapshot_generates_new_run(tmp_path: Path) -> None:
     """新 snapshot 生成新 CandidateSet/PriorityRun,旧结果保留。"""
-    ids = test_first_run_complete_chain(tmp_path)
+    ids = _build_complete_chain(tmp_path)
 
     # 创建第二个快照(指向另一个认知数据库,但 snapshot_id 不同)
     gov_db = Path(ids["gov_db"])
@@ -323,7 +286,7 @@ def test_new_snapshot_generates_new_run(tmp_path: Path) -> None:
 # ============================================================
 def test_api_reverse_lookup(tmp_path: Path) -> None:
     """通过 API 反查全链 ID。"""
-    ids = test_first_run_complete_chain(tmp_path)
+    ids = _build_complete_chain(tmp_path)
     gov_db = ids["gov_db"]
 
     # 创建 app 和 client
