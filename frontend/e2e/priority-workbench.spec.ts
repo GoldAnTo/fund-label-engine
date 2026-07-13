@@ -36,10 +36,10 @@ const priorityRunPayload = {
     as_of_date: "2026-07-01",
     created_at: "2026-07-01T08:00:00Z",
     next_review_at: "2026-10-01",
-    supporting_evidence: null,
-    opposing_evidence: null,
-    key_metrics: null,
-    catalysts: null,
+    supporting_evidence: ["居民可支配收入连续三年增长5%以上", "消费行业集中度提升"],
+    opposing_evidence: ["短期消费数据波动", "部分子行业估值偏高"],
+    key_metrics: ["居民可支配收入增速", "社零总额同比", "消费行业PE分位"],
+    catalysts: ["年报季披露", "消费刺激政策落地"],
     invalidation_conditions: ["居民收入增速低于3%", "消费行业政策重大变化"],
   },
   research_input: {
@@ -217,6 +217,18 @@ test("thesis title and belief_statement are displayed", async ({ page }) => {
   await expect(page.locator("text=看好消费升级方向")).toBeVisible();
   // 失效条件
   await expect(page.locator("text=居民收入增速低于3%")).toBeVisible();
+  // 支持证据
+  await expect(page.locator("h3:has-text('支持证据')").first()).toBeVisible();
+  await expect(page.locator("text=居民可支配收入连续三年增长5%以上")).toBeVisible();
+  // 反对证据
+  await expect(page.locator("h3:has-text('反对证据')").first()).toBeVisible();
+  await expect(page.locator("text=短期消费数据波动")).toBeVisible();
+  // 催化剂
+  await expect(page.locator("h3:has-text('催化剂')").first()).toBeVisible();
+  await expect(page.locator("text=年报季披露")).toBeVisible();
+  // 关键指标
+  await expect(page.locator("h3:has-text('关键指标')").first()).toBeVisible();
+  await expect(page.locator("text=居民可支配收入增速").first()).toBeVisible();
   // 候选集统计
   await expect(page.locator("text=不相关：1")).toBeVisible();
 });

@@ -391,6 +391,62 @@ export default function PriorityWorkbenchPage() {
               </div>
             )}
 
+          {/* 支持证据 */}
+          {detail.thesis?.supporting_evidence &&
+            Array.isArray(detail.thesis.supporting_evidence) &&
+            detail.thesis.supporting_evidence.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <h3 style={{ margin: "0 0 4px", color: "var(--pos-text)" }}>支持证据</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--text-2)" }}>
+                  {detail.thesis.supporting_evidence.map((c, i) => (
+                    <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+          {/* 反对证据 */}
+          {detail.thesis?.opposing_evidence &&
+            Array.isArray(detail.thesis.opposing_evidence) &&
+            detail.thesis.opposing_evidence.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <h3 style={{ margin: "0 0 4px", color: "var(--warn-text)" }}>反对证据</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--text-2)" }}>
+                  {detail.thesis.opposing_evidence.map((c, i) => (
+                    <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+          {/* 催化剂 */}
+          {detail.thesis?.catalysts &&
+            Array.isArray(detail.thesis.catalysts) &&
+            detail.thesis.catalysts.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <h3 style={{ margin: "0 0 4px", color: "var(--accent-text)" }}>催化剂</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--text-2)" }}>
+                  {detail.thesis.catalysts.map((c, i) => (
+                    <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+          {/* 关键指标 */}
+          {detail.thesis?.key_metrics &&
+            Array.isArray(detail.thesis.key_metrics) &&
+            detail.thesis.key_metrics.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <h3 style={{ margin: "0 0 4px" }}>关键指标</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--text-2)" }}>
+                  {detail.thesis.key_metrics.map((c, i) => (
+                    <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
           {/* 非生产警告条 */}
           {!detail.approved_for_production && (
             <div
