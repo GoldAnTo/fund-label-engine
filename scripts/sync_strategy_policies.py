@@ -24,10 +24,15 @@ import json
 import os
 import sqlite3
 import sys
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+# 注册自定义日期适配器，避免 Python 3.12+ 弃用默认适配器的警告
+sqlite3.register_adapter(date, lambda d: d.isoformat())
+sqlite3.register_adapter(datetime, lambda dt: dt.isoformat())
 
 # 把项目根目录加入 sys.path,让 migration runner 可用
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
