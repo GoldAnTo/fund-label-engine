@@ -16,7 +16,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from app.persistence.governance import GovernanceRepository
 from app.persistence.migrations_runner import run_migrations
 from app.services.governance_service import (
@@ -60,31 +59,31 @@ def service(gov_db: Path) -> GovernanceService:
 
 def _create_research_input(service: GovernanceService, **kwargs) -> str:
     """创建一条 ResearchInput,返回 user_input_id。"""
-    defaults = dict(
-        input_type="philosophy",
-        business_mode="private_strategy",
-        strategy_policy_id="p1",
-        strategy_policy_version=1,
-        actor_role="researcher",
-        actor_id="researcher_001",
-        request_source="ad_hoc_research",
-        raw_text="我看好消费白马",
-        data_snapshot_id="snap1",
-    )
+    defaults = {
+        "input_type": "philosophy",
+        "business_mode": "private_strategy",
+        "strategy_policy_id": "p1",
+        "strategy_policy_version": 1,
+        "actor_role": "researcher",
+        "actor_id": "researcher_001",
+        "request_source": "ad_hoc_research",
+        "raw_text": "我看好消费白马",
+        "data_snapshot_id": "snap1",
+    }
     defaults.update(kwargs)
     result = service.create_research_input(**defaults)
     return result["user_input_id"]
 
 
 def _create_thesis(service: GovernanceService, uid: str, **kwargs) -> str:
-    defaults = dict(
-        user_input_id=uid,
-        strategy_policy_id="p1",
-        strategy_policy_version=1,
-        title="消费白马配置",
-        belief_statement="消费白马是核心",
-        actor_id="researcher_001",
-    )
+    defaults = {
+        "user_input_id": uid,
+        "strategy_policy_id": "p1",
+        "strategy_policy_version": 1,
+        "title": "消费白马配置",
+        "belief_statement": "消费白马是核心",
+        "actor_id": "researcher_001",
+    }
     defaults.update(kwargs)
     result = service.create_thesis(**defaults)
     return result["thesis_id"]
@@ -470,6 +469,39 @@ class TestCandidateSet:
                 candidates=[{"asset_type": "fund"}],  # 缺 asset_code
                 actor_id="r1",
             )
+
+    def test_create_candidates_generates_legacy_header(
+        self, service: GovernanceService, gov_db: Path
+    ):
+        """旧 create_candidates() 仍可使用,自动生成 legacy_governance_v0 header。"""
+        uid = _create_research_input(service)
+        tid = _create_thesis(service, uid)
+        result = service.create_candidates(
+            thesis_id=tid,
+            user_input_id=uid,
+            candidates=[
+                {"asset_type": "fund", "asset_code": "000001", "asset_name": "A"},
+                {"asset_type": "fund", "asset_code": "000002", "asset_name": "B"},
+            ],
+            actor_id="r1",
+        )
+        cs_id = result["candidate_set_id"]
+
+        # 检查 candidate_set_headers 表中自动生成了 header
+        conn = sqlite3.connect(str(gov_db))
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM candidate_set_headers WHERE candidate_set_id = ?",
+            (cs_id,),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row["source_method_version"] == "legacy_governance_v0"
+        assert row["thesis_id"] == tid
+        assert row["user_input_id"] == uid
+        assert row["scanned_fund_count"] == 2
+        assert row["mapped_candidate_count"] == 2
+        assert row["unmapped_due_to_data_count"] == 0
 
 
 # ============================================================

@@ -1,24 +1,35 @@
-"""治理核心 API Router:研究请求 / 候选集合。
+"""治理核心 API Router:研究请求 / 候选集合 / 优先级评价。
 
 路由:
     POST /v1/governance/research-inputs         创建研究请求
     GET  /v1/governance/research-inputs/{input_id}  查询研究请求
     GET  /v1/governance/candidate-sets/{candidate_set_id}  查询候选集合(含反查链路)
+    POST /v1/governance/theses/{thesis_id}/candidate-sets  从投资假设生成 CandidateSet
+    POST /v1/governance/theses/{thesis_id}/candidate-priority-runs  创建优先级评价
+    GET  /v1/governance/candidate-priority-runs/{priority_run_id}  查询优先级结果
+    GET  /v1/governance/theses/{thesis_id}/candidate-priority-runs  查询历史评价
 
 领域异常 -> HTTP 状态码:
     PolicyNotFoundError / ResearchInputNotFoundError / SnapshotNotFoundError -> 404
     DuplicateResearchInputError -> 409
     InvalidStatusTransitionError -> 422
     GovernanceError(其他) -> 422
+
+    ThesisNotFoundError / CandidateSetNotFoundError / SnapshotNotFoundError /
+    PolicyNotFoundError(认知治理) -> 404
+    DuplicateCandidateSetError / DuplicatePriorityRunError -> 409
+    StructuredIntentIncompleteError / CandidatePriorityConfigurationError -> 422
+    CandidateDataSourceUnavailableError -> 503
 """
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
-
+from app.persistence.candidate_priority import CandidatePriorityRepository
 from app.persistence.governance import GovernanceRepository
+from app.services import cognition_governance_service as _cgs
+from app.services.candidate_priority import CandidatePriorityConfigurationError
+from app.services.cognition_governance_service import CognitionGovernanceService
 from app.services.governance_service import (
     DuplicateResearchInputError,
     GovernanceError,
@@ -28,6 +39,8 @@ from app.services.governance_service import (
     ResearchInputNotFoundError,
     SnapshotNotFoundError,
 )
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 
 
 # ============================================================
@@ -69,6 +82,40 @@ class CandidateSetResponse(BaseModel):
     candidates: list[dict[str, Any]] = []
 
 
+class CreateCandidateSetRequest(BaseModel):
+    """从投资假设生成 CandidateSet 的请求。"""
+    data_snapshot_id: str
+    actor_id: str
+
+
+class CreatePriorityRunRequest(BaseModel):
+    """创建优先级评价的请求。"""
+    candidate_set_id: str
+    data_snapshot_id: str
+    ranking_method_version: str
+    actor_id: str
+
+
+class CreateCandidateSetResponse(BaseModel):
+    """CandidateSet 创建响应。"""
+    candidate_set_id: str
+    thesis_id: str
+    mapped_candidate_count: int
+    scanned_fund_count: int
+    unmapped_due_to_data_count: int
+    data_snapshot_id: str
+
+
+class CreatePriorityRunResponse(BaseModel):
+    """PriorityRun 创建响应。"""
+    priority_run_id: str
+    result_type: str
+    evaluated_candidate_count: int
+    eligible_candidate_count: int
+    tier_counts: dict[str, Any] = Field(default_factory=dict)
+    approved_for_production: bool
+
+
 # ============================================================
 # 依赖
 # ============================================================
@@ -94,6 +141,31 @@ def get_governance_service(request: Request) -> GovernanceService:
         repo = GovernanceRepository(db_path)
         request.app.state.governance_service = GovernanceService(repo)
     return request.app.state.governance_service
+
+
+def get_cognition_governance_service(request: Request) -> CognitionGovernanceService:
+    """从 app.state 获取 CognitionGovernanceService(延迟初始化)。
+
+    复用 governance DB 路径选择逻辑:
+        1. output_db_path(双库模式的输出库,治理数据应写入这里)
+        2. db_path(单库模式)
+        3. source_db_path(最后兜底)
+    """
+    if not hasattr(request.app.state, "cognition_governance_service"):
+        db_path = (
+            getattr(request.app.state, "output_db_path", None)
+            or getattr(request.app.state, "db_path", None)
+            or getattr(request.app.state, "source_db_path", None)
+        )
+        if not db_path:
+            raise HTTPException(status_code=503, detail="数据库未配置")
+        gov_repo = GovernanceRepository(db_path)
+        priority_repo = CandidatePriorityRepository(db_path)
+        request.app.state.cognition_governance_service = CognitionGovernanceService(
+            governance_repo=gov_repo,
+            priority_repo=priority_repo,
+        )
+    return request.app.state.cognition_governance_service
 
 
 def _get_source_ip(request: Request) -> str | None:
@@ -127,6 +199,36 @@ def _map_governance_error(exc: GovernanceError) -> HTTPException:
         return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, InvalidStatusTransitionError):
         return HTTPException(status_code=422, detail=str(exc))
+    return HTTPException(status_code=422, detail=str(exc))
+
+
+def _map_cognition_error(exc: Exception) -> HTTPException:
+    """把认知治理领域异常映射到 HTTP 状态码。
+
+    ThesisNotFoundError / CandidateSetNotFoundError / SnapshotNotFoundError /
+    PolicyNotFoundError -> 404
+    DuplicateCandidateSetError / DuplicatePriorityRunError -> 409
+    StructuredIntentIncompleteError / CandidatePriorityConfigurationError -> 422
+    CandidateDataSourceUnavailableError -> 503
+    其他 GovernanceError -> 422
+    """
+    if isinstance(exc, (
+        _cgs.ThesisNotFoundError,
+        _cgs.CandidateSetNotFoundError,
+        _cgs.SnapshotNotFoundError,
+        _cgs.PolicyNotFoundError,
+    )):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, _cgs.DuplicateCandidateSetError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, _cgs.DuplicatePriorityRunError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, _cgs.StructuredIntentIncompleteError):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, CandidatePriorityConfigurationError):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, _cgs.CandidateDataSourceUnavailableError):
+        return HTTPException(status_code=503, detail=str(exc))
     return HTTPException(status_code=422, detail=str(exc))
 
 
@@ -246,3 +348,101 @@ def get_candidate_set(
         data_snapshot_id=data_snapshot_id,
         candidates=candidates,
     )
+
+
+# ============================================================
+# 认知治理 API: CandidateSet 生成 + PriorityRun 编排
+# ============================================================
+@router.post(
+    "/theses/{thesis_id}/candidate-sets",
+    response_model=CreateCandidateSetResponse,
+    status_code=201,
+    summary="从投资假设生成 CandidateSet",
+)
+def create_candidate_set(
+    thesis_id: str,
+    request_body: CreateCandidateSetRequest,
+    request: Request,
+    service: CognitionGovernanceService = Depends(get_cognition_governance_service),
+) -> CreateCandidateSetResponse:
+    """从投资假设生成 CandidateSet。
+
+    - 根据 thesis_id 读取投资假设和结构化意图
+    - 用 data_snapshot_id 对应的数据快照构建 CognitionEngine
+    - 调用认知引擎生成基金候选证据并写入候选集合
+    - source_ip 从请求上下文自动获取,不从 body 传入
+    """
+    try:
+        result = service.create_candidate_set(
+            thesis_id=thesis_id,
+            data_snapshot_id=request_body.data_snapshot_id,
+            actor_id=request_body.actor_id,
+            source_ip=_get_source_ip(request),
+        )
+        return CreateCandidateSetResponse(**result)
+    except (_cgs.GovernanceError, CandidatePriorityConfigurationError) as exc:
+        raise _map_cognition_error(exc) from exc
+
+
+@router.post(
+    "/theses/{thesis_id}/candidate-priority-runs",
+    response_model=CreatePriorityRunResponse,
+    status_code=201,
+    summary="创建优先级评价",
+)
+def create_priority_run(
+    thesis_id: str,
+    request_body: CreatePriorityRunRequest,
+    request: Request,
+    service: CognitionGovernanceService = Depends(get_cognition_governance_service),
+) -> CreatePriorityRunResponse:
+    """创建优先级评价运行。
+
+    - 校验 thesis / candidate_set / snapshot / policy 对齐
+    - 读取候选证据并在内存中完成评价和档内排序
+    - 原子写入 run + results + audit
+    - no_eligible_candidate 也是成功状态(201),不是错误
+    - source_ip 从请求上下文自动获取,不从 body 传入
+    """
+    try:
+        result = service.create_priority_run(
+            thesis_id=thesis_id,
+            candidate_set_id=request_body.candidate_set_id,
+            data_snapshot_id=request_body.data_snapshot_id,
+            ranking_method_version=request_body.ranking_method_version,
+            actor_id=request_body.actor_id,
+            source_ip=_get_source_ip(request),
+        )
+        return CreatePriorityRunResponse(**result)
+    except (_cgs.GovernanceError, CandidatePriorityConfigurationError) as exc:
+        raise _map_cognition_error(exc) from exc
+
+
+@router.get(
+    "/candidate-priority-runs/{priority_run_id}",
+    summary="查询优先级结果",
+)
+def get_priority_run(
+    priority_run_id: str,
+    service: CognitionGovernanceService = Depends(get_cognition_governance_service),
+) -> dict[str, Any]:
+    """查询优先级评价详情,按固定五档分组返回候选列表。不存在返回 404。"""
+    result = service.get_priority_run(priority_run_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"优先级评价不存在: {priority_run_id}",
+        )
+    return result
+
+
+@router.get(
+    "/theses/{thesis_id}/candidate-priority-runs",
+    summary="查询投资假设的历史评价",
+)
+def list_priority_runs(
+    thesis_id: str,
+    service: CognitionGovernanceService = Depends(get_cognition_governance_service),
+) -> list[dict[str, Any]]:
+    """按投资假设查询历史 PriorityRun 列表。"""
+    return service.list_priority_runs(thesis_id)

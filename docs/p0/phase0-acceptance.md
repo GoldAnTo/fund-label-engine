@@ -175,3 +175,54 @@
 - 投研负责人:_____________  日期:_____________
 - 风险负责人:_____________  日期:_____________
 - 产品/运营:_____________    日期:_____________
+
+---
+
+## 阶段 1：基金候选优先级 v0
+
+### 实现内容摘要
+
+阶段 1 在阶段 0 治理核心表的基础上，实现了基金候选优先级 v0 的完整链路：
+
+1. **CandidatePriorityEngine**（纯规则引擎）：执行策略硬门禁、数据可信度门禁、估值软门禁和五档分组（research_now / research_next / valuation_watch / data_insufficient / excluded），生成稳定原因码和档内排序。
+2. **HoldingSourceAdapter**（持仓适配器）：统一 stock_holdings 和 fund_stock_holdings 两种持仓表结构，提供报告期查询和持仓加载。
+3. **CognitionEngine.build_fund_candidate_evidence()**：构建完整基金候选证据（不截断），返回 FundCandidateEvidenceBatch，供治理链路使用。
+4. **0016 migration**：新增 candidate_set_headers 表、candidate_priority_runs / candidate_priority_results 表、candidate_priority_json 列，PriorityResult 整行不可变。
+5. **GovernanceRepository**：CandidateSet 头表持久化、幂等键检查、候选冻结证据存储。
+6. **CandidatePriorityRepository**：PriorityRun / PriorityResult 持久化、幂等键查询、按 thesis 历史查询。
+7. **CognitionGovernanceService**：编排服务，从投资假设生成 CandidateSet（调用 CognitionEngine），编排 PriorityRun（调用 CandidatePriorityEngine），原子写入 run + results + audit。
+8. **四个治理 API 路由**：
+   - POST /v1/governance/theses/{thesis_id}/candidate-sets
+   - POST /v1/governance/theses/{thesis_id}/candidate-priority-runs
+   - GET /v1/governance/candidate-priority-runs/{priority_run_id}
+   - GET /v1/governance/theses/{thesis_id}/candidate-priority-runs
+
+### 端到端 smoke 测试
+
+测试文件：`backend/tests/test_smoke_candidate_priority.py`
+
+测试使用真实认知数据库（`_make_cognition_db`），不使用 Mock，验证完整链路：
+ResearchInput -> Thesis -> Cognition evidence -> CandidateSet -> CandidatePriorityRun -> CandidatePriorityResult -> API reverse lookup
+
+覆盖场景：
+1. 完整链路首次运行（含五档分组验证）
+2. 同参数重复运行不创建新记录（DuplicateCandidateSetError / DuplicatePriorityRunError）
+3. 新快照生成新 PriorityRun，旧结果保留
+4. API 反查全链 ID（GET 详情 + GET 历史评价）
+
+运行命令：
+
+```bash
+.venv/bin/python -m pytest backend/tests/test_smoke_candidate_priority.py -q
+```
+
+lint 命令：
+
+```bash
+.venv/bin/python -m ruff check backend/tests/test_smoke_candidate_priority.py
+```
+
+### 实际测试结果
+
+- smoke 端到端测试：4 passed
+- ruff lint：All checks passed

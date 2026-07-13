@@ -15,9 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from app.persistence.migrations_runner import (
-    applied_ids,
     list_migrations,
     run_migrations,
 )
@@ -320,6 +318,15 @@ class TestGovernanceTriggers:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             ("th_c1", "ri_c1", "private_equity_growth", 1, "t", "b", "o", "draft"),
         )
+        # 0016 后 candidate_sets 有 FK 到 candidate_set_headers,需先插 header
+        c.execute(
+            """INSERT INTO candidate_set_headers
+                (candidate_set_id, thesis_id, user_input_id, data_snapshot_id,
+                 source_method_version, scanned_fund_count, mapped_candidate_count,
+                 unmapped_due_to_data_count, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("cs_c1", "th_c1", "ri_c1", "snap_test1", "fund_candidate_evidence_v0", 1, 1, 0, "system"),
+        )
         c.execute(
             """INSERT INTO candidate_sets
                 (candidate_id, candidate_set_id, thesis_id, user_input_id,
@@ -354,6 +361,15 @@ class TestGovernanceTriggers:
                  title, belief_statement, owner, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             ("th_v1", "ri_v1", "private_equity_growth", 1, "消费白马", "消费白马是核心", "owner", "draft"),
+        )
+        # 0016 后 candidate_sets 有 FK 到 candidate_set_headers,需先插 header
+        c.execute(
+            """INSERT INTO candidate_set_headers
+                (candidate_set_id, thesis_id, user_input_id, data_snapshot_id,
+                 source_method_version, scanned_fund_count, mapped_candidate_count,
+                 unmapped_due_to_data_count, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("cs_v1", "th_v1", "ri_v1", "snap_test1", "fund_candidate_evidence_v0", 1, 1, 0, "system"),
         )
         c.execute(
             """INSERT INTO candidate_sets
@@ -390,7 +406,7 @@ class TestStrategyPolicySync:
             rows = conn.execute(
                 "SELECT policy_id, version, business_mode, policy_status FROM strategy_policies ORDER BY policy_id"
             ).fetchall()
-            assert len(rows) == 2, f"expected 2 policies, got {len(rows)}: {rows}"
+            assert len(rows) == 3, f"expected 3 policies, got {len(rows)}: {rows}"
             ids = {r[0] for r in rows}
             assert "private_equity_growth" in ids
             assert "foof_growth" in ids

@@ -4,47 +4,97 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from app.cognition.holding_source import (
+    HoldingSourceAdapter,
+    HoldingSourceUnavailableError,
+)
+
 
 def get_holdings(
     conn: sqlite3.Connection,
     fund_code: str,
     report_period: str | None = None,
 ) -> list[dict[str, Any]]:
-    """获取基金持仓，关联行业和因子（子查询方式获取因子，避免多 LEFT JOIN 问题）。"""
-    if report_period is None:
-        row = conn.execute(
-            "SELECT MAX(report_period) FROM stock_holdings WHERE fund_code = ?",
-            (fund_code,),
-        ).fetchone()
-        report_period = row[0] if row else None
-    if not report_period:
+    """获取基金持仓，关联行业和因子。
+
+    内部使用 HoldingSourceAdapter 读取基础持仓（统一字段），
+    再批量补充行业映射和因子数据。
+    如果持仓表不存在，返回空列表（向后兼容）。
+    """
+    try:
+        adapter = HoldingSourceAdapter(conn)
+    except HoldingSourceUnavailableError:
         return []
 
-    rows = conn.execute(
-        """
-        SELECT h.stock_code, h.stock_name, h.net_value_ratio AS weight,
-               COALESCE(m.sector_group, 'other') AS sector_group,
-               COALESCE(m.industry_name, '未知') AS industry_name,
-               (SELECT f.factor_value FROM factordb.stock_factor_values f
-                WHERE f.stock_code = h.stock_code AND f.factor_code = 'pe') AS pe,
-               (SELECT f.factor_value FROM factordb.stock_factor_values f
-                WHERE f.stock_code = h.stock_code AND f.factor_code = 'pb') AS pb,
-               (SELECT f.factor_value FROM factordb.stock_factor_values f
-                WHERE f.stock_code = h.stock_code AND f.factor_code = 'roe') AS roe,
-               (SELECT f.factor_value FROM factordb.stock_factor_values f
-                WHERE f.stock_code = h.stock_code AND f.factor_code = 'dividend_yield') AS dividend_yield,
-               (SELECT f.factor_value FROM factordb.stock_factor_values f
-                WHERE f.stock_code = h.stock_code AND f.factor_code = 'profit_growth') AS profit_growth,
-               (SELECT f.factor_value FROM factordb.stock_factor_values f
-                WHERE f.stock_code = h.stock_code AND f.factor_code = 'valuation_percentile') AS val_pct
-        FROM stock_holdings h
-        LEFT JOIN stock_industry_map m ON h.stock_code = m.stock_code
-        WHERE h.fund_code = ? AND h.report_period = ? AND h.net_value_ratio IS NOT NULL AND h.net_value_ratio > 0
-        ORDER BY h.net_value_ratio DESC
-        """,
-        (fund_code, report_period),
-    ).fetchall()
-    return [dict(r) for r in rows]
+    # 读取基础持仓（已按权重降序排列，已过滤 weight > 0）
+    base = adapter.load_holdings(fund_code, report_period)
+    if not base:
+        return []
+
+    # 安全过滤：确保 weight 有效
+    base = [h for h in base if h["weight"] is not None and h["weight"] > 0]
+    if not base:
+        return []
+
+    stock_codes = [h["stock_code"] for h in base]
+    placeholders = ",".join("?" * len(stock_codes))
+
+    # 批量查询行业映射
+    industry_map: dict[str, dict[str, Any]] = {}
+    try:
+        rows = conn.execute(
+            f"SELECT stock_code, sector_group, industry_name "
+            f"FROM stock_industry_map WHERE stock_code IN ({placeholders})",
+            stock_codes,
+        ).fetchall()
+        for r in rows:
+            industry_map[r[0]] = {"sector_group": r[1], "industry_name": r[2]}
+    except Exception:
+        pass
+
+    # 批量查询因子数据（factordb 未 attach 时静默降级）
+    factor_map: dict[str, dict[str, Any]] = {}
+    try:
+        rows = conn.execute(
+            f"SELECT stock_code, factor_code, factor_value "
+            f"FROM factordb.stock_factor_values WHERE stock_code IN ({placeholders})",
+            stock_codes,
+        ).fetchall()
+        for r in rows:
+            factor_map.setdefault(r[0], {})[r[1]] = r[2]
+    except Exception:
+        pass
+
+    # 组装返回结果，保持字段名和值与原实现一致
+    result: list[dict[str, Any]] = []
+    for h in base:
+        stock_code = h["stock_code"]
+        ind = industry_map.get(stock_code, {})
+        factors = factor_map.get(stock_code, {})
+
+        sector_group = ind.get("sector_group")
+        if sector_group is None:
+            sector_group = "other"
+
+        industry_name = ind.get("industry_name")
+        if industry_name is None:
+            industry_name = "未知"
+
+        result.append({
+            "stock_code": stock_code,
+            "stock_name": h["stock_name"],
+            "weight": h["weight"],
+            "sector_group": sector_group,
+            "industry_name": industry_name,
+            "pe": factors.get("pe"),
+            "pb": factors.get("pb"),
+            "roe": factors.get("roe"),
+            "dividend_yield": factors.get("dividend_yield"),
+            "profit_growth": factors.get("profit_growth"),
+            "val_pct": factors.get("valuation_percentile"),
+        })
+
+    return result
 
 
 def match_theme(holdings: list[dict[str, Any]], theme: dict[str, Any]) -> dict[str, Any]:
@@ -86,12 +136,12 @@ def match_theme(holdings: list[dict[str, Any]], theme: dict[str, Any]) -> dict[s
 
 
 def _get_recent_periods(conn: sqlite3.Connection, fund_code: str, n: int = 4) -> list[str]:
-    rows = conn.execute(
-        "SELECT DISTINCT report_period FROM stock_holdings "
-        "WHERE fund_code = ? ORDER BY report_period DESC LIMIT ?",
-        (fund_code, n),
-    ).fetchall()
-    return [r[0] for r in rows]
+    """获取基金最近 N 个报告期（倒序）。使用适配器以兼容两种表结构。"""
+    try:
+        adapter = HoldingSourceAdapter(conn)
+    except HoldingSourceUnavailableError:
+        return []
+    return adapter.list_report_dates(fund_code, limit=n)
 
 
 def calculate_holding_trend(

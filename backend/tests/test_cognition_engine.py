@@ -12,13 +12,13 @@ from app.cognition.engine import CognitionEngine
 from app.cognition.expectation_gap import calculate_link_expectation_gap
 from app.cognition.portfolio_builder import build_portfolio, calculate_overlap
 from app.cognition.theme_registry import load_themes
+from app.cognition.validator import validate_cognition
 from app.cognition.valuation_gate import (
     calculate_valuation,
     check_hard_limits,
     estimate_price_in_years,
     suggest_max_weight,
 )
-from app.cognition.validator import validate_cognition
 
 
 # ============================================================
@@ -1212,9 +1212,9 @@ def test_evidence_traceability_structure(tmp_path: Path) -> None:
         for key in ("supporting_evidence", "opposing_evidence", "warnings"):
             for ev in validation[key]:
                 assert isinstance(ev, dict), f"{key} 中的证据应该是dict"
-                assert "claim" in ev, f"证据缺少claim字段"
-                assert "source" in ev, f"证据缺少source字段"
-                assert "source_type" in ev, f"证据缺少source_type字段"
+                assert "claim" in ev, "证据缺少claim字段"
+                assert "source" in ev, "证据缺少source字段"
+                assert "source_type" in ev, "证据缺少source_type字段"
                 assert ev["source_type"] in _VALID_SOURCE_TYPES, \
                     f"source_type={ev['source_type']} 不在合法集合中"
                 assert isinstance(ev["claim"], str) and len(ev["claim"]) > 0
@@ -1798,6 +1798,7 @@ def test_calculate_portfolio_metrics_industry_exposure_is_percentage() -> None:
     修复后：line 303 改为 round(v, 1)，直接返回 percentage
     """
     import sqlite3
+
     from app.cognition.portfolio_builder import calculate_portfolio_metrics
 
     conn = sqlite3.connect(":memory:")
@@ -1842,6 +1843,7 @@ def test_calculate_portfolio_metrics_industry_exposure_is_percentage() -> None:
 def test_calculate_portfolio_metrics_holdings_penetration_is_percentage() -> None:
     """holdings_penetration.weight 应是 percentage（0-100 范围）。"""
     import sqlite3
+
     from app.cognition.portfolio_builder import calculate_portfolio_metrics
 
     conn = sqlite3.connect(":memory:")
@@ -1867,3 +1869,94 @@ def test_calculate_portfolio_metrics_holdings_penetration_is_percentage() -> Non
     assert hp[0]["weight"] < 10, f"持仓穿透应是百分比，实际 {hp[0]['weight']}"
     assert hp[0]["weight"] > 0
     assert 0 < hp[0]["weight"] < 5
+
+
+# ============================================================
+# build_fund_candidate_evidence：完整候选证据接口
+# ============================================================
+def test_build_fund_candidate_evidence_returns_all_candidates(tmp_path: Path) -> None:
+    """build_fund_candidate_evidence 返回所有候选，不受 top_n 截断。"""
+    source_db, factor_db = _make_cognition_db(tmp_path)
+    engine = CognitionEngine(source_db, factor_db)
+    try:
+        evidence = engine.build_fund_candidate_evidence(
+            direction="consumer",
+            conviction="medium",
+            time_horizon="long",
+            risk_tolerance="moderate",
+            data_snapshot_id="snap1",
+            as_of_date="2026-01-15",
+        )
+        # 返回所有候选，不受 top_n 截断
+        assert len(evidence.all_candidates) > 1
+        # scanned_fund_count 等于数据库中基金数
+        assert evidence.scanned_fund_count == 3
+        # 权重都是 0..1 小数
+        for c in evidence.all_candidates:
+            assert 0 <= c.matched_holding_weight <= 1
+            assert 0 <= c.disclosed_holding_weight <= 1
+            assert 0 <= c.normalized_match_pct <= 1
+    finally:
+        engine.close()
+
+
+def test_build_fund_candidate_evidence_independent_of_top_n(tmp_path: Path) -> None:
+    """build_fund_candidate_evidence 返回完整集合，与 run() 的 top_n 截断无关。"""
+    source_db, factor_db = _make_cognition_db(tmp_path)
+    engine = CognitionEngine(source_db, factor_db)
+    try:
+        # run() 只返回 top_n=1
+        result = engine.run("consumer", top_n=1)
+        assert len(result["step4_fund_matches"]) == 1
+        # 但 build_fund_candidate_evidence() 返回完整集合
+        evidence = engine.build_fund_candidate_evidence(
+            direction="consumer",
+            conviction="medium",
+            time_horizon="long",
+            risk_tolerance="moderate",
+            data_snapshot_id="snap1",
+            as_of_date="2026-01-15",
+        )
+        assert len(evidence.all_candidates) > 1
+    finally:
+        engine.close()
+
+
+def test_build_fund_candidate_evidence_has_mapped_and_unmapped_counts(tmp_path: Path) -> None:
+    """scanned_fund_count == mapped_candidate_count + unmapped_due_to_data_count。"""
+    source_db, factor_db = _make_cognition_db(tmp_path)
+    engine = CognitionEngine(source_db, factor_db)
+    try:
+        evidence = engine.build_fund_candidate_evidence(
+            direction="consumer",
+            conviction="medium",
+            time_horizon="long",
+            risk_tolerance="moderate",
+            data_snapshot_id="snap1",
+            as_of_date="2026-01-15",
+        )
+        assert evidence.mapped_candidate_count > 0
+        assert (
+            evidence.scanned_fund_count
+            == evidence.mapped_candidate_count + evidence.unmapped_due_to_data_count
+        )
+    finally:
+        engine.close()
+
+
+def test_build_fund_candidate_evidence_has_valuation_gated(tmp_path: Path) -> None:
+    """valuation_gated_candidates 是被估值门禁拦下的基金元组。"""
+    source_db, factor_db = _make_cognition_db(tmp_path)
+    engine = CognitionEngine(source_db, factor_db)
+    try:
+        evidence = engine.build_fund_candidate_evidence(
+            direction="consumer",
+            conviction="medium",
+            time_horizon="long",
+            risk_tolerance="moderate",
+            data_snapshot_id="snap1",
+            as_of_date="2026-01-15",
+        )
+        assert isinstance(evidence.valuation_gated_candidates, tuple)
+    finally:
+        engine.close()

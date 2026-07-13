@@ -286,6 +286,97 @@ class GovernanceTransaction:
         return _row_to_thesis(row)
 
     # ----------------------------------------------------------
+    # candidate_set_headers(集合头)
+    # ----------------------------------------------------------
+    def insert_candidate_set_header(
+        self,
+        *,
+        candidate_set_id: str,
+        thesis_id: str,
+        user_input_id: str,
+        data_snapshot_id: str | None,
+        source_method_version: str,
+        scanned_fund_count: int,
+        mapped_candidate_count: int,
+        unmapped_due_to_data_count: int,
+        created_by: str,
+    ) -> str:
+        """插入 CandidateSet 集合头。返回 candidate_set_id。
+
+        外键约束:thesis_id / user_input_id 必须已存在;
+                  data_snapshot_id 必须已存在(若非 None)。
+        """
+        self._conn.execute(
+            """
+            INSERT INTO candidate_set_headers (
+                candidate_set_id, thesis_id, user_input_id, data_snapshot_id,
+                source_method_version, scanned_fund_count, mapped_candidate_count,
+                unmapped_due_to_data_count, created_by, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                candidate_set_id,
+                thesis_id,
+                user_input_id,
+                data_snapshot_id,
+                source_method_version,
+                scanned_fund_count,
+                mapped_candidate_count,
+                unmapped_due_to_data_count,
+                created_by,
+                _now_iso(),
+            ),
+        )
+        return candidate_set_id
+
+    def get_candidate_set_header(self, candidate_set_id: str) -> dict[str, Any] | None:
+        """查询 CandidateSet 集合头。返回 dict 或 None。"""
+        row = self._conn.execute(
+            "SELECT * FROM candidate_set_headers WHERE candidate_set_id = ?",
+            (candidate_set_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_candidate_set_header_by_key(
+        self,
+        thesis_id: str,
+        data_snapshot_id: str | None,
+        source_method_version: str,
+    ) -> dict[str, Any] | None:
+        """按幂等键 (thesis_id, data_snapshot_id, source_method_version) 查询 header。"""
+        if data_snapshot_id is None:
+            row = self._conn.execute(
+                "SELECT * FROM candidate_set_headers "
+                "WHERE thesis_id = ? AND data_snapshot_id IS NULL "
+                "AND source_method_version = ?",
+                (thesis_id, source_method_version),
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT * FROM candidate_set_headers "
+                "WHERE thesis_id = ? AND data_snapshot_id = ? "
+                "AND source_method_version = ?",
+                (thesis_id, data_snapshot_id, source_method_version),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_strategy_policy(self, policy_id: str, version: int) -> dict[str, Any] | None:
+        """查询策略政策,JSON 字段被解析为 Python 对象。"""
+        row = self._conn.execute(
+            "SELECT * FROM strategy_policies WHERE policy_id = ? AND version = ?",
+            (policy_id, version),
+        ).fetchone()
+        return _row_to_strategy_policy(row) if row else None
+
+    def get_data_snapshot(self, snapshot_id: str) -> dict[str, Any] | None:
+        """查询数据快照。返回 dict 或 None。"""
+        row = self._conn.execute(
+            "SELECT * FROM data_snapshots WHERE snapshot_id = ?",
+            (snapshot_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    # ----------------------------------------------------------
     # candidate_sets
     # ----------------------------------------------------------
     def insert_candidates(
@@ -297,12 +388,16 @@ class GovernanceTransaction:
         所有候选共用同一 candidate_set_id(由调用方指定或自动生成)。
         任一插入失败 -> 整个事务 rollback(由调用方在 with 块中处理)。
 
+        0016 后 candidate_sets 有外键引用 candidate_set_headers,
+        本方法在写入候选行之前自动创建 legacy header(如果不存在)。
+
         每个候选 dict 必填字段:
             thesis_id, user_input_id, asset_type, asset_code
         可选字段:
             asset_name, fit_score, evidence_score, valuation_status,
             data_quality_status, conflict_reasons, exclusion_reasons,
-            as_of_date, data_snapshot_id, candidate_set_id, candidate_id
+            as_of_date, data_snapshot_id, candidate_set_id, candidate_id,
+            candidate_evidence
         """
         if not candidates:
             return {"candidate_ids": [], "candidate_set_id": ""}
@@ -319,6 +414,36 @@ class GovernanceTransaction:
                     f" 与集合 {candidate_set_id!r} 不一致"
                 )
 
+        # 0016 后 candidate_sets 外键引用 candidate_set_headers,
+        # 写入候选行之前确保 header 存在;不存在则自动创建 legacy header
+        header_exists = self._conn.execute(
+            "SELECT 1 FROM candidate_set_headers WHERE candidate_set_id = ?",
+            (candidate_set_id,),
+        ).fetchone()
+        if header_exists is None:
+            first = candidates[0]
+            self._conn.execute(
+                """
+                INSERT INTO candidate_set_headers (
+                    candidate_set_id, thesis_id, user_input_id, data_snapshot_id,
+                    source_method_version, scanned_fund_count, mapped_candidate_count,
+                    unmapped_due_to_data_count, created_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    candidate_set_id,
+                    first["thesis_id"],
+                    first["user_input_id"],
+                    first.get("data_snapshot_id"),
+                    "legacy_governance_v0",
+                    len(candidates),
+                    len(candidates),
+                    0,
+                    "system",
+                    _now_iso(),
+                ),
+            )
+
         ids: list[str] = []
         for c in candidates:
             cid = c.get("candidate_id") or _short_id("can")
@@ -331,8 +456,8 @@ class GovernanceTransaction:
                     valuation_status, data_quality_status,
                     portfolio_contribution_json, conflict_reasons_json,
                     exclusion_reasons_json, as_of_date, data_snapshot_id,
-                    candidate_status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    candidate_status, created_at, candidate_evidence_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     cid,
@@ -353,6 +478,7 @@ class GovernanceTransaction:
                     c.get("data_snapshot_id"),
                     c.get("candidate_status", "proposed"),
                     _now_iso(),
+                    _dumps(c.get("candidate_evidence")),
                 ),
             )
             ids.append(cid)
@@ -534,6 +660,57 @@ class GovernanceRepository:
             ).fetchall()
             return [_row_to_candidate(r) for r in rows]
 
+    def get_candidate_set_header(self, candidate_set_id: str) -> dict[str, Any] | None:
+        """无事务查询:读取 CandidateSet 集合头。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM candidate_set_headers WHERE candidate_set_id = ?",
+                (candidate_set_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_candidate_set_header_by_key(
+        self,
+        thesis_id: str,
+        data_snapshot_id: str | None,
+        source_method_version: str,
+    ) -> dict[str, Any] | None:
+        """无事务查询:按幂等键查询 CandidateSet header。"""
+        with self._connect() as conn:
+            if data_snapshot_id is None:
+                row = conn.execute(
+                    "SELECT * FROM candidate_set_headers "
+                    "WHERE thesis_id = ? AND data_snapshot_id IS NULL "
+                    "AND source_method_version = ?",
+                    (thesis_id, source_method_version),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM candidate_set_headers "
+                    "WHERE thesis_id = ? AND data_snapshot_id = ? "
+                    "AND source_method_version = ?",
+                    (thesis_id, data_snapshot_id, source_method_version),
+                ).fetchone()
+            return dict(row) if row else None
+
+    def get_strategy_policy(self, policy_id: str, version: int) -> dict[str, Any] | None:
+        """无事务查询:读取策略政策,JSON 字段被解析为 Python 对象。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM strategy_policies WHERE policy_id = ? AND version = ?",
+                (policy_id, version),
+            ).fetchone()
+            return _row_to_strategy_policy(row) if row else None
+
+    def get_data_snapshot(self, snapshot_id: str) -> dict[str, Any] | None:
+        """无事务查询:读取数据快照。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM data_snapshots WHERE snapshot_id = ?",
+                (snapshot_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
 
 # ============================================================
 # row -> dict 转换(反序列化 JSON 字段)
@@ -562,4 +739,18 @@ def _row_to_candidate(row: sqlite3.Row) -> dict[str, Any]:
     d["portfolio_contribution"] = _loads(d.pop("portfolio_contribution_json", None))
     d["conflict_reasons"] = _loads(d.pop("conflict_reasons_json", None))
     d["exclusion_reasons"] = _loads(d.pop("exclusion_reasons_json", None))
+    d["candidate_evidence"] = _loads(d.pop("candidate_evidence_json", None))
+    return d
+
+
+def _row_to_strategy_policy(row: sqlite3.Row) -> dict[str, Any]:
+    d = dict(row)
+    d["market_scope"] = _loads(d.pop("market_scope_json", None))
+    d["position_limit"] = _loads(d.pop("position_limit_json", None))
+    d["allowed_universe"] = _loads(d.pop("allowed_universe_json", None))
+    d["excluded_universe"] = _loads(d.pop("excluded_universe_json", None))
+    d["valuation_policy"] = _loads(d.pop("valuation_policy_json", None))
+    d["monitoring_policy"] = _loads(d.pop("monitoring_policy_json", None))
+    d["investment_policy"] = _loads(d.pop("investment_policy_json", None))
+    d["candidate_priority"] = _loads(d.pop("candidate_priority_json", None))
     return d

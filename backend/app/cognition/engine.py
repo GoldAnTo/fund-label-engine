@@ -5,6 +5,9 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -15,12 +18,29 @@ from app.cognition.chain_graph import (
     load_chains,
 )
 from app.cognition.expectation_gap import calculate_link_expectation_gap
-from app.cognition.portfolio_builder import build_portfolio, calculate_overlap, calculate_portfolio_metrics
+from app.cognition.holding_source import HoldingSourceAdapter
+from app.cognition.portfolio_builder import (
+    build_portfolio,
+    calculate_overlap,
+    calculate_portfolio_metrics,
+)
 from app.cognition.theme_registry import load_themes
-from app.cognition.valuation_gate import calculate_valuation, check_hard_limits
 from app.cognition.validator import validate_cognition
+from app.cognition.valuation_gate import calculate_valuation, check_hard_limits
+from app.services.candidate_priority import FundCandidateEvidence
 
 _MATCH_THRESHOLD = 5.0
+
+
+@dataclass(frozen=True)
+class FundCandidateEvidenceBatch:
+    """基金候选证据批次：包含所有候选（未截断）和统计信息。"""
+
+    all_candidates: tuple[FundCandidateEvidence, ...]
+    valuation_gated_candidates: tuple[FundCandidateEvidence, ...]
+    scanned_fund_count: int
+    mapped_candidate_count: int
+    unmapped_due_to_data_count: int
 
 
 class CognitionEngine:
@@ -126,7 +146,6 @@ class CognitionEngine:
         与 run() 的区别：用概念板块成分股替代预设的 chain stocks，
         构建单环节产业链，judgment 使用自适应默认模板。
         """
-        conn = self._get_conn()
         stocks = self.get_concept_stocks(concept_code)
         if not stocks:
             return {
@@ -1107,6 +1126,277 @@ class CognitionEngine:
                 for f in gated_out[:5]
             ],
         }
+
+    # ------------------------------------------------------------------
+    # 完整候选证据构建（未截断）
+    # ------------------------------------------------------------------
+    def build_fund_candidate_evidence(
+        self,
+        *,
+        direction: str,
+        belief_link: str | None = None,
+        conviction: str = "medium",
+        time_horizon: str = "long",
+        risk_tolerance: str = "moderate",
+        data_snapshot_id: str,
+        as_of_date: str,
+        explicitly_named_fund_codes: Sequence[str] = (),
+        max_valuation_percentile: float | None = None,
+    ) -> FundCandidateEvidenceBatch:
+        """构建完整基金候选证据（不截断），供治理链路使用。
+
+        与 run() 的区别：
+        - 不执行 top_n 截断，所有匹配到的基金都进入 all_candidates
+        - 返回结构化的 FundCandidateEvidence 对象
+        - 估值门禁拦下的基金同时在 all_candidates 和 valuation_gated_candidates 中
+        """
+        conn = self._get_conn()
+        chain = self._chains.get(direction)
+        if not chain:
+            chain = self._build_dynamic_chain(conn, direction)
+
+        judgment = chain["judgment"]
+        hard_limits = dict(judgment.get("hard_limits", {}))
+        if max_valuation_percentile is not None:
+            hard_limits["max_valuation_percentile"] = max_valuation_percentile
+
+        # 加载所有基金持仓
+        fund_codes = self._load_fund_codes(conn)
+        all_holdings: dict[str, list[dict[str, Any]]] = {}
+        for fc in fund_codes:
+            h = get_holdings(conn, fc)
+            if h:
+                all_holdings[fc] = h
+
+        revenue_exposure = self._load_revenue_exposure(conn)
+
+        # 产业链拆解和预期差分析（复用 run() 的逻辑）
+        link_analysis: list[dict[str, Any]] = []
+        for link in chain["chain"]:
+            if link.get("exclude"):
+                continue
+            if belief_link and link["name"] != belief_link:
+                continue
+            all_matched_holdings: list[dict[str, Any]] = []
+            for fc, holdings in all_holdings.items():
+                stock_kws = link.get("stocks", [])
+                ind_kws = link.get("industry_keywords", [])
+                for h in holdings:
+                    name = h.get("stock_name", "") or ""
+                    ind = h.get("industry_name", "") or ""
+                    if any(kw in name for kw in stock_kws) or any(kw in ind for kw in ind_kws):
+                        all_matched_holdings.append(h)
+            gap = calculate_link_expectation_gap(link, all_matched_holdings, revenue_exposure)
+            gap["benefit_logic"] = link.get("benefit_logic", "")
+            link_analysis.append(gap)
+
+        link_analysis.sort(key=lambda x: x["score"], reverse=True)
+
+        # 构建匹配关键词（非负预期差的环节）
+        good_keywords: list[str] = []
+        good_industry_kws: list[str] = []
+        for link in chain["chain"]:
+            if link.get("exclude"):
+                continue
+            if belief_link and link["name"] != belief_link:
+                continue
+            for la in link_analysis:
+                if la["link_name"] == link["name"] and la["expectation_gap"] != "negative":
+                    good_keywords.extend(link.get("stocks", []))
+                    good_industry_kws.extend(link.get("industry_keywords", []))
+
+        # 横截面估值基准和基金经理
+        industry_pe_medians = self._get_industry_pe_medians(conn)
+        fund_managers = self._load_fund_managers(conn)
+
+        # 持仓源适配器（用于获取报告期）
+        try:
+            holding_adapter = HoldingSourceAdapter(conn)
+        except Exception:
+            holding_adapter = None
+
+        all_candidates: list[FundCandidateEvidence] = []
+        valuation_gated: list[FundCandidateEvidence] = []
+        mapped_count = 0
+        unmapped_count = 0
+
+        for fc, holdings in all_holdings.items():
+            match = self._match_fund_to_chain(
+                holdings, good_keywords, good_industry_kws, revenue_exposure,
+            )
+
+            is_mapped = match["match_pct"] >= _MATCH_THRESHOLD
+            is_named = fc in explicitly_named_fund_codes
+
+            if is_mapped:
+                mapped_count += 1
+            elif not is_named:
+                unmapped_count += 1
+
+            # 未映射且未点名的基金不进入候选
+            if not is_mapped and not is_named:
+                continue
+
+            # 权重计算（0..1 小数）
+            # match_pct 是匹配持仓占总披露持仓的百分数，转为小数比例后乘以总披露权重，
+            # 得到实际匹配持仓占基金净值的权重
+            disclosed = sum(h["weight"] for h in holdings)
+            matched = match["match_pct"] / 100.0 * disclosed
+            normalized = matched / disclosed if disclosed > 0 else 0.0
+
+            # 持仓报告期
+            holding_report_date: str | None = None
+            if holding_adapter:
+                dates = holding_adapter.list_report_dates(fc, limit=1)
+                holding_report_date = dates[0] if dates else None
+
+            # 持仓年龄（使用 as_of_date，不使用系统今天日期）
+            holding_age_days: int | None = None
+            if holding_report_date:
+                report_date = date.fromisoformat(holding_report_date)
+                as_of = date.fromisoformat(as_of_date)
+                holding_age_days = (as_of - report_date).days
+
+            # 因子覆盖权重：有 pe 或 pb 因子的持仓权重 / 总披露权重
+            factor_coverage = (
+                sum(h["weight"] for h in holdings if self._has_required_factor(h)) / disclosed
+                if disclosed > 0
+                else 0.0
+            )
+
+            # 估值
+            valuation = calculate_valuation(holdings)
+            self._enrich_cross_sectional(holdings, valuation, industry_pe_medians)
+
+            # 持仓趋势
+            trend = calculate_holding_trend(
+                conn,
+                fc,
+                {
+                    "chain_links": {
+                        "_": {
+                            "stock_keywords": good_keywords,
+                            "industry_keywords": good_industry_kws,
+                        }
+                    }
+                },
+            )
+
+            # 估值门禁
+            gate = check_hard_limits(valuation, hard_limits)
+
+            # 基金经理
+            manager = fund_managers.get(fc)
+
+            # 证据类型来源记录
+            evidence_types = self._build_evidence_types(
+                holdings, valuation, trend, manager, holding_report_date, link_analysis,
+            )
+
+            evidence = FundCandidateEvidence(
+                fund_code=fc,
+                fund_name=self._get_fund_name(conn, fc),
+                matched_holding_weight=matched,
+                disclosed_holding_weight=disclosed,
+                normalized_match_pct=normalized,
+                holding_report_date=holding_report_date,
+                holding_age_days=holding_age_days,
+                factor_coverage_weight=factor_coverage,
+                valuation=valuation,
+                holding_trend=trend,
+                manager_identity=manager,
+                evidence_types=evidence_types,
+                policy_conflicts=(),
+                data_snapshot_id=data_snapshot_id,
+            )
+
+            all_candidates.append(evidence)
+            if not gate["passed"]:
+                valuation_gated.append(evidence)
+
+        return FundCandidateEvidenceBatch(
+            all_candidates=tuple(all_candidates),
+            valuation_gated_candidates=tuple(valuation_gated),
+            scanned_fund_count=len(fund_codes),
+            mapped_candidate_count=mapped_count,
+            unmapped_due_to_data_count=unmapped_count,
+        )
+
+    @staticmethod
+    def _has_required_factor(holding: dict[str, Any]) -> bool:
+        """检查持仓是否有 pe 或 pb 因子（非 None）。"""
+        return holding.get("pe") is not None or holding.get("pb") is not None
+
+    @staticmethod
+    def _build_evidence_types(
+        holdings: list[dict[str, Any]],
+        valuation: dict[str, Any],
+        trend: dict[str, Any],
+        manager: dict[str, Any] | None,
+        holding_report_date: str | None,
+        link_analysis: list[dict[str, Any]],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """构建证据类型来源记录，关联原始数据来源。"""
+        evidence_types: dict[str, list[dict[str, Any]]] = {}
+
+        # business_logic: 来自产业链的受益逻辑
+        benefit_logics = [
+            la["benefit_logic"] for la in link_analysis if la.get("benefit_logic")
+        ]
+        if benefit_logics:
+            evidence_types["business_logic"] = [
+                {"source": "chain", "benefit_logic": bl} for bl in benefit_logics
+            ]
+
+        # earnings_or_cashflow: 来自持仓的因子数据
+        stocks_with_factors = [
+            h["stock_code"] for h in holdings if h.get("pe") or h.get("roe")
+        ]
+        if stocks_with_factors:
+            evidence_types["earnings_or_cashflow"] = [
+                {"source": "stock_factor_values", "stocks": stocks_with_factors}
+            ]
+
+        # valuation: 来自估值计算
+        if valuation.get("weighted_pe") or valuation.get("weighted_pb"):
+            evidence_types["valuation"] = [
+                {
+                    "source": "calculate_valuation",
+                    "weighted_pe": valuation.get("weighted_pe"),
+                    "weighted_pb": valuation.get("weighted_pb"),
+                }
+            ]
+
+        # catalyst_or_expectation_gap: 来自预期差分析
+        best_gap = link_analysis[0] if link_analysis else None
+        if best_gap and best_gap.get("expectation_gap"):
+            evidence_types["catalyst_or_expectation_gap"] = [
+                {"source": "expectation_gap", "gap": best_gap["expectation_gap"]}
+            ]
+
+        # holding_truth: 来自持仓表
+        if holdings:
+            evidence_types["holding_truth"] = [
+                {
+                    "source": "stock_holdings",
+                    "report_date": holding_report_date,
+                    "count": len(holdings),
+                }
+            ]
+
+        # holding_trend: 来自趋势计算
+        if trend.get("periods"):
+            evidence_types["holding_trend"] = [
+                {"source": "calculate_holding_trend", "trend": trend.get("trend")}
+            ]
+
+        # manager_identity: 来自基金经理
+        if manager:
+            evidence_types["manager_identity"] = [
+                {"source": "fund_managers", "name": manager.get("name")}
+            ]
+
+        return evidence_types
 
     # ------------------------------------------------------------------
     # 自定义方向：动态构建产业链

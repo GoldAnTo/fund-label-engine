@@ -730,3 +730,13 @@ ResearchInput
 8. 无合格候选时返回正常的 `no_eligible_candidate`。
 9. API 可以反查 ResearchInput、Thesis、CandidateSet、Policy、Snapshot 和规则版本。
 10. 系统不输出买入建议、组合权重或预测收益。
+
+## 21. 实施修正
+
+以下修正基于代码映射暴露出的结构问题，在 v0 实施时同步回写：
+
+1. **CandidateSet 增加集合头和不可变证据。** 新增 `candidate_set_headers` 表，并在候选行保存 `candidate_evidence_json`，避免两次 API 调用之间证据丢失。
+2. **CandidateSet 唯一约束调整为 (candidate_set_id, asset_code)。** 支持同一 Thesis 在不同数据快照下生成新集合。新集合幂等键为 `thesis_id + data_snapshot_id + source_method_version`。
+3. **因子覆盖门禁增加显式阈值。** `candidate_priority` 策略配置增加 `minimum_factor_coverage_weight`，运行时不使用代码默认值。
+
+此外，认知引擎必须按 `data_snapshots.source_db_path` 和 `factor_db_path` 读取历史数据源，不能复用当前 app.state 数据库冒充历史快照。

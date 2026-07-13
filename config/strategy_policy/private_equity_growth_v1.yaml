@@ -1,0 +1,113 @@
+# ============================================================
+# Strategy Policy 样例 · 私募主观权益成长型 v1 (version 2)
+# ============================================================
+# 在 v0 (version 1) 基础上新增 candidate_priority 配置和显式估值阈值。
+# 这是阶段 0 的业务样例，不是公司正式投资制度。
+
+policy_id: private_equity_growth
+version: 2
+policy_status: example
+approved_for_production: false
+
+business_mode: private_strategy
+strategy_name: 私募主观权益成长型
+strategy_type: equity_long_only
+market_scope:
+  - cn_a
+investment_horizon: P12M
+benchmark: CSI300
+target_return: null
+risk_budget: null
+maximum_drawdown: null
+leverage_limit: 1.0
+liquidity_limit: null
+
+position_limit:
+  single_stock: null
+  single_industry: null
+  single_theme: null
+  gross_exposure: 1.0
+  net_exposure: 1.0
+
+allowed_universe:
+  asset_types:
+    - stock
+    - industry
+    - fund
+    - strategy
+  market_scope:
+    - cn_a
+
+excluded_universe:
+  - reason: 暂无生产黑名单，仅用于演示政策结构
+    assets: []
+
+investment_policy:
+  preferred_styles:
+    - quality_growth
+    - innovation
+  required_evidence:
+    - business_logic
+    - earnings_or_cashflow
+    - valuation
+    - catalyst_or_expectation_gap
+  required_invalidation_conditions: true
+  no_candidate_if_evidence_insufficient: true
+
+valuation_policy:
+  status: example
+  method: relative_and_absolute
+  max_pe: 60
+  max_pb: 10
+  max_peg: 2.0
+  max_valuation_percentile: 85
+  require_historical_percentile: true
+
+candidate_priority:
+  method_version: fund_priority_v0
+  source_method_version: fund_candidate_evidence_v0
+  asset_type: fund
+  minimum_target_holding_weight: 0.03
+  minimum_disclosed_holding_weight: 0.10
+  minimum_factor_coverage_weight: 0.50
+  maximum_holding_age_days: 180
+  valuation_breach_mode: watch
+  require_manager_identity: true
+  require_holding_report_date: true
+  required_evidence:
+    - business_logic
+    - earnings_or_cashflow
+    - valuation
+    - catalyst_or_expectation_gap
+  allowed_asset_types:
+    - fund
+  excluded_asset_codes: []
+  approved_for_production: false
+
+monitoring_policy:
+  holding_change:
+    enabled: true
+    threshold: null
+  industry_drift:
+    enabled: true
+    threshold: null
+  style_drift:
+    enabled: true
+    threshold: null
+  manager_change:
+    enabled: true
+  data_stale:
+    enabled: true
+    days_threshold: null
+  thesis_invalidation:
+    enabled: true
+    review_days: null
+  risk_breach:
+    enabled: true
+    threshold: null
+
+effective_from: 2026-07-10
+effective_to: null
+approved_by: null
+schema_doc: docs/p0/domain-language-v0.md
+change_policy: append_new_version
