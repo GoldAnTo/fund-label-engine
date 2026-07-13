@@ -39,7 +39,7 @@ def test_get_run_includes_processed_fund_codes(seeded_run) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["run_id"] == run_id
-    assert payload["fund_codes"] == ["000001", "000002"]
+    assert payload["fund_codes"] == ["000001", "000002", "000004", "000005", "000006", "000007", "000008"]
 
 
 def test_get_run_fund_returns_labels_and_evidence(seeded_run) -> None:
@@ -355,21 +355,21 @@ def test_get_run_summary_aggregates_counts_and_distributions(seeded_run) -> None
     assert summary["run_id"] == run_id
     assert summary["status"] == "succeeded"
     counts = summary["counts"]
-    # 样例 db 里 2 只基金都被处理；000002 数据不足 + manual_review
-    assert counts["processed"] == 2
+    # 样例 db 里 7 只支持类型基金被处理；000002 数据不足 + manual_review
+    assert counts["processed"] == 7
     assert counts["failed"] == 0
     assert counts["data_insufficient"] == 1
     assert counts["manual_review"] == 1
     # 标签分布按 fund_count 倒序
     distribution = {item["label_code"]: item for item in summary["label_distribution"]}
     assert "data_sufficient" in distribution
-    assert distribution["data_sufficient"]["fund_count"] == 1
+    assert distribution["data_sufficient"]["fund_count"] == 6
     review_dist = {
         item["review_action"]: item["fund_count"]
         for item in summary["review_action_distribution"]
     }
     assert review_dist.get("manual_review") == 1
-    assert review_dist.get("observe") == 1
+    assert review_dist.get("observe") == 6
     state_dist = {
         item["state"]: item["calculation_count"]
         for item in summary["calculation_state_distribution"]
@@ -392,7 +392,8 @@ def test_get_portfolio_matrix_derives_combination_roles(seeded_run) -> None:
             "AND label_code IN ("
             "'benchmark_data_missing', "
             "'return_window_insufficient', "
-            "'style_unlabeled_stock_factors_missing'"
+            "'style_unlabeled_stock_factors_missing', "
+            "'style_exposure_observe'"
             ")",
             (run_id,),
         )
@@ -718,7 +719,7 @@ def test_search_run_funds_supports_filters(seeded_run) -> None:
     payload = response.json()
     assert payload["run_id"] == run_id
     fund_codes = [item["fund_code"] for item in payload["results"]]
-    assert fund_codes == ["000001"]
+    assert fund_codes == ["000001", "000004", "000005", "000006", "000007", "000008"]
     assert "holding_concentration_high" in payload["available_labels"]
 
 
@@ -830,17 +831,24 @@ def test_relative_label_eligibility_endpoint_lists_ready_and_blocked(seeded_run)
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["total_funds"] == 2
+    assert payload["total_funds"] == 7
     assert payload["ready_count"] == 1
-    assert payload["blocked_count"] == 1
+    assert payload["blocked_count"] == 6
     assert payload["blocker_groups"] == [
+        {
+            "key": "benchmark_missing|benchmark_source_status=benchmark_missing",
+            "status": "benchmark_missing",
+            "component": "benchmark_source_status=benchmark_missing",
+            "count": 5,
+            "sample_fund_codes": ["000004", "000005", "000006", "000007", "000008"],
+        },
         {
             "key": "benchmark_source_missing|LOCAL_CBOND_TOTAL:中债总",
             "status": "benchmark_source_missing",
             "component": "LOCAL_CBOND_TOTAL:中债总",
             "count": 1,
             "sample_fund_codes": ["000002"],
-        }
+        },
     ]
     by_code = {row["fund_code"]: row for row in payload["results"]}
     assert by_code["000001"]["relative_label_status"] == "relative_label_ready"
@@ -903,7 +911,9 @@ def test_relative_label_eligibility_endpoint_filters_blocked(seeded_run) -> None
 
     assert response.status_code == 200
     rows = response.json()["results"]
-    assert [row["fund_code"] for row in rows] == ["000002"]
+    assert [row["fund_code"] for row in rows] == [
+        "000002", "000004", "000005", "000006", "000007", "000008",
+    ]
 
 
 def test_relative_label_eligibility_fund_code_filter(seeded_run) -> None:
@@ -1031,9 +1041,9 @@ def test_workbench_tasks_and_summary_aggregate_ready_pool_and_review_queue(seede
     summary_payload = summary.json()
     assert summary_payload["run_id"] == run_id
     assert summary_payload["ready_count"] == 1
-    assert summary_payload["blocked_count"] == 1
+    assert summary_payload["blocked_count"] == 6
     assert summary_payload["manual_review_count"] == 1
-    assert summary_payload["task_type_counts"]["benchmark_gap"] == 1
+    assert summary_payload["task_type_counts"]["benchmark_gap"] == 6
     assert summary_payload["task_type_counts"]["manual_review"] == 1
     assert tasks.status_code == 200
     task_payload = tasks.json()

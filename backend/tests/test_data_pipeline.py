@@ -195,7 +195,7 @@ def test_repository_lists_only_supported_fund_types(seeded_db: Path) -> None:
 
     codes = repo.list_supported_fund_codes()
 
-    assert codes == ["000001", "000002"]
+    assert codes == ["000001", "000002", "000004", "000005", "000006", "000007", "000008"]
 
 
 def test_repository_loads_fund_input_with_holdings_and_fees(seeded_db: Path) -> None:
@@ -211,7 +211,7 @@ def test_repository_loads_fund_input_with_holdings_and_fees(seeded_db: Path) -> 
     assert fund.management_fee == 0.010
     assert fund.custody_fee == 0.002
     assert fund.equity_position == 0.89
-    assert fund.stock_factors == []  # 表存在但没有数据
+    assert len(fund.stock_factors) == 10  # 10 只持仓股票均有因子数据
 
 
 def test_repository_loads_stock_factors_no_later_than_holding_report_date(
@@ -234,20 +234,15 @@ def test_repository_loads_stock_factors_no_later_than_holding_report_date(
 
     assert fund is not None
     assert fund.holding_report_date == "2026-03-31"
-    assert fund.stock_factors == [
-        {
-            "stock_code": "600519",
-            "factor_date": "2026-03-30",
-            "pb": 8.1,
-            "roe": 0.24,
-            "dividend_yield": 0.025,
-            "revenue_growth": 0.08,
-            "profit_growth": 0.12,
-            "market_cap_bucket": "large",
-            "valuation_percentile": 0.72,
-            "style": "quality",
-        }
-    ]
+    # seed 数据中 600519 的 factor_date 为 "2026-03-31"，比测试插入的 "2026-03-30" 更晚
+    # 但不晚于 report_date "2026-03-31"，所以应取 "2026-03-31"（seed 数据）
+    # 而 "2026-04-30" 晚于 report_date，不应被加载
+    factor_600519 = next(
+        f for f in fund.stock_factors if f["stock_code"] == "600519"
+    )
+    assert factor_600519["factor_date"] == "2026-03-31"
+    # 确认 "2026-04-30" 的数据未被加载
+    assert all(f["factor_date"] != "2026-04-30" for f in fund.stock_factors)
 
 
 def test_repository_returns_none_for_unknown_fund(seeded_db: Path) -> None:
@@ -259,7 +254,7 @@ def test_repository_returns_none_for_unknown_fund(seeded_db: Path) -> None:
 def test_batch_persists_run_results_and_evidence(seeded_db: Path) -> None:
     run_id, processed = run_batch(seeded_db)
 
-    assert processed == 2  # 只跑支持类型的 000001 和 000002
+    assert processed == 7  # 7 只支持类型的基金：000001, 000002, 000004-000008
 
     with sqlite3.connect(seeded_db) as conn:
         conn.row_factory = sqlite3.Row
@@ -282,7 +277,7 @@ def test_batch_persists_run_results_and_evidence(seeded_db: Path) -> None:
         assert "holding_concentration_high" in labels_000001
         assert "manager_tenure_long" in labels_000001
         assert "fee_low" in labels_000001
-        assert "style_unlabeled_stock_factors_missing" in labels_000001
+        assert "style_exposure_observe" in labels_000001
 
         labels_000002 = {
             row["label_code"]
@@ -487,8 +482,8 @@ def test_single_fund_failure_does_not_abort_batch(
 
     run_id, processed = run_batch(seeded_db)
 
-    # 000001 失败，000002 仍被处理
-    assert processed == 1
+    # 000001 失败，其余 6 只仍被处理
+    assert processed == 6
 
     reader = LabelRunReader(seeded_db)
     run = reader.get_run(run_id)

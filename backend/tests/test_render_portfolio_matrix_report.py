@@ -19,7 +19,8 @@ def test_render_portfolio_matrix_report_smoke(tmp_path: Path) -> None:
             "AND label_code IN ("
             "'benchmark_data_missing', "
             "'return_window_insufficient', "
-            "'style_unlabeled_stock_factors_missing'"
+            "'style_unlabeled_stock_factors_missing', "
+            "'style_exposure_observe'"
             ")",
             (run_id,),
         )
