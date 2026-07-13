@@ -5,6 +5,7 @@ import SearchPage from "./pages/SearchPage";
 import ComparePage from "./pages/ComparePage";
 import CognitionPage from "./pages/CognitionPage";
 import LabelDefinitionsPage from "./pages/LabelDefinitionsPage";
+import PriorityWorkbenchPage from "./pages/PriorityWorkbenchPage";
 import { useEffect } from "react";
 
 const NAV_GROUPS = [
@@ -25,6 +26,7 @@ const NAV_GROUPS = [
   {
     title: "治理",
     links: [
+      { to: "/priority", label: "基金研究优先级" },
       { to: "/label-definitions", label: "规则定义" },
     ],
   },
@@ -35,6 +37,7 @@ const CRUMB_MAP: Record<string, string> = {
   compare: "竞品横评",
   explorer: "风格总览",
   search: "风格筛选",
+  priority: "基金研究优先级",
   funds: "基金",
   "label-definitions": "规则定义",
 };
@@ -109,6 +112,7 @@ export default function App() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/runs/:runId/funds/:fundCode" element={<FundReportPage />} />
             <Route path="/label-definitions" element={<LabelDefinitionsPage />} />
+            <Route path="/priority" element={<PriorityWorkbenchPage />} />
             <Route path="/ready-pool" element={<Navigate to="/explorer" replace />} />
             <Route path="/portfolio" element={<Navigate to="/cognition" replace />} />
             <Route path="/runs" element={<Navigate to="/cognition" replace />} />

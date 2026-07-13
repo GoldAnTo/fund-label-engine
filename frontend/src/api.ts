@@ -22,6 +22,77 @@ export async function downloadFile(url: string, fallbackName: string): Promise<v
   URL.revokeObjectURL(a.href);
 }
 
+// ============================================================
+// 治理 API: CandidateSet + PriorityRun
+// ============================================================
+
+export interface PriorityRunDetail {
+  priority_run_id: string;
+  thesis_id: string;
+  candidate_set_id: string;
+  strategy_policy_id: string;
+  strategy_policy_version: number;
+  data_snapshot_id: string | null;
+  ranking_method_version: string;
+  result_type: string;
+  result_status: string;
+  evaluated_candidate_count: number;
+  eligible_candidate_count: number;
+  tier_counts: Record<string, number>;
+  approved_for_production: boolean;
+  created_by: string;
+  created_at: string;
+  candidates_by_tier: Record<string, PriorityCandidate[]>;
+}
+
+export interface PriorityCandidate {
+  priority_result_id: string;
+  priority_run_id: string;
+  candidate_id: string;
+  fund_code: string;
+  fund_name: string | null;
+  eligibility_status: string;
+  priority_tier: string;
+  priority_rank: number | null;
+  matched_holding_weight: number | null;
+  disclosed_holding_weight: number | null;
+  normalized_match_pct: number | null;
+  fit_score: number | null;
+  evidence_score: number | null;
+  holdings_truth_status: string | null;
+  valuation_status: string | null;
+  data_quality_status: string | null;
+  holding_report_date: string | null;
+  dimension_results: Record<string, unknown>;
+  priority_reasons: { code: string; message: string }[];
+  exclusion_reasons: { code: string; message: string }[];
+}
+
+export interface PriorityRunSummary {
+  priority_run_id: string;
+  thesis_id: string;
+  candidate_set_id: string;
+  strategy_policy_id: string;
+  strategy_policy_version: number;
+  data_snapshot_id: string | null;
+  ranking_method_version: string;
+  result_type: string;
+  result_status: string;
+  evaluated_candidate_count: number;
+  eligible_candidate_count: number;
+  tier_counts: Record<string, number>;
+  created_by: string;
+  created_at: string;
+}
+
+export async function fetchPriorityRun(priorityRunId: string): Promise<PriorityRunDetail> {
+  return json(`/v1/governance/candidate-priority-runs/${priorityRunId}`);
+}
+
+export async function fetchPriorityRunsByThesis(thesisId: string): Promise<PriorityRunSummary[]> {
+  return json(`/v1/governance/theses/${thesisId}/candidate-priority-runs`);
+}
+
 async function postJSON(url: string, body: unknown) {
   const res = await fetch(`${BASE}${url}`, {
     method: "POST",

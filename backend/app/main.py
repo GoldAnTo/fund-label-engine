@@ -1991,6 +1991,10 @@ def create_app(
         def serve_label_definitions_route() -> FileResponse:
             return _frontend_index()
 
+        @app.get("/priority", include_in_schema=False)
+        def serve_priority_route() -> FileResponse:
+            return _frontend_index()
+
         app.mount("/", StaticFiles(directory=str(dist_dir), html=True), name="frontend")
 
     return app
