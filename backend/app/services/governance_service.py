@@ -526,6 +526,9 @@ class GovernanceService:
     def get_candidates_by_set(self, candidate_set_id: str) -> list[dict[str, Any]]:
         return self._repo.get_candidates_by_set(candidate_set_id)
 
+    def get_candidate_set_header(self, candidate_set_id: str) -> dict[str, Any] | None:
+        return self._repo.get_candidate_set_header(candidate_set_id)
+
     # ----------------------------------------------------------
     # 校验辅助
     # ----------------------------------------------------------

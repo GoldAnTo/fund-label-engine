@@ -441,6 +441,25 @@ def render_report(
                 lines.append(f"- {r}")
             lines.append("")
 
+        # 优先级评价结果摘要(仅 --priority 模式)
+        if sc.get("priority_run_id"):
+            lines.append("### 优先级评价结果")
+            lines.append("")
+            lines.append(f"- priority_run_id:`{sc['priority_run_id']}`")
+            lines.append(f"- result_type:**{sc.get('priority_result_type', '')}**")
+            lines.append(
+                f"- evaluated_candidate_count:{sc.get('priority_evaluated_count', 0)}"
+            )
+            lines.append(
+                f"- eligible_candidate_count:{sc.get('priority_eligible_count', 0)}"
+            )
+            tier_counts = sc.get("priority_tier_counts", {})
+            if tier_counts:
+                lines.append(
+                    f"- tier_counts:{json.dumps(tier_counts, ensure_ascii=False)}"
+                )
+            lines.append("")
+
         lines.append("---")
         lines.append("")
 
@@ -484,20 +503,21 @@ def _ensure_governance_db(gov_db: Path) -> None:
             )
             break  # sync_strategy_policies 会同步所有 YAML
 
-    # 确保 data_snapshots 有一条记录
+    # 确保 data_snapshots 有一条记录(包含 factor_db_path,供认知治理链路使用)
     conn = sqlite3.connect(str(gov_db))
     try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        # 检查是否已有 snap_smoke
-        row = conn.execute(
-            "SELECT 1 FROM data_snapshots WHERE snapshot_id = 'snap_smoke'"
-        ).fetchone()
-        if row is None:
-            conn.execute(
-                "INSERT INTO data_snapshots (snapshot_id, source_db_path) VALUES (?, ?)",
-                ("snap_smoke", str(SOURCE_DB)),
-            )
-            conn.commit()
+        conn.execute(
+            "INSERT OR REPLACE INTO data_snapshots "
+            "(snapshot_id, source_db_path, factor_db_path, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "snap_smoke",
+                str(SOURCE_DB),
+                str(FACTOR_DB) if FACTOR_DB.exists() else None,
+                _now_iso(),
+            ),
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -507,10 +527,14 @@ def persist_scenarios(
     gov_db: Path,
     run_id: str,
     snapshot_id: str,
+    policy_version: int = 1,
 ) -> list[dict[str, Any]]:
     """通过 GovernanceService 把 3 个场景的结果落库。
 
     使用 run_id 生成确定性 ID,重跑同一 run_id 会触发 409(证明数据已持久化)。
+
+    当 policy_version >= 2 时,会传入 structured_intent(认知治理链路需要
+    direction/conviction/time_horizon/risk_tolerance 四个必填字段)。
 
     返回增强后的 scenarios,包含真实的 research_input_id / thesis_id / candidate_set_id。
     """
@@ -521,19 +545,26 @@ def persist_scenarios(
     service = GovernanceService(repo)
 
     POLICY_ID = "private_equity_growth"
-    POLICY_VERSION = 1
 
-    # 如果策略不存在,用 p1 兜底(测试环境)
-    if not service.get_research_input("dummy"):
-        pass  # 只是为了初始化 service
-    # 检查策略是否存在
-    if not repo.policy_exists(POLICY_ID, POLICY_VERSION):
-        # 尝试用 sync 脚本同步
+    # 如果策略不存在,用 sync 脚本同步
+    if not repo.policy_exists(POLICY_ID, policy_version):
         import subprocess
         subprocess.run(
             [sys.executable, "scripts/sync_strategy_policies.py", str(gov_db)],
             cwd=str(_PROJECT_ROOT), capture_output=True, check=True,
         )
+
+    # 各场景的 structured_intent(认知治理链路需要四个必填字段)
+    # direction 使用预定义产业链名称 "consumer"(消费),与 cognition_chains.yaml 对齐
+    _structured_intents = {
+        "a": {"direction": "consumer", "conviction": "medium",
+              "time_horizon": "long", "risk_tolerance": "moderate"},
+        "b": {"direction": "consumer", "conviction": "medium",
+              "time_horizon": "long", "risk_tolerance": "moderate"},
+        "c": {"direction": "consumer", "conviction": "medium",
+              "time_horizon": "long", "risk_tolerance": "moderate"},
+    }
+    need_structured_intent = policy_version >= 2
 
     for i, sc in enumerate(scenarios):
         suffix = chr(ord("a") + i)  # a, b, c
@@ -547,11 +578,12 @@ def persist_scenarios(
                 input_type="philosophy" if suffix == "a" else ("industry" if suffix == "b" else "target"),
                 business_mode="private_strategy",
                 strategy_policy_id=POLICY_ID,
-                strategy_policy_version=POLICY_VERSION,
+                strategy_policy_version=policy_version,
                 actor_role="researcher",
                 actor_id="smoke_researcher_001",
                 request_source="ad_hoc_research",
                 raw_text=sc["raw_text"],
+                structured_intent=_structured_intents[suffix] if need_structured_intent else None,
                 as_of_date=AS_OF_DATE,
                 data_snapshot_id="snap_smoke",
                 source_ip="127.0.0.1",
@@ -573,7 +605,7 @@ def persist_scenarios(
         result = service.create_thesis(
             user_input_id=ri_id,
             strategy_policy_id=POLICY_ID,
-            strategy_policy_version=POLICY_VERSION,
+            strategy_policy_version=policy_version,
             title=thesis.get("title", f"thesis_{suffix}"),
             belief_statement=thesis.get("belief_statement", sc["raw_text"]),
             time_horizon=thesis.get("time_horizon", "P12M"),
@@ -680,6 +712,144 @@ def verify_via_api(scenarios: list[dict[str, Any]], gov_db: Path) -> list[dict[s
 
 
 # ============================================================
+# CandidatePriorityRun 闭环
+# ============================================================
+def run_priority(
+    scenarios: list[dict[str, Any]], gov_db: Path, snapshot_id: str
+) -> list[dict[str, Any]]:
+    """对已落库的 Thesis 创建 CandidateSet 和 PriorityRun,完成认知治理闭环。
+
+    对每个有 persisted_thesis_id 的场景:
+    1. create_candidate_set(thesis_id, data_snapshot_id, actor_id)
+    2. create_priority_run(thesis_id, candidate_set_id, data_snapshot_id, ranking_method_version, actor_id)
+    3. 记录 priority_run_id 和结果
+
+    重复运行时(幂等键冲突)复用已有 ID,不报错。
+    """
+    from app.persistence.candidate_priority import CandidatePriorityRepository
+    from app.persistence.governance import GovernanceRepository
+    from app.services.cognition_governance_service import (
+        CognitionGovernanceService,
+        DuplicateCandidateSetError,
+        DuplicatePriorityRunError,
+    )
+
+    gov_repo = GovernanceRepository(gov_db)
+    priority_repo = CandidatePriorityRepository(gov_db)
+    service = CognitionGovernanceService(
+        governance_repo=gov_repo, priority_repo=priority_repo
+    )
+
+    for sc in scenarios:
+        thesis_id = sc.get("persisted_thesis_id")
+        if not thesis_id:
+            continue
+
+        # 1. 创建 CandidateSet(重复时复用已有 ID)
+        try:
+            cs_result = service.create_candidate_set(
+                thesis_id=thesis_id,
+                data_snapshot_id=snapshot_id,
+                actor_id="smoke_researcher_001",
+            )
+            candidate_set_id = cs_result["candidate_set_id"]
+        except DuplicateCandidateSetError as exc:
+            candidate_set_id = exc.candidate_set_id
+
+        sc["priority_candidate_set_id"] = candidate_set_id
+
+        # 2. 创建 PriorityRun(重复时复用已有 ID)
+        try:
+            pr_result = service.create_priority_run(
+                thesis_id=thesis_id,
+                candidate_set_id=candidate_set_id,
+                data_snapshot_id=snapshot_id,
+                ranking_method_version="fund_priority_v0",
+                actor_id="smoke_researcher_001",
+            )
+            sc["priority_run_id"] = pr_result["priority_run_id"]
+            sc["priority_result_type"] = pr_result["result_type"]
+            sc["priority_evaluated_count"] = pr_result["evaluated_candidate_count"]
+            sc["priority_eligible_count"] = pr_result["eligible_candidate_count"]
+            sc["priority_tier_counts"] = pr_result["tier_counts"]
+        except DuplicatePriorityRunError as exc:
+            # 已存在,从 DB 反查结果
+            run_detail = service.get_priority_run(exc.priority_run_id)
+            if run_detail is not None:
+                sc["priority_run_id"] = run_detail["priority_run_id"]
+                sc["priority_result_type"] = run_detail["result_type"]
+                sc["priority_evaluated_count"] = run_detail["evaluated_candidate_count"]
+                sc["priority_eligible_count"] = run_detail["eligible_candidate_count"]
+                sc["priority_tier_counts"] = run_detail.get("tier_counts", {})
+            else:
+                sc["priority_run_id"] = exc.priority_run_id
+                sc["priority_result_type"] = "unknown"
+                sc["priority_evaluated_count"] = 0
+                sc["priority_eligible_count"] = 0
+                sc["priority_tier_counts"] = {}
+
+    return scenarios
+
+
+def verify_priority_via_api(
+    scenarios: list[dict[str, Any]], gov_db: Path
+) -> list[dict[str, Any]]:
+    """通过 API GET /v1/governance/candidate-priority-runs/{id} 反查验证。
+
+    验证返回的 thesis_id / candidate_set_id / tier_counts 等。
+    """
+    from app.main import create_app
+    from app.persistence.candidate_priority import CandidatePriorityRepository
+    from app.persistence.governance import GovernanceRepository
+    from app.services.cognition_governance_service import CognitionGovernanceService
+    from fastapi.testclient import TestClient
+
+    app = create_app(source_db_path=str(gov_db), output_db_path=str(gov_db))
+    # 注入 CognitionGovernanceService(确保用新 DB)
+    gov_repo = GovernanceRepository(gov_db)
+    priority_repo = CandidatePriorityRepository(gov_db)
+    app.state.cognition_governance_service = CognitionGovernanceService(
+        governance_repo=gov_repo, priority_repo=priority_repo
+    )
+    client = TestClient(app)
+
+    results = []
+    for sc in scenarios:
+        priority_run_id = sc.get("priority_run_id")
+        if not priority_run_id:
+            results.append({
+                "scenario": sc["scenario"],
+                "verified": False,
+                "reason": "no_priority_run_id",
+            })
+            continue
+
+        resp = client.get(f"/v1/governance/candidate-priority-runs/{priority_run_id}")
+        if resp.status_code == 200:
+            data = resp.json()
+            results.append({
+                "scenario": sc["scenario"],
+                "verified": True,
+                "priority_run_id": data["priority_run_id"],
+                "thesis_id": data["thesis_id"],
+                "candidate_set_id": data["candidate_set_id"],
+                "result_type": data["result_type"],
+                "evaluated_candidate_count": data["evaluated_candidate_count"],
+                "eligible_candidate_count": data["eligible_candidate_count"],
+                "tier_counts": data.get("tier_counts", {}),
+            })
+        else:
+            results.append({
+                "scenario": sc["scenario"],
+                "verified": False,
+                "status_code": resp.status_code,
+                "detail": resp.json().get("detail", ""),
+            })
+
+    return results
+
+
+# ============================================================
 # 主入口
 # ============================================================
 def main() -> int:
@@ -687,6 +857,10 @@ def main() -> int:
     parser.add_argument(
         "--persist", action="store_true",
         help="通过 GovernanceService 落库(默认仅内存)",
+    )
+    parser.add_argument(
+        "--priority", action="store_true",
+        help="启用 CandidatePriorityRun 闭环(需配合 --persist)",
     )
     parser.add_argument(
         "--governance-db", type=str, default="/tmp/fle-p0/governance.sqlite",
@@ -733,10 +907,18 @@ def main() -> int:
     if args.persist:
         gov_db = Path(args.governance_db)
         run_id = args.run_id or f"smoke_{uuid.uuid4().hex[:6]}"
-        print(f"[4.5/5] persisting with run_id={run_id}, gov_db={gov_db}")
+        # --priority 时使用 v2 策略(有 candidate_priority 配置)
+        persist_policy_version = 2 if args.priority else 1
+        print(
+            f"[4.5/5] persisting with run_id={run_id}, gov_db={gov_db}, "
+            f"priority={args.priority}"
+        )
 
         _ensure_governance_db(gov_db)
-        scenarios = persist_scenarios(scenarios, gov_db, run_id, snapshot_id)
+        scenarios = persist_scenarios(
+            scenarios, gov_db, run_id, snapshot_id,
+            policy_version=persist_policy_version,
+        )
 
         # 通过 API 反查验证
         verify_results = verify_via_api(scenarios, gov_db)
@@ -750,6 +932,21 @@ def main() -> int:
                 print(f"    policy={vr['strategy_policy_id']} v{vr['strategy_policy_version']}")
                 print(f"    snapshot={vr['data_snapshot_id']}")
                 print(f"    candidates={vr['candidate_count']}")
+
+        # CandidatePriorityRun 闭环
+        if args.priority:
+            print("[4.6/5] running CandidatePriorityRun closed loop...")
+            scenarios = run_priority(scenarios, gov_db, snapshot_id)
+            priority_verify_results = verify_priority_via_api(scenarios, gov_db)
+            for vr in priority_verify_results:
+                status = "OK" if vr["verified"] else "FAIL"
+                print(f"  priority verify: {vr['scenario']} -> {status}")
+                if vr["verified"]:
+                    print(f"    priority_run_id={vr['priority_run_id']}")
+                    print(f"    result_type={vr['result_type']}")
+                    print(f"    evaluated={vr['evaluated_candidate_count']}")
+                    print(f"    eligible={vr['eligible_candidate_count']}")
+                    print(f"    tier_counts={vr['tier_counts']}")
 
     # 5. 生成报告
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)

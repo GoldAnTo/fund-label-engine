@@ -308,36 +308,49 @@ def get_candidate_set(
 
     返回的不仅是候选行,还包含:
     - candidate_set_id
-    - thesis_id(从候选行获取)
-    - user_input_id(从候选行获取)
+    - thesis_id(从集合头获取)
+    - user_input_id(从集合头获取)
     - strategy_policy_id + version(从 thesis 获取)
-    - data_snapshot_id(从 thesis 获取)
+    - data_snapshot_id(从集合头获取,不是 thesis)
     - candidates(完整候选列表)
 
     这样机构投研可以从候选直接反查到研究请求、投资假设、策略版本和数据快照。
     """
+    # 优先从集合头获取元信息（正确的快照来源）
+    header = service.get_candidate_set_header(candidate_set_id)
+
     candidates = service.get_candidates_by_set(candidate_set_id)
-    if not candidates:
+
+    # 集合头和候选行都不存在时才是 404
+    if not header and not candidates:
         raise HTTPException(
             status_code=404,
             detail=f"候选集合不存在: {candidate_set_id}",
         )
 
-    # 从第一个候选获取 thesis_id 和 user_input_id
-    first = candidates[0]
-    thesis_id = first.get("thesis_id")
-    user_input_id = first.get("user_input_id")
+    # 从集合头获取 thesis_id、user_input_id、data_snapshot_id
+    if header:
+        thesis_id = header.get("thesis_id")
+        user_input_id = header.get("user_input_id")
+        data_snapshot_id = header.get("data_snapshot_id")
+    else:
+        # 回退：从第一个候选获取（旧数据兼容）
+        first = candidates[0]
+        thesis_id = first.get("thesis_id")
+        user_input_id = first.get("user_input_id")
+        data_snapshot_id = None
 
-    # 从 thesis 获取策略和快照信息
+    # 从 thesis 获取策略版本
+    # 旧数据兼容：如果 header 没有 data_snapshot_id，从 thesis 回退
     strategy_policy_id = None
     strategy_policy_version = None
-    data_snapshot_id = None
     if thesis_id:
         thesis = service.get_thesis(thesis_id)
         if thesis:
             strategy_policy_id = thesis.get("strategy_policy_id")
             strategy_policy_version = thesis.get("strategy_policy_version")
-            data_snapshot_id = thesis.get("data_snapshot_id")
+            if not data_snapshot_id:
+                data_snapshot_id = thesis.get("data_snapshot_id")
 
     return CandidateSetResponse(
         candidate_set_id=candidate_set_id,

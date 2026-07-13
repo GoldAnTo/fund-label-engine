@@ -275,6 +275,7 @@ class CognitionGovernanceService:
                     scanned_fund_count=batch.scanned_fund_count,
                     mapped_candidate_count=batch.mapped_candidate_count,
                     unmapped_due_to_data_count=batch.unmapped_due_to_data_count,
+                    unrelated_fund_count=batch.unrelated_fund_count,
                     created_by=actor_id,
                 )
 
@@ -324,6 +325,7 @@ class CognitionGovernanceService:
             "mapped_candidate_count": batch.mapped_candidate_count,
             "scanned_fund_count": batch.scanned_fund_count,
             "unmapped_due_to_data_count": batch.unmapped_due_to_data_count,
+            "unrelated_fund_count": batch.unrelated_fund_count,
             "data_snapshot_id": data_snapshot_id,
         }
 

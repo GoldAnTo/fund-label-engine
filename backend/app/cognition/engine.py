@@ -40,7 +40,8 @@ class FundCandidateEvidenceBatch:
     valuation_gated_candidates: tuple[FundCandidateEvidence, ...]
     scanned_fund_count: int
     mapped_candidate_count: int
-    unmapped_due_to_data_count: int
+    unmapped_due_to_data_count: int  # 因数据不足而无法映射的基金数
+    unrelated_fund_count: int  # 有持仓但与主题方向不相关的基金数
 
 
 class CognitionEngine:
@@ -1225,7 +1226,8 @@ class CognitionEngine:
         all_candidates: list[FundCandidateEvidence] = []
         valuation_gated: list[FundCandidateEvidence] = []
         mapped_count = 0
-        unmapped_count = 0
+        unrelated_count = 0  # 有持仓但与主题方向不相关
+        named_missing_count = 0  # 点名但无持仓数据
 
         for fc, holdings in all_holdings.items():
             match = self._match_fund_to_chain(
@@ -1238,7 +1240,7 @@ class CognitionEngine:
             if is_mapped:
                 mapped_count += 1
             elif not is_named:
-                unmapped_count += 1
+                unrelated_count += 1
 
             # 未映射且未点名的基金不进入候选
             if not is_mapped and not is_named:
@@ -1325,6 +1327,7 @@ class CognitionEngine:
         existing_codes = {c.fund_code for c in all_candidates}
         for code in explicitly_named_fund_codes:
             if code not in existing_codes:
+                named_missing_count += 1
                 fund_name = self._get_fund_name(conn, code)
                 all_candidates.append(
                     FundCandidateEvidence(
@@ -1351,7 +1354,8 @@ class CognitionEngine:
             valuation_gated_candidates=tuple(valuation_gated),
             scanned_fund_count=len(fund_codes),
             mapped_candidate_count=mapped_count,
-            unmapped_due_to_data_count=unmapped_count,
+            unmapped_due_to_data_count=named_missing_count,
+            unrelated_fund_count=unrelated_count,
         )
 
     @staticmethod

@@ -116,6 +116,7 @@ def _make_batch(
             mapped_candidate_count if mapped_candidate_count is not None else len(all_candidates)
         ),
         unmapped_due_to_data_count=unmapped_due_to_data_count,
+        unrelated_fund_count=0,
     )
 
 

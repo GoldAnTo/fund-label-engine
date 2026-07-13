@@ -299,6 +299,7 @@ class GovernanceTransaction:
         scanned_fund_count: int,
         mapped_candidate_count: int,
         unmapped_due_to_data_count: int,
+        unrelated_fund_count: int = 0,
         created_by: str,
     ) -> str:
         """插入 CandidateSet 集合头。返回 candidate_set_id。
@@ -311,8 +312,8 @@ class GovernanceTransaction:
             INSERT INTO candidate_set_headers (
                 candidate_set_id, thesis_id, user_input_id, data_snapshot_id,
                 source_method_version, scanned_fund_count, mapped_candidate_count,
-                unmapped_due_to_data_count, created_by, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                unmapped_due_to_data_count, unrelated_fund_count, created_by, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 candidate_set_id,
@@ -323,6 +324,7 @@ class GovernanceTransaction:
                 scanned_fund_count,
                 mapped_candidate_count,
                 unmapped_due_to_data_count,
+                unrelated_fund_count,
                 created_by,
                 _now_iso(),
             ),

@@ -332,6 +332,18 @@ class CandidatePriorityEngine:
             self._compute_dimension_results(ctx, data_gap=True)
             return self._build_result(ctx, "data_insufficient", "unassessable")
 
+        # 2b. 真实目标持仓低于最低要求（在数据门禁之后检查）
+        # 数据齐全但匹配权重不足，说明基金持仓与主题方向关联度不够
+        if ctx.evidence.matched_holding_weight < ctx.policy.minimum_target_holding_weight:
+            ctx.exclusion_reasons.append(
+                PriorityReason(
+                    code="target_exposure_below_minimum",
+                    message=REASON_MESSAGES["target_exposure_below_minimum"],
+                )
+            )
+            ctx.reasons.append(ctx.exclusion_reasons[-1])
+            return self._build_result(ctx, "excluded", "ineligible")
+
         # 3. 估值软门禁
         valuation_tier = self._check_valuation_gate(ctx)
         if valuation_tier == "excluded":
@@ -374,23 +386,25 @@ class CandidatePriorityEngine:
             ctx.reasons.append(ctx.exclusion_reasons[-1])
             return True
 
+        # v0 产品边界：策略 asset_type 必须与证据 asset_type 一致
+        # 真实策略 allowed_universe 可能包含 stock/industry/fund/strategy，
+        # 但 candidate_priority.asset_type="fund" 时只评价基金
+        if ev.asset_type != pol.asset_type:
+            ctx.exclusion_reasons.append(
+                PriorityReason(
+                    code="policy_asset_type_not_allowed",
+                    message=REASON_MESSAGES["policy_asset_type_not_allowed"],
+                )
+            )
+            ctx.reasons.append(ctx.exclusion_reasons[-1])
+            return True
+
         # fund_code 在 excluded_asset_codes
         if ev.fund_code in pol.excluded_asset_codes:
             ctx.exclusion_reasons.append(
                 PriorityReason(
                     code="policy_universe_excluded",
                     message=REASON_MESSAGES["policy_universe_excluded"],
-                )
-            )
-            ctx.reasons.append(ctx.exclusion_reasons[-1])
-            return True
-
-        # 真实目标持仓低于最低要求
-        if ev.matched_holding_weight < pol.minimum_target_holding_weight:
-            ctx.exclusion_reasons.append(
-                PriorityReason(
-                    code="target_exposure_below_minimum",
-                    message=REASON_MESSAGES["target_exposure_below_minimum"],
                 )
             )
             ctx.reasons.append(ctx.exclusion_reasons[-1])
