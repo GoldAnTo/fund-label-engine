@@ -91,8 +91,10 @@ export async function fetchPriorityRun(priorityRunId: string, signal?: AbortSign
   return res.json();
 }
 
-export async function fetchPriorityRunsByThesis(thesisId: string): Promise<PriorityRunSummary[]> {
-  return json(`/v1/governance/theses/${thesisId}/candidate-priority-runs`);
+export async function fetchPriorityRunsByThesis(thesisId: string, signal?: AbortSignal): Promise<PriorityRunSummary[]> {
+  const res = await fetch(`${BASE}/v1/governance/theses/${thesisId}/candidate-priority-runs`, { signal });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
 }
 
 async function postJSON(url: string, body: unknown) {

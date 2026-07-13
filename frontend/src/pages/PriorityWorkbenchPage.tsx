@@ -106,10 +106,14 @@ export default function PriorityWorkbenchPage() {
         }
       })
       .catch((e) => {
-        // 已取消或 abort 错误不处理
         if (cancelled || e?.name === "AbortError") return;
         setDetail(null);
-        setError(e instanceof Error ? e.message : String(e));
+        let msg = e instanceof Error ? e.message : String(e);
+        // 转换常见错误为中文
+        if (msg.includes("404")) msg = `未找到 PriorityRun: ${runId}`;
+        else if (msg.includes("500")) msg = "服务器内部错误，请稍后重试";
+        else if (msg.includes("Failed to fetch")) msg = "网络连接失败，请检查后端服务是否运行";
+        setError(msg);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -120,15 +124,26 @@ export default function PriorityWorkbenchPage() {
     };
   }, [runId]);
 
-  // 加载同 Thesis 的历史运行列表
+  // 加载同 Thesis 的历史运行列表（带取消）
   useEffect(() => {
     if (!detail?.thesis_id) {
       setHistoryRuns([]);
       return;
     }
-    fetchPriorityRunsByThesis(detail.thesis_id)
-      .then((runs) => setHistoryRuns(runs))
-      .catch(() => setHistoryRuns([]));
+    const controller = new AbortController();
+    let cancelled = false;
+    fetchPriorityRunsByThesis(detail.thesis_id, controller.signal)
+      .then((runs) => {
+        if (!cancelled) setHistoryRuns(runs);
+      })
+      .catch((e) => {
+        if (cancelled || e?.name === "AbortError") return;
+        setHistoryRuns([]);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [detail?.thesis_id]);
 
   // 切换运行：直接更新 URL，由 URL 变化触发 useEffect
@@ -165,15 +180,32 @@ export default function PriorityWorkbenchPage() {
         <div className="card">
           <h2>投资假设详情 / 基金研究优先级</h2>
           {error && (
-            <div className="alert alert-warn" style={{ marginBottom: 12 }}>
+            <div className="alert alert-warn" style={{ marginBottom: 12 }} role="alert">
               {error}
+              <button
+                className="secondary"
+                style={{ marginLeft: 12, fontSize: 11.5 }}
+                onClick={() => {
+                  setError(null);
+                  // 重新触发加载：先清除再恢复 URL 参数
+                  const current = runId;
+                  setSearchParams({}, { replace: true });
+                  setTimeout(() => setSearchParams({ run: current }, { replace: true }), 0);
+                }}
+              >
+                重试
+              </button>
             </div>
           )}
           <p className="muted" style={{ marginBottom: 12 }}>
             请输入 PriorityRun ID 加载工作台，或通过 URL 参数 ?run=xxx 直接访问。
           </p>
           <div className="toolbar">
+            <label htmlFor="priority-run-input" style={{ fontSize: 12.5, color: "var(--text-2)" }}>
+              PriorityRun ID
+            </label>
             <input
+              id="priority-run-input"
               style={{ flex: "0 0 320px" }}
               placeholder="输入 priority_run_id"
               value={runInput}
@@ -181,6 +213,7 @@ export default function PriorityWorkbenchPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleLoadInput();
               }}
+              aria-label="PriorityRun ID 输入框"
             />
             <button onClick={handleLoadInput} disabled={!runInput.trim()}>
               加载
@@ -197,7 +230,11 @@ export default function PriorityWorkbenchPage() {
   return (
     <div>
       {/* 加载提示 */}
-      {!error && loading && <div className="alert alert-info">加载中...</div>}
+      {!error && loading && (
+        <div className="alert alert-info" role="status" aria-live="polite">
+          加载中...
+        </div>
+      )}
 
       {/* 顶部信息条 */}
       {detail && (
@@ -344,7 +381,6 @@ export default function PriorityWorkbenchPage() {
                             <tr
                               key={c.priority_result_id}
                               tabIndex={0}
-                              role="button"
                               aria-selected={selectedResultId === c.priority_result_id}
                               onClick={() => handleSelect(c.priority_result_id)}
                               onKeyDown={(e) => {
@@ -353,13 +389,12 @@ export default function PriorityWorkbenchPage() {
                                   handleSelect(c.priority_result_id);
                                 }
                               }}
-                              style={{
-                                cursor: "pointer",
-                                background:
-                                  selectedResultId === c.priority_result_id
-                                    ? "var(--accent-soft)"
-                                    : undefined,
-                              }}
+                              className={
+                                selectedResultId === c.priority_result_id
+                                  ? "priority-row-selected priority-row-focus"
+                                  : "priority-row-focus"
+                              }
+                              style={{ cursor: "pointer" }}
                             >
                               <td className="num">{c.priority_rank ?? "-"}</td>
                               <td

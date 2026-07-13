@@ -581,6 +581,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   gap: 12px;
   align-items: start;
 }
+.priority-layout > div:first-child {
+  min-width: 0;
+}
 .priority-layout .priority-sidebar {
   position: sticky;
   top: 8px;
@@ -610,6 +613,21 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .priority-table-scroll {
   overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.priority-table-scroll table {
+  min-width: 600px;
+}
+
+/* 选中行高亮样式 */
+.priority-row-selected {
+  background: var(--accent-soft) !important;
+}
+.priority-row-focus:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 /* ---- Responsive ---- */
