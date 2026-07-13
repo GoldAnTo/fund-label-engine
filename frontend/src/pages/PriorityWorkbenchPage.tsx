@@ -50,12 +50,6 @@ function fmtWeight(v: number | null | undefined): string {
   return `${(v * 100).toFixed(1)}%`;
 }
 
-// 百分比格式化：已是 0-100，保留1位小数
-function fmtPct(v: number | null | undefined): string {
-  if (v === null || v === undefined) return "-";
-  return `${v.toFixed(1)}%`;
-}
-
 // 评分格式化：保留2位小数
 function fmtScore(v: number | null | undefined): string {
   if (v === null || v === undefined) return "-";
@@ -75,7 +69,8 @@ function reasonLabel(code: string): string {
 
 export default function PriorityWorkbenchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [runId, setRunId] = useState(searchParams.get("run") || "");
+  // 直接从 URL 读取运行 ID，不维护独立 state
+  const runId = searchParams.get("run") || "";
   const [runInput, setRunInput] = useState("");
   const [detail, setDetail] = useState<PriorityRunDetail | null>(null);
   const [historyRuns, setHistoryRuns] = useState<PriorityRunSummary[]>([]);
@@ -83,18 +78,22 @@ export default function PriorityWorkbenchPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // 加载 PriorityRun 详情
+  // 加载 PriorityRun 详情：依赖 URL 的 run 值，使用 AbortController + cancelled flag
   useEffect(() => {
     if (!runId) {
       setDetail(null);
       setHistoryRuns([]);
       setSelectedResultId("");
+      setError(null);
       return;
     }
+    const controller = new AbortController();
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    fetchPriorityRun(runId)
+    fetchPriorityRun(runId, controller.signal)
       .then((data) => {
+        if (cancelled) return;
         setDetail(data);
         setSelectedResultId("");
         // 默认选中第一档第一个候选
@@ -107,10 +106,18 @@ export default function PriorityWorkbenchPage() {
         }
       })
       .catch((e) => {
+        // 已取消或 abort 错误不处理
+        if (cancelled || e?.name === "AbortError") return;
         setDetail(null);
         setError(e instanceof Error ? e.message : String(e));
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [runId]);
 
   // 加载同 Thesis 的历史运行列表
@@ -124,19 +131,20 @@ export default function PriorityWorkbenchPage() {
       .catch(() => setHistoryRuns([]));
   }, [detail?.thesis_id]);
 
-  // 同步 runId 到 URL 参数
-  useEffect(() => {
-    const next = new URLSearchParams(searchParams);
-    if (runId) next.set("run", runId);
-    else next.delete("run");
-    setSearchParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId]);
+  // 切换运行：直接更新 URL，由 URL 变化触发 useEffect
+  const handleRunChange = (newId: string) => {
+    setSearchParams(newId ? { run: newId } : {}, { replace: true });
+  };
 
   // 手动输入加载
   const handleLoadInput = () => {
     const trimmed = runInput.trim();
-    if (trimmed) setRunId(trimmed);
+    if (trimmed) handleRunChange(trimmed);
+  };
+
+  // 选中基金行
+  const handleSelect = (resultId: string) => {
+    setSelectedResultId(resultId);
   };
 
   // 查找当前选中的候选对象
@@ -150,12 +158,17 @@ export default function PriorityWorkbenchPage() {
     return null;
   })();
 
-  // 没有 run 参数时，显示输入入口
-  if (!runId) {
+  // 错误状态或没有 runId 时，显示输入框卡片
+  if (error || !runId) {
     return (
       <div>
         <div className="card">
           <h2>投资假设详情 / 基金研究优先级</h2>
+          {error && (
+            <div className="alert alert-warn" style={{ marginBottom: 12 }}>
+              {error}
+            </div>
+          )}
           <p className="muted" style={{ marginBottom: 12 }}>
             请输入 PriorityRun ID 加载工作台，或通过 URL 参数 ?run=xxx 直接访问。
           </p>
@@ -183,17 +196,13 @@ export default function PriorityWorkbenchPage() {
 
   return (
     <div>
-      {/* 错误提示 */}
-      {error && <div className="alert alert-warn">{error}</div>}
-      {loading && <div className="alert alert-info">加载中...</div>}
+      {/* 加载提示 */}
+      {!error && loading && <div className="alert alert-info">加载中...</div>}
 
       {/* 顶部信息条 */}
       {detail && (
         <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-          <div
-            className="kv"
-            style={{ gridTemplateColumns: "140px 1fr 140px 1fr" }}
-          >
+          <div className="kv priority-meta-grid">
             <dt>Thesis ID</dt>
             <dd style={{ fontFamily: "ui-monospace, monospace" }}>
               {fmtText(detail.thesis_id)}
@@ -247,7 +256,7 @@ export default function PriorityWorkbenchPage() {
           <label>历史运行</label>
           <select
             value={runId}
-            onChange={(e) => setRunId(e.target.value)}
+            onChange={(e) => handleRunChange(e.target.value)}
             style={{ minWidth: 280 }}
           >
             {historyRuns.length === 0 ? (
@@ -274,14 +283,7 @@ export default function PriorityWorkbenchPage() {
 
       {/* 主区：五档基金列表 + 侧栏 */}
       {detail && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) 360px",
-            gap: 12,
-            alignItems: "start",
-          }}
-        >
+        <div className="priority-layout">
           {/* 左侧：五档基金列表 */}
           <div>
             {TIER_ORDER.map((tier) => {
@@ -317,63 +319,74 @@ export default function PriorityWorkbenchPage() {
 
                   {/* 基金表格（空档位不显示表格） */}
                   {candidates.length > 0 && (
-                    <table>
-                      <thead>
-                        <tr>
-                          <th style={{ width: 56 }}>档内排名</th>
-                          <th style={{ width: 90 }}>基金代码</th>
-                          <th>基金名称</th>
-                          <th className="num" style={{ width: 100 }}>
-                            真实目标持仓
-                          </th>
-                          <th className="num" style={{ width: 80 }}>
-                            披露覆盖
-                          </th>
-                          <th style={{ width: 90 }}>数据质量</th>
-                          <th style={{ width: 90 }}>估值状态</th>
-                          <th className="num" style={{ width: 70 }}>
-                            证据分
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {candidates.map((c) => (
-                          <tr
-                            key={c.priority_result_id}
-                            onClick={() => setSelectedResultId(c.priority_result_id)}
-                            style={{
-                              cursor: "pointer",
-                              background:
-                                selectedResultId === c.priority_result_id
-                                  ? "var(--accent-soft)"
-                                  : undefined,
-                            }}
-                          >
-                            <td className="num">{c.priority_rank ?? "-"}</td>
-                            <td
+                    <div className="priority-table-scroll">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th className="num" style={{ width: 56 }}>档内排名</th>
+                            <th style={{ width: 90 }}>基金代码</th>
+                            <th>基金名称</th>
+                            <th className="num" style={{ width: 100 }}>
+                              真实目标持仓
+                            </th>
+                            <th className="num" style={{ width: 80 }}>
+                              披露覆盖
+                            </th>
+                            <th style={{ width: 90 }}>数据质量</th>
+                            <th style={{ width: 90 }}>估值状态</th>
+                            <th className="num" style={{ width: 70 }}>
+                              证据分
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {candidates.map((c) => (
+                            <tr
+                              key={c.priority_result_id}
+                              tabIndex={0}
+                              role="button"
+                              aria-selected={selectedResultId === c.priority_result_id}
+                              onClick={() => handleSelect(c.priority_result_id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  handleSelect(c.priority_result_id);
+                                }
+                              }}
                               style={{
-                                fontFamily: "ui-monospace, monospace",
-                                fontWeight: 700,
+                                cursor: "pointer",
+                                background:
+                                  selectedResultId === c.priority_result_id
+                                    ? "var(--accent-soft)"
+                                    : undefined,
                               }}
                             >
-                              {c.fund_code}
-                            </td>
-                            <td style={{ color: "var(--text-2)" }}>
-                              {fmtText(c.fund_name)}
-                            </td>
-                            <td className="num">
-                              {fmtWeight(c.matched_holding_weight)}
-                            </td>
-                            <td className="num">
-                              {fmtWeight(c.disclosed_holding_weight)}
-                            </td>
-                            <td>{fmtText(c.data_quality_status)}</td>
-                            <td>{fmtText(c.valuation_status)}</td>
-                            <td className="num">{fmtScore(c.evidence_score)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                              <td className="num">{c.priority_rank ?? "-"}</td>
+                              <td
+                                style={{
+                                  fontFamily: "ui-monospace, monospace",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {c.fund_code}
+                              </td>
+                              <td style={{ color: "var(--text-2)" }}>
+                                {fmtText(c.fund_name)}
+                              </td>
+                              <td className="num">
+                                {fmtWeight(c.matched_holding_weight)}
+                              </td>
+                              <td className="num">
+                                {fmtWeight(c.disclosed_holding_weight)}
+                              </td>
+                              <td>{fmtText(c.data_quality_status)}</td>
+                              <td>{fmtText(c.valuation_status)}</td>
+                              <td className="num">{fmtScore(c.evidence_score)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </div>
               );
@@ -381,14 +394,7 @@ export default function PriorityWorkbenchPage() {
           </div>
 
           {/* 右侧：选中基金详情侧栏 */}
-          <div
-            style={{
-              position: "sticky",
-              top: 8,
-              maxHeight: "calc(100vh - 16px)",
-              overflow: "auto",
-            }}
-          >
+          <div className="priority-sidebar">
             {selectedCandidate ? (
               <CandidateDetail candidate={selectedCandidate} />
             ) : (
@@ -501,7 +507,7 @@ function CandidateDetail({ candidate }: { candidate: PriorityCandidate }) {
         </dd>
         <dt>归一化匹配率</dt>
         <dd style={{ fontVariantNumeric: "tabular-nums" }}>
-          {fmtPct(candidate.normalized_match_pct)}
+          {fmtWeight(candidate.normalized_match_pct)}
         </dd>
         <dt>适配分</dt>
         <dd style={{ fontVariantNumeric: "tabular-nums" }}>

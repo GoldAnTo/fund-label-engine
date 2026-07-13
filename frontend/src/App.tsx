@@ -21,12 +21,12 @@ const NAV_GROUPS = [
       { to: "/compare", label: "竞品横评" },
       { to: "/explorer", label: "风格总览" },
       { to: "/search", label: "风格筛选" },
+      { to: "/priority", label: "基金研究优先级" },
     ],
   },
   {
     title: "治理",
     links: [
-      { to: "/priority", label: "基金研究优先级" },
       { to: "/label-definitions", label: "规则定义" },
     ],
   },

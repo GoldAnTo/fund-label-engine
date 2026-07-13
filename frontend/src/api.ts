@@ -85,8 +85,10 @@ export interface PriorityRunSummary {
   created_at: string;
 }
 
-export async function fetchPriorityRun(priorityRunId: string): Promise<PriorityRunDetail> {
-  return json(`/v1/governance/candidate-priority-runs/${priorityRunId}`);
+export async function fetchPriorityRun(priorityRunId: string, signal?: AbortSignal): Promise<PriorityRunDetail> {
+  const res = await fetch(`${BASE}/v1/governance/candidate-priority-runs/${priorityRunId}`, { signal });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
 }
 
 export async function fetchPriorityRunsByThesis(thesisId: string): Promise<PriorityRunSummary[]> {
