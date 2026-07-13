@@ -1452,11 +1452,17 @@ export async function postCognition(
   direction: string,
   beliefLink?: string,
   conviction?: string,
+  riskTolerance?: string,
+  timeHorizon?: string,
+  beliefNote?: string,
 ): Promise<CognitionResponse> {
   return postJSON("/v1/cognition", {
     theme_key: direction,
     belief_link: beliefLink ?? null,
     conviction: conviction ?? "medium",
+    risk_tolerance: riskTolerance ?? "balanced",
+    time_horizon: timeHorizon ?? "medium",
+    belief_note: beliefNote ?? null,
   });
 }
 
@@ -1479,11 +1485,17 @@ export async function postConceptCognition(
   conceptCode: string,
   conceptName: string,
   conviction?: string,
+  riskTolerance?: string,
+  timeHorizon?: string,
+  beliefNote?: string,
 ): Promise<CognitionResponse> {
   return postJSON("/v1/cognition/concept", {
     concept_code: conceptCode,
     concept_name: conceptName,
     conviction: conviction ?? "medium",
+    risk_tolerance: riskTolerance ?? "balanced",
+    time_horizon: timeHorizon ?? "medium",
+    belief_note: beliefNote ?? null,
   });
 }
 
@@ -1511,11 +1523,17 @@ export async function postStockCognition(
   stockCode: string,
   stockName?: string,
   conviction?: string,
+  riskTolerance?: string,
+  timeHorizon?: string,
+  beliefNote?: string,
 ): Promise<CognitionResponse & { stock_info?: Record<string, unknown>; valuation_assessment?: string }> {
   return postJSON("/v1/cognition/stock", {
     stock_code: stockCode,
     stock_name: stockName ?? null,
     conviction: conviction ?? "medium",
+    risk_tolerance: riskTolerance ?? "balanced",
+    time_horizon: timeHorizon ?? "medium",
+    belief_note: beliefNote ?? null,
   });
 }
 
