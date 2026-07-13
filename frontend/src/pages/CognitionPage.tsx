@@ -230,6 +230,10 @@ export default function CognitionPage() {
     setCustomInput("");
   };
 
+  // useScrollSpy 必须在所有条件 return 之前调用，避免 Hooks 顺序变化
+  const sectionIds = ["sec-brief", "sec-evidence", "sec-candidates", "sec-portfolio"];
+  const scrolled = useScrollSpy(sectionIds);
+
   // === 阶段1：选方向 ===
   if (step === 1) {
     return (
@@ -464,11 +468,6 @@ export default function CognitionPage() {
     const selectedFund = selectedFundCode
       ? result.step4_fund_matches.find((f) => f.fund_code === selectedFundCode) ?? null
       : null;
-
-    // 章节列表（左侧导航）
-    // 选基 v1：精简为 4 段（设计 §4-§5）
-    const sectionIds = ["sec-brief", "sec-evidence", "sec-candidates", "sec-portfolio"];
-    const scrolled = useScrollSpy(sectionIds);
 
     // 把 step3 + step5 validation 整理为支持/反对/待验证三类证据
     const evidenceItems: EvidenceItem[] = [];
