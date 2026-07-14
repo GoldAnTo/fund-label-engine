@@ -5,6 +5,10 @@ import sqlite3
 import statistics
 from typing import Any
 
+import numpy as np
+import pandas as pd
+from pypfopt import EfficientFrontier, expected_returns, risk_models
+
 
 def calculate_overlap(
     holdings_a: list[dict[str, Any]],
@@ -157,6 +161,148 @@ def build_portfolio(
     result["suggested_weight"] = round(sum(s["weight"] for s in selected), 1)
     result["defense_weight"] = round(defense_weight, 1)
     return result
+
+
+def _detect_return_column(conn: sqlite3.Connection) -> str:
+    """检测 nav_history 表中日收益率列名（daily_growth_rate 或 daily_return）。"""
+    cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(nav_history)").fetchall()
+    }
+    if "daily_growth_rate" in cols:
+        return "daily_growth_rate"
+    if "daily_return" in cols:
+        return "daily_return"
+    return "daily_growth_rate"
+
+
+def optimize_portfolio(
+    candidates: list[dict[str, Any]],
+    conn: sqlite3.Connection,
+    total_cognition_weight: float = 25.0,
+    max_single_weight: float = 12.0,
+    min_single_weight: float = 3.0,
+) -> dict[str, Any] | None:
+    """用均值-方差优化分配基金权重。
+
+    方法：
+    1. 从 nav_history 提取候选基金的日收益率
+    2. 计算预期收益（年化均值）和协方差矩阵
+    3. 用 EfficientFrontier.max_sharpe() 优化，失败时回退到 min_volatility()
+    4. 约束：单只 [min_single_weight, max_single_weight]，总和 = total_cognition_weight
+
+    返回 None 时表示优化失败（数据不足或无可行解），调用方应回退到 build_portfolio()。
+    """
+    # 候选基金少于 2 只无法做组合优化
+    if len(candidates) < 2:
+        return None
+
+    fund_codes = [c["fund_code"] for c in candidates]
+
+    # 检测日收益率列名
+    return_col = _detect_return_column(conn)
+
+    # 提取日收益率矩阵
+    returns_data: dict[str, dict[str, float]] = {}
+    for fc in fund_codes:
+        rows = conn.execute(
+            f"SELECT nav_date, {return_col} FROM nav_history "
+            f"WHERE fund_code = ? AND {return_col} IS NOT NULL "
+            f"ORDER BY nav_date",
+            (fc,),
+        ).fetchall()
+        if len(rows) < 30:
+            return None  # 数据不足
+        returns_data[fc] = {r[0]: r[1] for r in rows}
+
+    # 对齐日期，取所有基金的共同交易日
+    all_dates: set[str] = set()
+    for d in returns_data.values():
+        all_dates.update(d.keys())
+    all_dates_sorted = sorted(all_dates)
+
+    if len(all_dates_sorted) < 30:
+        return None
+
+    # 构建 DataFrame，缺失值用 NaN 填充后 dropna
+    df = pd.DataFrame(
+        {fc: [returns_data[fc].get(d, np.nan) for d in all_dates_sorted] for fc in fund_codes}
+    )
+    df = df.dropna()
+
+    if len(df) < 30:
+        return None
+
+    # 计算预期收益和协方差（日收益率已经是小数形式，用 returns_data=True）
+    try:
+        mu = expected_returns.mean_historical_return(df, returns_data=True, frequency=252)
+        S = risk_models.sample_cov(df, returns_data=True, frequency=252)
+    except Exception:
+        return None
+
+    # 协方差矩阵奇异时无法优化
+    try:
+        _ = np.linalg.inv(S.values)
+    except np.linalg.LinAlgError:
+        return None
+
+    # 归一化权重的上下界（最终权重 = 归一化权重 * total_cognition_weight）
+    lower_bound = min_single_weight / total_cognition_weight
+    upper_bound = max_single_weight / total_cognition_weight
+
+    # 候选基金数量太少导致约束不可行时直接返回 None
+    if len(fund_codes) * upper_bound < 1.0 or len(fund_codes) * lower_bound > 1.0:
+        return None
+
+    ef = EfficientFrontier(mu, S, weight_bounds=(lower_bound, upper_bound))
+
+    optimization_method = "max_sharpe"
+    try:
+        weights = ef.max_sharpe()
+    except Exception:
+        # max_sharpe 失败（可能是约束变换导致不可行），回退到最小波动率
+        ef = EfficientFrontier(mu, S, weight_bounds=(lower_bound, upper_bound))
+        try:
+            weights = ef.min_volatility()
+            optimization_method = "min_volatility"
+        except Exception:
+            return None
+
+    # 清理权重：过滤极小值，缩放到总仓位百分比
+    clean_weights = {
+        k: round(v * total_cognition_weight, 1)
+        for k, v in weights.items()
+        if v > 0.001
+    }
+
+    # 缩放校正：确保总和精确等于 total_cognition_weight（允许 +-0.1 误差）
+    total = sum(clean_weights.values())
+    if total <= 0:
+        return None
+
+    # 如果误差超过 0.1，按比例微调
+    if abs(total - total_cognition_weight) > 0.1:
+        scale = total_cognition_weight / total
+        clean_weights = {k: round(v * scale, 1) for k, v in clean_weights.items()}
+
+    # 构建结果，保留候选基金原始信息并附加权重
+    selected: list[dict[str, Any]] = []
+    for c in candidates:
+        w = clean_weights.get(c["fund_code"], 0)
+        if w > 0:
+            selected.append({**c, "weight": w, "max_weight": max_single_weight})
+
+    if not selected:
+        return None
+
+    total_invested = round(sum(s["weight"] for s in selected), 1)
+
+    return {
+        "selected_funds": selected,
+        "optimization_method": optimization_method,
+        "suggested_weight": total_invested,
+        "total_invested": total_invested,
+    }
 
 
 def calculate_portfolio_metrics(

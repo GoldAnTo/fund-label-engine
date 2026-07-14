@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    from app.cognition.industry_db import IndustryDB
 
 
 def _config_path() -> Path:
@@ -42,3 +45,30 @@ def get_all_industry_keywords(chain: dict[str, Any]) -> list[str]:
             continue
         keywords.extend(link.get("industry_keywords", []))
     return keywords
+
+
+def enrich_chain_with_industry_db(
+    chain: dict[str, Any], industry_db: IndustryDB
+) -> dict[str, Any]:
+    """用行业数据库增强产业链环节的股票列表。
+
+    遍历非 excluded 的环节，用 industry_keywords 查行业数据库，
+    把查到的额外股票代码补充到 extra_stocks 字段（不修改原有 stocks 列表）。
+    如果 industry_db 未加载或无数据，直接返回原 chain 不做修改。
+    """
+    if not industry_db.is_loaded():
+        return chain
+
+    for link in chain.get("chain", []):
+        if link.get("exclude"):
+            continue
+        # 用行业关键词查找更多相关股票
+        for ind_kw in link.get("industry_keywords", []):
+            extra_stocks = industry_db.get_stocks_by_industry(ind_kw)
+            existing = set(link.get("stocks", []))
+            existing_codes = set(link.get("extra_stocks", []))
+            for s in extra_stocks:
+                if s not in existing and s not in existing_codes:
+                    link.setdefault("extra_stocks", []).append(s)
+                    existing_codes.add(s)
+    return chain

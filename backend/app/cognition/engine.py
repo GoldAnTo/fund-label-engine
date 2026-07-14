@@ -13,18 +13,22 @@ from typing import Any
 
 from app.cognition.asset_mapper import calculate_holding_trend, get_holdings
 from app.cognition.chain_graph import (
+    enrich_chain_with_industry_db,
     get_all_industry_keywords,
     get_all_stock_keywords,
     load_chains,
 )
 from app.cognition.expectation_gap import calculate_link_expectation_gap
 from app.cognition.holding_source import HoldingSourceAdapter
+from app.cognition.industry_db import IndustryDB
 from app.cognition.portfolio_builder import (
     build_portfolio,
     calculate_overlap,
     calculate_portfolio_metrics,
+    optimize_portfolio,
 )
 from app.cognition.theme_registry import load_themes
+from app.cognition.thesis_tracker import create_tracker_from_cognition
 from app.cognition.validator import validate_cognition
 from app.cognition.valuation_gate import calculate_valuation, check_hard_limits
 from app.services.candidate_priority import FundCandidateEvidence
@@ -54,12 +58,19 @@ class CognitionEngine:
         engine.close()
     """
 
-    def __init__(self, source_db: str | Path, factor_db: str | Path) -> None:
+    def __init__(
+        self,
+        source_db: str | Path,
+        factor_db: str | Path,
+        industry_db: IndustryDB | None = None,
+    ) -> None:
         self._source_db = Path(source_db)
         self._factor_db = Path(factor_db).resolve() if factor_db else None
         self._themes = load_themes()
         self._chains = load_chains()
         self._conn: sqlite3.Connection | None = None
+        # 行业数据库：用于产业链匹配的补充查询，为 None 时回退到纯关键词匹配
+        self._industry_db = industry_db
 
     # ------------------------------------------------------------------
     # 连接管理
@@ -76,6 +87,12 @@ class CognitionEngine:
             if self._factor_db and self._factor_db.exists():
                 conn.execute(f"ATTACH DATABASE '{self._factor_db}' AS factordb")
             self._conn = conn
+            # 如果未显式传入 industry_db，尝试从 source DB 自动加载
+            if self._industry_db is None:
+                auto_db = IndustryDB()
+                auto_db.load_from_sqlite(conn)
+                if auto_db.is_loaded():
+                    self._industry_db = auto_db
         return self._conn
 
     def close(self) -> None:
@@ -864,6 +881,10 @@ class CognitionEngine:
         if not chain:
             chain = self._build_dynamic_chain(conn, direction)
 
+        # 用行业数据库增强产业链环节的股票列表（补充 extra_stocks）
+        if self._industry_db and self._industry_db.is_loaded():
+            chain = enrich_chain_with_industry_db(chain, self._industry_db)
+
         judgment = chain["judgment"]
 
         # 估值硬约束：用户可覆盖默认值
@@ -910,8 +931,16 @@ class CognitionEngine:
                 for h in holdings:
                     name = h.get("stock_name", "") or ""
                     ind = h.get("industry_name", "") or ""
+                    # 关键词子串匹配
                     if any(kw in name for kw in stock_kws) or any(kw in ind for kw in ind_kws):
                         all_matched_holdings.append(h)
+                        continue
+                    # 行业数据库补充匹配
+                    if self._industry_db and self._industry_db.is_loaded():
+                        code = h.get("stock_code", "") or ""
+                        stock_industries = self._industry_db.get_industries_by_stock(code)
+                        if any(kw in si for si in stock_industries for kw in ind_kws):
+                            all_matched_holdings.append(h)
 
             gap = calculate_link_expectation_gap(link, all_matched_holdings, revenue_exposure)
             gap["benefit_logic"] = link.get("benefit_logic", "")
@@ -1047,13 +1076,36 @@ class CognitionEngine:
             defense_fund = self._find_defense_fund(conn, all_holdings, defense_chain, revenue_exposure)
 
         # 使用 portfolio_builder 构建组合（接入重叠度/相关性/估值约束）
-        portfolio = build_portfolio(
+        # 先尝试均值-方差优化，失败时回退到启发式分配
+        optimized = optimize_portfolio(
             portfolio_candidates,
-            defense_fund,
-            corr_threshold=0.85,
+            conn,
             total_cognition_weight=total_cognition_weight,
-            defense_weight_pct=defense_weight_pct,
         )
+        if optimized:
+            # 优化成功：用优化结果，补上防守基金和现金仓位
+            portfolio = optimized
+            if defense_fund:
+                defense_fund["weight"] = defense_weight_pct
+                portfolio["defense_position"] = defense_fund
+                portfolio["defense_weight"] = defense_weight_pct
+                total = portfolio["total_invested"] + defense_weight_pct
+            else:
+                portfolio["defense_position"] = None
+                portfolio["defense_weight"] = 0.0
+                total = portfolio["total_invested"]
+            portfolio["cash_pct"] = round(max(0, 100 - total), 1)
+            portfolio["optimization_method"] = "mean_variance"
+        else:
+            # 回退到原有启发式逻辑
+            portfolio = build_portfolio(
+                portfolio_candidates,
+                defense_fund,
+                corr_threshold=0.85,
+                total_cognition_weight=total_cognition_weight,
+                defense_weight_pct=defense_weight_pct,
+            )
+            portfolio["optimization_method"] = "heuristic"
 
         # 持仓重叠度分析
         overlap_pairs: list[dict[str, Any]] = []
@@ -1111,6 +1163,13 @@ class CognitionEngine:
         portfolio["top_funds"] = portfolio.get("selected_funds", [])
         portfolio["defense_fund"] = defense_fund
 
+        # === 假设追踪闭环：Brier Score + 贝叶斯更新 ===
+        tracker = create_tracker_from_cognition(
+            thesis_id=f"{direction}_{date.today().isoformat()}",
+            validation_result=validation,
+            initial_probability=0.5,
+        )
+
         return {
             "direction": direction,
             "available_links": [
@@ -1124,6 +1183,7 @@ class CognitionEngine:
             "step4_fund_matches": top_funds,
             "step5_validation": validation,
             "step5_portfolio": portfolio,
+            "thesis_tracker": tracker.to_dict(),
             "gated_out_funds": [
                 {
                     "fund_code": f["fund_code"],
@@ -1163,6 +1223,10 @@ class CognitionEngine:
         if not chain:
             chain = self._build_dynamic_chain(conn, direction)
 
+        # 用行业数据库增强产业链环节的股票列表（补充 extra_stocks）
+        if self._industry_db and self._industry_db.is_loaded():
+            chain = enrich_chain_with_industry_db(chain, self._industry_db)
+
         judgment = chain["judgment"]
         hard_limits = dict(judgment.get("hard_limits", {}))
         if max_valuation_percentile is not None:
@@ -1192,8 +1256,16 @@ class CognitionEngine:
                 for h in holdings:
                     name = h.get("stock_name", "") or ""
                     ind = h.get("industry_name", "") or ""
+                    # 关键词子串匹配
                     if any(kw in name for kw in stock_kws) or any(kw in ind for kw in ind_kws):
                         all_matched_holdings.append(h)
+                        continue
+                    # 行业数据库补充匹配
+                    if self._industry_db and self._industry_db.is_loaded():
+                        code = h.get("stock_code", "") or ""
+                        stock_industries = self._industry_db.get_industries_by_stock(code)
+                        if any(kw in si for si in stock_industries for kw in ind_kws):
+                            all_matched_holdings.append(h)
             gap = calculate_link_expectation_gap(link, all_matched_holdings, revenue_exposure)
             gap["benefit_logic"] = link.get("benefit_logic", "")
             link_analysis.append(gap)
@@ -1509,12 +1581,13 @@ class CognitionEngine:
         ind_kws: list[str],
         revenue_data: dict[str, dict[str, float]] | None = None,
     ) -> dict[str, Any]:
-        """计算基金对目标资产的暴露度（收入暴露分析 + 关键词回退）。
+        """计算基金对目标资产的暴露度（收入暴露分析 + 关键词回退 + 行业数据库回退）。
 
         匹配优先级：
         1. 收入暴露：如果该股票有主营业务构成数据且某业务条目匹配关键词，
            按营收占比加权（例：中际旭创 光模块85% -> 暴露度0.85）
         2. 关键词回退：无主营构成数据时，按股票名/行业名关键词子串匹配（暴露度1.0）
+        3. 行业数据库回退：关键词未命中时，用行业数据库反查股票所属行业（暴露度1.0）
         """
         total_weight = sum(h["weight"] for h in holdings)
         if total_weight == 0:
@@ -1539,6 +1612,11 @@ class CognitionEngine:
             elif any(kw in name for kw in stock_kws) or any(kw in ind for kw in ind_kws):
                 # 2. 关键词回退（暴露度1.0）
                 matched_weight += h["weight"]
+            elif self._industry_db and self._industry_db.is_loaded() and ind_kws:
+                # 3. 行业数据库回退：反查股票所属行业（暴露度1.0）
+                stock_industries = self._industry_db.get_industries_by_stock(code)
+                if any(kw in si for si in stock_industries for kw in ind_kws):
+                    matched_weight += h["weight"]
 
         return {
             "match_pct": round(matched_weight / total_weight * 100, 1),

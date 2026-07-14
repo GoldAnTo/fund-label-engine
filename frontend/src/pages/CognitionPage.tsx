@@ -944,6 +944,90 @@ export default function CognitionPage() {
                           </div>
                         </details>
                       )}
+
+                      {/* 假设追踪：Brier Score + 贝叶斯更新 */}
+                      {result.thesis_tracker && (() => {
+                        const t = result.thesis_tracker;
+                        const priorPct = Math.round(t.prior_probability * 100);
+                        const postPct = Math.round(t.posterior_probability * 100);
+                        const changePct = Math.round(t.probability_change * 100);
+                        const accuracyColor = t.prediction_accuracy === "good" ? "var(--pos)" : t.prediction_accuracy === "fair" ? "var(--warn)" : t.prediction_accuracy === "poor" ? "var(--neg)" : "var(--text-3)";
+                        const accuracyLabel = t.prediction_accuracy === "good" ? "优秀" : t.prediction_accuracy === "fair" ? "一般" : t.prediction_accuracy === "poor" ? "较差" : "未验证";
+                        return (
+                          <section className="card" style={{ marginTop: "12px" }}>
+                            <div style={{ fontWeight: 600, marginBottom: "12px" }}>假设追踪</div>
+
+                            {/* 先验 -> 后验 概率变化条 */}
+                            <div style={{ marginBottom: "12px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: "6px" }}>
+                                <span style={{ color: "var(--text-3)" }}>先验概率 {priorPct}%</span>
+                                <span style={{ color: changePct >= 0 ? "var(--pos)" : "var(--neg)", fontWeight: 600 }}>
+                                  {changePct >= 0 ? "+" : ""}{changePct}%
+                                </span>
+                                <span style={{ color: "var(--accent)", fontWeight: 600 }}>后验概率 {postPct}%</span>
+                              </div>
+                              <div style={{ position: "relative", height: "10px", background: "var(--surface-2, #e8e8e8)", borderRadius: "5px", overflow: "hidden" }}>
+                                <div style={{
+                                  position: "absolute",
+                                  left: 0,
+                                  top: 0,
+                                  height: "100%",
+                                  width: `${priorPct}%`,
+                                  background: "var(--text-3)",
+                                  opacity: 0.4,
+                                }} />
+                                <div style={{
+                                  position: "absolute",
+                                  left: 0,
+                                  top: 0,
+                                  height: "100%",
+                                  width: `${postPct}%`,
+                                  background: "var(--accent)",
+                                }} />
+                              </div>
+                            </div>
+
+                            {/* 证据计数 + 预测准确度 */}
+                            <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: 13, marginBottom: t.brier_scores && t.brier_scores.length > 0 ? "12px" : "0" }}>
+                              <span>
+                                <span style={{ color: "var(--text-3)" }}>证据总计 </span>
+                                <span style={{ fontWeight: 600 }}>{t.total_evidence}</span>
+                              </span>
+                              <span style={{ color: "var(--pos)" }}>支持 {t.supporting_evidence}</span>
+                              <span style={{ color: "var(--neg)" }}>反对 {t.opposing_evidence}</span>
+                              <span>
+                                <span style={{ color: "var(--text-3)" }}>已验证预测 </span>
+                                <span style={{ fontWeight: 600 }}>{t.resolved_predictions}/{t.total_predictions}</span>
+                              </span>
+                              <span>
+                                <span style={{ color: "var(--text-3)" }}>准确度 </span>
+                                <span style={{ color: accuracyColor, fontWeight: 600 }}>{accuracyLabel}</span>
+                              </span>
+                              {t.avg_brier_score !== null && (
+                                <span>
+                                  <span style={{ color: "var(--text-3)" }}>平均 Brier </span>
+                                  <span style={{ fontWeight: 600 }}>{t.avg_brier_score.toFixed(4)}</span>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Brier Score 明细 */}
+                            {t.brier_scores && t.brier_scores.length > 0 && (
+                              <div style={{ borderTop: "1px solid var(--border, #e0e0e0)", paddingTop: "10px" }}>
+                                <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: "6px" }}>Brier Score 明细（越低越准）</div>
+                                {t.brier_scores.map((b) => (
+                                  <div key={b.prediction_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 0" }}>
+                                    <span style={{ flex: 1, marginRight: "8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.prediction}</span>
+                                    <span style={{ color: "var(--text-3)", minWidth: "60px", textAlign: "right" }}>预测 {Math.round(b.probability * 100)}%</span>
+                                    <span style={{ color: "var(--text-3)", minWidth: "60px", textAlign: "right" }}>实际 {b.outcome === 1 ? "是" : "否"}</span>
+                                    <span style={{ minWidth: "50px", textAlign: "right", fontWeight: 600, color: b.brier_score < 0.15 ? "var(--pos)" : b.brier_score < 0.25 ? "var(--warn)" : "var(--neg)" }}>{b.brier_score.toFixed(4)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </section>
+                        );
+                      })()}
                     </>
                   ) : (
                     <div className="cognition-empty-state" role="status">

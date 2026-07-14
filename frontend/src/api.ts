@@ -1312,6 +1312,29 @@ export interface CognitionValidation {
   cognition_feedback?: CognitionFeedback;
 }
 
+// 假设追踪：Brier Score + 贝叶斯更新
+export interface ThesisTracker {
+  thesis_id: string;
+  prior_probability: number;
+  posterior_probability: number;
+  probability_change: number;
+  total_evidence: number;
+  supporting_evidence: number;
+  opposing_evidence: number;
+  total_predictions: number;
+  resolved_predictions: number;
+  avg_brier_score: number | null;
+  prediction_accuracy: string;
+  brier_scores: Array<{
+    prediction_id: string;
+    prediction: string;
+    probability: number;
+    outcome: number;
+    brier_score: number;
+    resolution_date: string;
+  }>;
+}
+
 export interface DebateRound {
   round: number;
   bull_argument: Evidence;
@@ -1406,6 +1429,8 @@ export interface CognitionResponse {
     overlap_analysis?: OverlapAnalysis;
     metrics?: PortfolioMetrics;
   };
+  // 假设追踪：Brier Score + 贝叶斯更新
+  thesis_tracker?: ThesisTracker;
 }
 
 export interface PortfolioMetrics {
