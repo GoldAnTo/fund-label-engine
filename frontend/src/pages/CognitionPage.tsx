@@ -11,7 +11,7 @@ import {
 import { DonutChart, HorizontalBarChart, ScenarioChart } from "../charts";
 import {
   Card, CardHeader, CardBody, Badge, ProgressBar, Stat, Table, Th, Td,
-  Loading, ErrorBox, EmptyState,
+  Loading, ErrorBox, EmptyState, TabBar,
 } from "../components/ui";
 
 // === 标签映射 ===
@@ -34,6 +34,14 @@ const DECISION_CONFIG: Record<string, { label: string; variant: "pos" | "warn" |
   avoid: { label: "暂不参与", variant: "neg" },
   needs_more_evidence: { label: "证据不足", variant: "neutral" },
 };
+
+const COGNITION_TABS = [
+  { id: "summary", label: "概览" },
+  { id: "evidence", label: "证据链" },
+  { id: "candidates", label: "候选基金" },
+  { id: "risk", label: "风险护栏" },
+  { id: "portfolio", label: "组合与备忘录" },
+];
 
 function fmt(v: number | string | null | undefined, suffix = ""): string {
   if (v === null || v === undefined) return "-";
@@ -94,6 +102,7 @@ export default function CognitionPage() {
   const [monitorLoading, setMonitorLoading] = useState(false);
   const [monitorError, setMonitorError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [activeTab, setActiveTab] = useState<"summary" | "evidence" | "candidates" | "risk" | "portfolio">("summary");
 
   // === Effects ===
   useEffect(() => {
@@ -396,6 +405,13 @@ export default function CognitionPage() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* 主区 */}
             <div className="lg:col-span-8 space-y-8">
+              <TabBar
+                tabs={COGNITION_TABS}
+                active={activeTab}
+                onChange={(id) => setActiveTab(id as typeof activeTab)}
+              />
+              {activeTab === "summary" && (
+              <>
               {/* 1. 决策摘要条（4 列） */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <KpiTile label="IC 投决">
@@ -455,10 +471,10 @@ export default function CognitionPage() {
                   <p className="text-base font-medium leading-relaxed m-0 flex-1">{headline.text}</p>
                 </div>
               </div>
-
-              {/* 3. 投资证据链 */}
+              </>
+              )}
+              {activeTab === "evidence" && (
               <section>
-                <h3 className="text-xs uppercase tracking-wide text-text-3 font-semibold mb-3">投资证据链</h3>
                 {result.step1_judgment?.belief && (
                   <div className="p-6 bg-surface border border-border rounded-lg mb-4">
                     <div className="text-xs uppercase tracking-wide text-text-3 mb-2">投资信念</div>
@@ -499,11 +515,10 @@ export default function CognitionPage() {
                 <EvidenceList kind="neg" title="反对证据" count={validation?.evidence_counts.opposing ?? opposingTop5.length}
                   items={opposingTop5} extra={opposingExtra} />
               </section>
-
-              {/* 4. 候选基金 */}
+              )}
+              {activeTab === "candidates" && (
               <section>
                 <div className="flex items-baseline justify-between mb-3">
-                  <h3 className="text-xs uppercase tracking-wide text-text-3 font-semibold">候选基金</h3>
                   {selectedFund && (
                     <div className="text-sm">
                       <span className="text-text-3">当前查看</span>
@@ -560,10 +575,9 @@ export default function CognitionPage() {
                   </Card>
                 )}
               </section>
-
-              {/* 5. 风险护栏 */}
+              )}
+              {activeTab === "risk" && (
               <section>
-                <h3 className="text-xs uppercase tracking-wide text-text-3 font-semibold mb-3">风险护栏</h3>
                 {result.ic_review && <ICReviewInline ic={result.ic_review} />}
                 {result.thesis_tracker?.health && <ThesisHealthInline health={result.thesis_tracker.health} />}
                 {result.ic_review && result.ic_review.hurdles.length > 0 && (
@@ -606,10 +620,10 @@ export default function CognitionPage() {
                   </details>
                 )}
               </section>
-
-              {/* 6. 组合 + 备忘录 */}
+              )}
+              {activeTab === "portfolio" && (
+              <>
               <section>
-                <h3 className="text-xs uppercase tracking-wide text-text-3 font-semibold mb-3">组合与备忘录</h3>
                 {pf && pf.top_funds && pf.top_funds.length > 0 ? (
                   <Card className="mb-4">
                     <CardHeader title="组合草案" subtitle={pf.rationale} />
@@ -715,6 +729,8 @@ export default function CognitionPage() {
                     ))}
                   </div>
                 </details>
+              )}
+              </>
               )}
             </div>
 
