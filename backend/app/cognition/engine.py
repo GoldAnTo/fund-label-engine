@@ -20,7 +20,9 @@ from app.cognition.chain_graph import (
 )
 from app.cognition.expectation_gap import calculate_link_expectation_gap
 from app.cognition.holding_source import HoldingSourceAdapter
+from app.cognition.ic_gate import create_ic_review_from_cognition
 from app.cognition.industry_db import IndustryDB
+from app.cognition.investment_memo import generate_memo_from_cognition
 from app.cognition.portfolio_builder import (
     build_portfolio,
     calculate_overlap,
@@ -1163,11 +1165,48 @@ class CognitionEngine:
         portfolio["top_funds"] = portfolio.get("selected_funds", [])
         portfolio["defense_fund"] = defense_fund
 
-        # === 假设追踪闭环：Brier Score + 贝叶斯更新 ===
+        # === 假设追踪闭环：Brier Score + 贝叶斯更新 + 健康监控 ===
         tracker = create_tracker_from_cognition(
             thesis_id=f"{direction}_{date.today().isoformat()}",
             validation_result=validation,
             initial_probability=0.5,
+            direction=direction,
+            fund_matches=top_funds,
+            judgment=judgment,
+        )
+
+        # 用当前分析结果刷新健康状态
+        current_metrics = {
+            "match_pct": top_funds[0]["match_pct"] if top_funds else None,
+            "pe": top_funds[0].get("valuation", {}).get("weighted_pe") if top_funds else None,
+            "val_pct": top_funds[0].get("valuation", {}).get("weighted_val_pct") if top_funds else None,
+            "peg": top_funds[0].get("valuation", {}).get("peg") if top_funds else None,
+            "trend": 1 if top_funds and top_funds[0].get("trend", {}).get("trend") == "increasing" else 0 if top_funds and top_funds[0].get("trend", {}).get("trend") == "stable" else -1,
+            "opposing_count": len(validation.get("opposing_evidence", [])),
+        }
+        health = tracker.refresh_health(current_metrics)
+        thesis_tracker_data = tracker.to_dict()
+        thesis_tracker_data["health"] = health
+
+        # === 投决会门槛审查 ===
+        ic_review = create_ic_review_from_cognition(
+            validation=validation,
+            fund_matches=fund_matches,
+            gated_out=gated_out,
+            judgment=judgment,
+            portfolio=portfolio,
+        )
+
+        # === 投资备忘录 ===
+        memo = generate_memo_from_cognition(
+            direction=direction,
+            judgment=judgment,
+            chain_analysis=link_analysis,
+            expectation_gap=step3,
+            fund_matches=fund_matches,
+            validation=validation,
+            portfolio=portfolio,
+            gated_out=gated_out,
         )
 
         return {
@@ -1183,7 +1222,9 @@ class CognitionEngine:
             "step4_fund_matches": top_funds,
             "step5_validation": validation,
             "step5_portfolio": portfolio,
-            "thesis_tracker": tracker.to_dict(),
+            "thesis_tracker": thesis_tracker_data,
+            "ic_review": ic_review.to_dict(),
+            "investment_memo": memo.to_dict(),
             "gated_out_funds": [
                 {
                     "fund_code": f["fund_code"],

@@ -1312,6 +1312,33 @@ export interface CognitionValidation {
   cognition_feedback?: CognitionFeedback;
 }
 
+// 假设健康监控项
+export interface WatchItemHealth {
+  item_id: string;
+  item_type: string;
+  title: string;
+  metric: string | null;
+  status: string;
+  last_value: number | null;
+  threshold: number | null;
+  comparator: string;
+  consecutive_breaches: number;
+  confirmation_periods: number;
+  immediate_kill: boolean;
+  why_matters: string;
+}
+
+// 假设健康摘要
+export interface ThesisHealth {
+  health_label: string;
+  total_items: number;
+  intact: number;
+  watch: number;
+  broken: number;
+  data_gap: number;
+  items: WatchItemHealth[];
+}
+
 // 假设追踪：Brier Score + 贝叶斯更新
 export interface ThesisTracker {
   thesis_id: string;
@@ -1333,6 +1360,43 @@ export interface ThesisTracker {
     brier_score: number;
     resolution_date: string;
   }>;
+  health?: ThesisHealth;
+}
+
+// 投决会门槛审查
+export interface ICHurdle {
+  hurdle_id: string;
+  name: string;
+  metric: string;
+  operator: string;
+  threshold: number;
+  observed: number | null;
+  passed: boolean | null;
+  rationale: string;
+}
+
+export interface ICPillar {
+  name: string;
+  score: number;
+  components: Array<{
+    name: string;
+    state: string;
+    score: number;
+    note: string;
+  }>;
+}
+
+export interface ICReview {
+  verdict: string;
+  gate_score: number;
+  cutoff: number;
+  fail_reason: string | null;
+  is_override: boolean;
+  override_rationale: string;
+  prior_verdict: string | null;
+  timestamp: string;
+  hurdles: ICHurdle[];
+  pillars: ICPillar[];
 }
 
 export interface DebateRound {
@@ -1371,6 +1435,50 @@ export interface GatedOutFund {
 export interface OverlapAnalysis {
   max_overlap_pct: number;
   high_overlap_pairs: Array<[string, string]>;
+}
+
+// 投资备忘录
+export interface MemoKeyFigure {
+  label: string;
+  value: string | number | null;
+  unit: string;
+  source: string;
+}
+
+export interface MemoSection {
+  section_id: string;
+  title: string;
+  thesis: string;
+  key_figures: MemoKeyFigure[];
+  content: string;
+}
+
+export interface MemoScenario {
+  probability: number;
+  return: number;
+  thesis: string;
+}
+
+export interface InvestmentMemo {
+  direction: string;
+  generated_at: string;
+  decision: "attractive" | "watchlist" | "avoid" | "needs_more_evidence";
+  sections: MemoSection[];
+  scenario: {
+    bear: MemoScenario;
+    base: MemoScenario;
+    bull: MemoScenario;
+  };
+  financial_snapshot: {
+    top_fund_code: string | null;
+    top_fund_name: string | null;
+    match_pct: number | null;
+    weighted_pe: number | null;
+    weighted_roe: number | null;
+    weighted_pb: number | null;
+    peg: number | null;
+    val_pct: number | null;
+  };
 }
 
 export interface CognitionResponse {
@@ -1431,6 +1539,10 @@ export interface CognitionResponse {
   };
   // 假设追踪：Brier Score + 贝叶斯更新
   thesis_tracker?: ThesisTracker;
+  // 投决会门槛审查
+  ic_review?: ICReview;
+  // 投资备忘录
+  investment_memo?: InvestmentMemo;
 }
 
 export interface PortfolioMetrics {

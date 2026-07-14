@@ -14,6 +14,7 @@ import {
   type ConceptBoard,
   type StockSearchResult,
   type MonitorOverview,
+  type ICReview,
 } from "../api";
 import { DonutChart, HorizontalBarChart, SkeletonCard } from "../charts";
 import {
@@ -120,7 +121,7 @@ export default function CognitionPage() {
   const [beliefNote, setBeliefNote] = useState("");
 
   // Tab 切换
-  const [activeTab, setActiveTab] = useState<"candidates" | "chain" | "validation" | "portfolio">("candidates");
+  const [activeTab, setActiveTab] = useState<"candidates" | "chain" | "validation" | "portfolio" | "memo">("candidates");
 
   // 基金选中与监控
   const [selectedFundCode, setSelectedFundCode] = useState<string | null>(null);
@@ -133,7 +134,7 @@ export default function CognitionPage() {
   const [exporting, setExporting] = useState(false);
 
   // useScrollSpy 必须在所有条件 return 之前调用，避免 Hooks 顺序变化
-  const sectionIds = ["tab-candidates", "tab-chain", "tab-validation", "tab-portfolio"];
+  const sectionIds = ["tab-candidates", "tab-chain", "tab-validation", "tab-portfolio", "tab-memo"];
   useScrollSpy(sectionIds);
 
   // 加载预设主题
@@ -651,6 +652,9 @@ export default function CognitionPage() {
             <button type="button" style={tabStyle(activeTab === "portfolio")} onClick={() => setActiveTab("portfolio")}>
               组合草案
             </button>
+            <button type="button" style={tabStyle(activeTab === "memo")} onClick={() => setActiveTab("memo")}>
+              投资备忘录
+            </button>
           </div>
 
           {/* 主区 + 右侧栏 */}
@@ -945,6 +949,217 @@ export default function CognitionPage() {
                         </details>
                       )}
 
+                      {/* 投决会门槛审查 */}
+                      {result.ic_review && (() => {
+                        const ic: ICReview = result.ic_review!;
+                        const isPass = ic.verdict === "pass";
+                        const scorePct = Math.min(100, Math.round(ic.gate_score));
+                        const cutoffPct = Math.min(100, Math.round(ic.cutoff));
+                        const pillarLabel: Record<string, string> = {
+                          conviction: "投资信心",
+                          constitution_fit: "策略适配",
+                          data_quality: "数据质量",
+                        };
+                        const pillarWeight: Record<string, string> = {
+                          conviction: "45%",
+                          constitution_fit: "35%",
+                          data_quality: "20%",
+                        };
+                        return (
+                          <section className="card" style={{ marginTop: "12px" }}>
+                            <div style={{ fontWeight: 600, marginBottom: "12px" }}>投决会审查</div>
+
+                            {/* 大字 verdict */}
+                            <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "12px" }}>
+                              <span style={{
+                                fontSize: 28,
+                                fontWeight: 700,
+                                color: isPass ? "var(--pos)" : "var(--neg)",
+                              }}>
+                                {isPass ? "PASS" : "FAIL"}
+                              </span>
+                              {ic.is_override && (
+                                <span style={{
+                                  padding: "2px 8px",
+                                  borderRadius: "4px",
+                                  background: "var(--warn)",
+                                  color: "#fff",
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                }}>
+                                  已覆盖
+                                </span>
+                              )}
+                              {ic.timestamp && (
+                                <span style={{ fontSize: 12, color: "var(--text-3)" }}>{ic.timestamp}</span>
+                              )}
+                            </div>
+
+                            {/* Gate Score vs Cutoff 进度条 */}
+                            <div style={{ marginBottom: "12px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: "6px" }}>
+                                <span style={{ color: "var(--text-3)" }}>Gate Score</span>
+                                <span style={{ fontWeight: 600, color: isPass ? "var(--pos)" : "var(--neg)" }}>
+                                  {ic.gate_score.toFixed(1)} / {ic.cutoff.toFixed(0)}
+                                </span>
+                              </div>
+                              <div style={{ position: "relative", height: "12px", background: "var(--surface-2, #e8e8e8)", borderRadius: "6px", overflow: "hidden" }}>
+                                <div style={{
+                                  position: "absolute",
+                                  left: 0,
+                                  top: 0,
+                                  height: "100%",
+                                  width: `${scorePct}%`,
+                                  background: isPass ? "var(--pos)" : "var(--neg)",
+                                  transition: "width 0.3s",
+                                }} />
+                                {/* 通过线标记 */}
+                                <div style={{
+                                  position: "absolute",
+                                  left: `${cutoffPct}%`,
+                                  top: -2,
+                                  height: "16px",
+                                  width: "2px",
+                                  background: "var(--text-2)",
+                                }} />
+                              </div>
+                              <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: "4px" }}>
+                                通过线 {ic.cutoff.toFixed(0)} 分
+                              </div>
+                            </div>
+
+                            {/* fail_reason */}
+                            {ic.fail_reason && (
+                              <div style={{
+                                padding: "8px 12px",
+                                background: "var(--neg-soft, #fff3f3)",
+                                border: "1px solid var(--neg)",
+                                borderRadius: "4px",
+                                marginBottom: "12px",
+                                fontSize: 13,
+                                color: "var(--neg)",
+                              }}>
+                                {ic.fail_reason}
+                              </div>
+                            )}
+
+                            {/* 三支柱评分 */}
+                            <div style={{ marginBottom: "12px" }}>
+                              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: "8px" }}>评分支柱</div>
+                              <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                                {ic.pillars.map((p) => {
+                                  const weak = p.score < 25;
+                                  return (
+                                    <div key={p.name} style={{
+                                      flex: "1 1 180px",
+                                      padding: "10px 12px",
+                                      background: "var(--surface-2, #f5f5f5)",
+                                      borderRadius: "6px",
+                                      border: weak ? "1px solid var(--neg)" : "1px solid transparent",
+                                    }}>
+                                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+                                        <span style={{ fontSize: 13, fontWeight: 600 }}>
+                                          {pillarLabel[p.name] ?? p.name}
+                                        </span>
+                                        <span style={{ fontSize: 11, color: "var(--text-3)" }}>
+                                          权重 {pillarWeight[p.name] ?? "-"}
+                                        </span>
+                                      </div>
+                                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                                        <div style={{ flex: 1, height: "8px", background: "#e0e0e0", borderRadius: "4px", overflow: "hidden" }}>
+                                          <div style={{
+                                            height: "100%",
+                                            width: `${Math.min(100, p.score)}%`,
+                                            background: weak ? "var(--neg)" : p.score >= 70 ? "var(--pos)" : "var(--warn)",
+                                          }} />
+                                        </div>
+                                        <span style={{
+                                          fontSize: 14,
+                                          fontWeight: 700,
+                                          color: weak ? "var(--neg)" : p.score >= 70 ? "var(--pos)" : "var(--warn)",
+                                          minWidth: "36px",
+                                          textAlign: "right",
+                                        }}>
+                                          {p.score.toFixed(1)}
+                                        </span>
+                                      </div>
+                                      {/* 组件明细 */}
+                                      <div style={{ fontSize: 11, color: "var(--text-3)" }}>
+                                        {p.components.map((c, i) => (
+                                          <div key={i} style={{ display: "flex", justifyContent: "space-between", marginTop: "2px" }}>
+                                            <span>{c.name}</span>
+                                            <span style={{
+                                              color: c.state === "contradicted" ? "var(--neg)" : c.state === "unknown" ? "var(--text-3)" : "var(--pos)",
+                                            }}>
+                                              {c.score.toFixed(0)} ({c.note})
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* 硬性门槛列表 */}
+                            {ic.hurdles.length > 0 && (
+                              <div>
+                                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: "8px" }}>硬性门槛</div>
+                                <table className="table-v2">
+                                  <thead>
+                                    <tr>
+                                      <th>门槛</th>
+                                      <th>观测值</th>
+                                      <th>阈值</th>
+                                      <th>结果</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {ic.hurdles.map((h) => (
+                                      <tr key={h.hurdle_id}>
+                                        <td style={{ fontSize: 13 }}>{h.name}</td>
+                                        <td style={{ fontSize: 13 }}>
+                                          {h.observed !== null ? h.observed : "-"}
+                                        </td>
+                                        <td style={{ fontSize: 13 }}>
+                                          {h.operator} {h.threshold}
+                                        </td>
+                                        <td style={{ fontSize: 13 }}>
+                                          {h.passed === null ? (
+                                            <span style={{ color: "var(--text-3)" }}>无法判断</span>
+                                          ) : h.passed ? (
+                                            <span style={{ color: "var(--pos)" }}>通过</span>
+                                          ) : (
+                                            <span style={{ color: "var(--neg)" }}>未通过</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+
+                            {/* 覆盖说明 */}
+                            {ic.is_override && ic.override_rationale && (
+                              <div style={{
+                                marginTop: "8px",
+                                padding: "8px 12px",
+                                background: "rgba(243,156,18,0.08)",
+                                border: "1px solid rgba(243,156,18,0.3)",
+                                borderRadius: "4px",
+                                fontSize: 13,
+                                color: "var(--warn)",
+                              }}>
+                                覆盖原因：{ic.override_rationale}
+                                {ic.prior_verdict && `（原裁决：${ic.prior_verdict}）`}
+                              </div>
+                            )}
+                          </section>
+                        );
+                      })()}
+
                       {/* 假设追踪：Brier Score + 贝叶斯更新 */}
                       {result.thesis_tracker && (() => {
                         const t = result.thesis_tracker;
@@ -1025,6 +1240,63 @@ export default function CognitionPage() {
                                 ))}
                               </div>
                             )}
+                          </section>
+                        );
+                      })()}
+
+                      {/* 假设健康监控 */}
+                      {result.thesis_tracker?.health && (() => {
+                        const h = result.thesis_tracker.health;
+                        const healthColor = h.health_label === "Intact" ? "var(--pos)" : h.health_label === "Watching" ? "var(--warn)" : h.health_label === "Broken" ? "var(--neg)" : "var(--text-3)";
+                        const statusColor = (s: string) => s === "intact" ? "var(--pos)" : s === "watch" ? "var(--warn)" : s === "broken" ? "var(--neg)" : "var(--text-3)";
+                        const statusLabel = (s: string) => s === "intact" ? "正常" : s === "watch" ? "观察" : s === "broken" ? "已破坏" : s === "data_gap" ? "数据缺失" : "未知";
+                        const itemTypeLabel: Record<string, string> = { kill_criterion: "退出条件", return_driver: "收益驱动", assumption: "假设", risk: "风险" };
+                        return (
+                          <section className="card" style={{ marginTop: "12px" }}>
+                            <div style={{ fontWeight: 600, marginBottom: "12px" }}>假设健康监控</div>
+
+                            {/* 健康标签大字 */}
+                            <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "16px" }}>
+                              <span style={{ fontSize: 28, fontWeight: 700, color: healthColor }}>{h.health_label}</span>
+                              <span style={{ fontSize: 13, color: "var(--text-3)" }}>
+                                {h.intact} 正常 / {h.watch} 观察 / {h.broken} 破坏 / {h.data_gap} 缺失
+                              </span>
+                            </div>
+
+                            {/* 监控项列表 */}
+                            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                              {h.items.map((item) => (
+                                <div key={item.item_id} style={{ padding: "10px 12px", background: "var(--surface-2, #f5f5f5)", borderRadius: "6px", borderLeft: `3px solid ${statusColor(item.status)}` }}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                      <span style={{ fontSize: 13, fontWeight: 600 }}>{item.title}</span>
+                                      {itemTypeLabel[item.item_type] && (
+                                        <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: "3px", background: "var(--surface, #e0e0e0)", color: "var(--text-3)" }}>
+                                          {itemTypeLabel[item.item_type]}
+                                        </span>
+                                      )}
+                                      {item.immediate_kill && (
+                                        <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: "3px", background: "rgba(231,68,60,0.1)", color: "var(--neg)" }}>
+                                          即时退出
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span style={{ fontSize: 12, fontWeight: 600, color: statusColor(item.status) }}>{statusLabel(item.status)}</span>
+                                  </div>
+                                  <div style={{ display: "flex", gap: "16px", fontSize: 12, color: "var(--text-3)" }}>
+                                    <span>
+                                      指标 {item.metric ?? "-"}：{item.last_value !== null ? item.last_value : "-"} {item.comparator} {item.threshold !== null ? item.threshold : "-"}
+                                    </span>
+                                    {item.consecutive_breaches > 0 && (
+                                      <span style={{ color: "var(--warn)" }}>连续违规 {item.consecutive_breaches}/{item.confirmation_periods}</span>
+                                    )}
+                                  </div>
+                                  {item.why_matters && (
+                                    <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: "4px" }}>{item.why_matters}</div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
                           </section>
                         );
                       })()}
@@ -1221,6 +1493,197 @@ export default function CognitionPage() {
                       <div className="cognition-empty-state-title">没有合格组合</div>
                       <div className="cognition-empty-state-detail">
                         候选为空时不展示可执行组合。请先调整方向或估值容忍度。
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 5：投资备忘录 */}
+              {activeTab === "memo" && (
+                <div id="tab-memo">
+                  {result.investment_memo ? (() => {
+                    const memo = result.investment_memo;
+                    const decisionConfig: Record<string, { label: string; bg: string; color: string }> = {
+                      attractive: { label: "有吸引力", bg: "#dcfce7", color: "#16a34a" },
+                      watchlist: { label: "观察名单", bg: "#fef9c3", color: "#ca8a04" },
+                      avoid: { label: "暂不参与", bg: "#fee2e2", color: "#dc2626" },
+                      needs_more_evidence: { label: "证据不足", bg: "#f3f4f6", color: "#6b7280" },
+                    };
+                    const dc = decisionConfig[memo.decision] ?? decisionConfig.needs_more_evidence;
+                    const scenarioList = [
+                      { key: "bear", name: "悲观", data: memo.scenario.bear, color: "#dc2626" },
+                      { key: "base", name: "基准", data: memo.scenario.base, color: "#2563eb" },
+                      { key: "bull", name: "乐观", data: memo.scenario.bull, color: "#16a34a" },
+                    ];
+                    const expectedReturn = scenarioList.reduce((acc, s) => acc + (s.data.probability * s.data.return) / 100, 0);
+                    const snap = memo.financial_snapshot;
+
+                    return (
+                      <>
+                        {/* 决策标签 */}
+                        <section className="card" style={{ marginBottom: "12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div>
+                            <span style={{ fontSize: 13, color: "var(--text-3)" }}>投资决策</span>
+                            <span style={{
+                              display: "inline-block",
+                              marginLeft: "8px",
+                              padding: "4px 14px",
+                              borderRadius: "4px",
+                              background: dc.bg,
+                              color: dc.color,
+                              fontSize: 14,
+                              fontWeight: 600,
+                            }}>
+                              {dc.label}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: 12, color: "var(--text-3)" }}>
+                            生成于 {memo.generated_at}
+                          </span>
+                        </section>
+
+                        {/* 七段式备忘录 */}
+                        {memo.sections.map((section, idx) => (
+                          <section key={section.section_id} className="card" style={{ marginBottom: "12px" }}>
+                            {/* 段落标题 */}
+                            <div style={{ display: "flex", alignItems: "center", marginBottom: "8px" }}>
+                              <span style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                width: "22px",
+                                height: "22px",
+                                borderRadius: "50%",
+                                background: "var(--accent, #3b82f6)",
+                                color: "#fff",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                marginRight: "8px",
+                                flexShrink: 0,
+                              }}>
+                                {idx + 1}
+                              </span>
+                              <span style={{ fontWeight: 600, fontSize: 14 }}>{section.title}</span>
+                            </div>
+
+                            {/* 核心论点 */}
+                            <div style={{
+                              padding: "6px 10px",
+                              background: "var(--surface-2, #f5f5f5)",
+                              borderRadius: "4px",
+                              fontSize: 13,
+                              color: "var(--text-2)",
+                              marginBottom: "8px",
+                              borderLeft: "3px solid var(--accent, #3b82f6)",
+                            }}>
+                              {section.thesis}
+                            </div>
+
+                            {/* 关键数字表格 */}
+                            {section.key_figures && section.key_figures.length > 0 && (
+                              <table className="table-v2" style={{ marginBottom: "8px" }}>
+                                <tbody>
+                                  {section.key_figures.map((fig, fi) => (
+                                    <tr key={fi}>
+                                      <td style={{ color: "var(--text-3)", width: "40%" }}>{fig.label}</td>
+                                      <td style={{ fontWeight: 600 }}>
+                                        {fig.value !== null && fig.value !== "" ? String(fig.value) : "-"}
+                                        {fig.unit && <span style={{ color: "var(--text-3)", marginLeft: "2px" }}>{fig.unit}</span>}
+                                      </td>
+                                      <td style={{ color: "var(--text-3)", fontSize: 11, textAlign: "right" }}>{fig.source}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+
+                            {/* 详细内容 */}
+                            <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6, margin: 0 }}>
+                              {section.content}
+                            </p>
+                          </section>
+                        ))}
+
+                        {/* 场景分析 */}
+                        <section className="card" style={{ marginBottom: "12px" }}>
+                          <div style={{ fontWeight: 600, marginBottom: "12px" }}>场景分析</div>
+                          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                            {scenarioList.map((s) => (
+                              <div key={s.key} style={{
+                                flex: "1",
+                                minWidth: "140px",
+                                padding: "10px 12px",
+                                borderRadius: "6px",
+                                background: "var(--surface-2, #f5f5f5)",
+                                borderLeft: `3px solid ${s.color}`,
+                              }}>
+                                <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: "4px" }}>{s.name}</div>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: s.color }}>
+                                  {s.data.return > 0 ? "+" : ""}{s.data.return}%
+                                </div>
+                                <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: "2px" }}>
+                                  概率 {s.data.probability}%
+                                </div>
+                                <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: "4px" }}>
+                                  {s.data.thesis}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ marginTop: "10px", padding: "6px 10px", background: "var(--surface-2, #f5f5f5)", borderRadius: "4px", fontSize: 13 }}>
+                            <span style={{ color: "var(--text-3)" }}>期望收益（加权）：</span>
+                            <span style={{ fontWeight: 600, color: expectedReturn >= 0 ? "var(--pos)" : "var(--neg)" }}>
+                              {expectedReturn >= 0 ? "+" : ""}{expectedReturn.toFixed(1)}%
+                            </span>
+                          </div>
+                        </section>
+
+                        {/* 财务快照 */}
+                        <section className="card" style={{ marginBottom: "12px" }}>
+                          <div style={{ fontWeight: 600, marginBottom: "12px" }}>财务快照</div>
+                          <table className="table-v2">
+                            <tbody>
+                              <tr>
+                                <td style={{ color: "var(--text-3)" }}>顶部基金</td>
+                                <td style={{ fontWeight: 600 }}>
+                                  {snap.top_fund_code ?? "-"} {snap.top_fund_name ?? ""}
+                                </td>
+                              </tr>
+                              <tr>
+                                <td style={{ color: "var(--text-3)" }}>匹配度</td>
+                                <td style={{ fontWeight: 600 }}>{snap.match_pct != null ? `${snap.match_pct}%` : "-"}</td>
+                              </tr>
+                              <tr>
+                                <td style={{ color: "var(--text-3)" }}>加权PE</td>
+                                <td style={{ fontWeight: 600 }}>{snap.weighted_pe ?? "-"}</td>
+                              </tr>
+                              <tr>
+                                <td style={{ color: "var(--text-3)" }}>加权ROE</td>
+                                <td style={{ fontWeight: 600 }}>{snap.weighted_roe != null ? `${snap.weighted_roe}%` : "-"}</td>
+                              </tr>
+                              <tr>
+                                <td style={{ color: "var(--text-3)" }}>加权PB</td>
+                                <td style={{ fontWeight: 600 }}>{snap.weighted_pb ?? "-"}</td>
+                              </tr>
+                              <tr>
+                                <td style={{ color: "var(--text-3)" }}>PEG</td>
+                                <td style={{ fontWeight: 600 }}>{snap.peg ?? "-"}</td>
+                              </tr>
+                              <tr>
+                                <td style={{ color: "var(--text-3)" }}>估值分位</td>
+                                <td style={{ fontWeight: 600 }}>{snap.val_pct != null ? `${snap.val_pct}%` : "-"}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </section>
+                      </>
+                    );
+                  })() : (
+                    <div className="cognition-empty-state" role="status">
+                      <div className="cognition-empty-state-title">暂无投资备忘录</div>
+                      <div className="cognition-empty-state-detail">
+                        个股认知不生成投资备忘录，请尝试主题或概念方向。
                       </div>
                     </div>
                   )}
