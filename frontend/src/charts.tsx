@@ -10,6 +10,12 @@ import {
   Tooltip,
   CartesianGrid,
   LabelList,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Legend,
 } from "recharts";
 
 /* ============================================================
@@ -233,5 +239,293 @@ export function EmptyState({ icon, title, hint }: { icon?: string; title: string
       <div className="empty-state-title">{title}</div>
       {hint && <div className="empty-state-hint">{hint}</div>}
     </div>
+  );
+}
+
+/* --- 雷达图：估值多维度对比 --- */
+export interface RadarDatum {
+  metric: string;
+  value: number;
+  benchmark: number;
+}
+
+export function ValuationRadar({ data }: { data: RadarDatum[] }) {
+  return (
+    <ResponsiveContainer width="100%" height={250}>
+      <RadarChart data={data}>
+        <PolarGrid stroke="var(--border)" />
+        <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fill: "var(--text-2)" }} />
+        <PolarRadiusAxis tick={{ fontSize: 10, fill: "var(--text-3)" }} />
+        <Radar name="当前" dataKey="value" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.3} />
+        <Radar name="基准" dataKey="benchmark" stroke="#94a3b8" fill="#94a3b8" fillOpacity={0.1} />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Tooltip
+          contentStyle={{
+            borderRadius: "8px",
+            border: "1px solid var(--border)",
+            background: "var(--surface)",
+            fontSize: "12px",
+            boxShadow: "var(--shadow)",
+          }}
+        />
+      </RadarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/* --- 对比柱图：支持/反对证据数量 --- */
+export function ComparisonBar({ positive, negative }: { positive: number; negative: number }) {
+  const data = [
+    { name: "支持证据", count: positive, fill: "#16a34a" },
+    { name: "反对证据", count: negative, fill: "#dc2626" },
+  ];
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={data} margin={{ left: 0, right: 20, top: 10, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="name" tick={{ fontSize: 12, fill: "var(--text-2)" }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} axisLine={false} tickLine={false} allowDecimals={false} />
+        <Tooltip
+          cursor={{ fill: "var(--surface-2)" }}
+          contentStyle={{
+            borderRadius: "8px",
+            border: "1px solid var(--border)",
+            background: "var(--surface)",
+            fontSize: "12px",
+            boxShadow: "var(--shadow)",
+          }}
+        />
+        <Bar dataKey="count" radius={[4, 4, 0, 0]} barSize={60}>
+          {data.map((entry, i) => (
+            <Cell key={`cell-${i}`} fill={entry.fill} />
+          ))}
+          <LabelList dataKey="count" position="top" style={{ fontSize: 13, fontWeight: 600, fill: "var(--text)" }} />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/* --- 预期差瀑布图：正向绿色，负向红色 --- */
+export interface GapWaterfallDatum {
+  name: string;
+  value: number;
+  positive: boolean;
+}
+
+export function GapWaterfall({ data }: { data: GapWaterfallDatum[] }) {
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data} margin={{ left: 0, right: 20, top: 10, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--text-2)" }} axisLine={false} tickLine={false} interval={0} angle={-20} textAnchor="end" height={60} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} axisLine={false} tickLine={false} />
+        <Tooltip
+          cursor={{ fill: "var(--surface-2)" }}
+          contentStyle={{
+            borderRadius: "8px",
+            border: "1px solid var(--border)",
+            background: "var(--surface)",
+            fontSize: "12px",
+            boxShadow: "var(--shadow)",
+          }}
+          formatter={(v) => Number(v ?? 0).toFixed(1)}
+        />
+        <Bar dataKey="value" radius={[4, 4, 0, 0]} barSize={36}>
+          {data.map((entry, i) => (
+            <Cell key={`cell-${i}`} fill={entry.positive ? "#16a34a" : "#dc2626"} />
+          ))}
+          <LabelList dataKey="value" position="top" style={{ fontSize: 11, fontWeight: 600, fill: "var(--text-2)" }} />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/* --- 场景收益柱图：bear/base/bull --- */
+export interface ScenarioBarDatum {
+  name: string;
+  return: number;
+  probability: number;
+}
+
+export function ScenarioBar({ data }: { data: ScenarioBarDatum[] }) {
+  const colors = ["#dc2626", "#2563eb", "#16a34a"];
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={data} margin={{ left: 0, right: 20, top: 10, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="name" tick={{ fontSize: 12, fill: "var(--text-2)" }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} axisLine={false} tickLine={false} unit="%" />
+        <Tooltip
+          cursor={{ fill: "var(--surface-2)" }}
+          contentStyle={{
+            borderRadius: "8px",
+            border: "1px solid var(--border)",
+            background: "var(--surface)",
+            fontSize: "12px",
+            boxShadow: "var(--shadow)",
+          }}
+          formatter={(v: any) => `${Number(v ?? 0) > 0 ? "+" : ""}${Number(v ?? 0)}%`}
+        />
+        <Bar dataKey="return" radius={[4, 4, 0, 0]} barSize={50}>
+          {data.map((_, i) => (
+            <Cell key={`cell-${i}`} fill={colors[i % colors.length]} />
+          ))}
+          <LabelList dataKey="return" position="top" style={{ fontSize: 12, fontWeight: 600, fill: "var(--text)" }} />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/* --- 雷达图：IC Review 三支柱 --- */
+export interface RadarVizDatum {
+  metric: string;
+  value: number;
+}
+
+export function RadarChartViz({ data }: { data: RadarVizDatum[] }) {
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <RadarChart data={data}>
+        <PolarGrid stroke="var(--border)" />
+        <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fill: "var(--text-2)" }} />
+        <PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "var(--text-3)" }} />
+        <Radar name="得分" dataKey="value" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.3} />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Tooltip
+          contentStyle={{
+            borderRadius: "8px",
+            border: "1px solid var(--border)",
+            background: "var(--surface)",
+            fontSize: "12px",
+            boxShadow: "var(--shadow)",
+          }}
+        />
+      </RadarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/* --- 瀑布图：预期差（正向绿色，负向红色，合计灰色） --- */
+export interface WaterfallDatum {
+  label: string;
+  value: number;
+  type: "pos" | "neg" | "total";
+}
+
+export function WaterfallChart({ data }: { data: WaterfallDatum[] }) {
+  // 计算瀑布图的累积值，生成 base（透明底）和 barHeight（实际柱高）
+  let cumulative = 0;
+  const chartData = data.map((d) => {
+    const prev = cumulative;
+    if (d.type === "total") {
+      cumulative = d.value;
+    } else {
+      cumulative += d.value;
+    }
+    const base = d.type === "total" ? 0 : Math.min(prev, cumulative);
+    const barHeight = d.type === "total" ? d.value : Math.abs(d.value);
+    return {
+      label: d.label,
+      base,
+      barHeight,
+      value: d.value,
+      type: d.type,
+      fill: d.type === "pos" ? "#16a34a" : d.type === "neg" ? "#dc2626" : "#6b7280",
+    };
+  });
+
+  return (
+    <ResponsiveContainer width="100%" height={260}>
+      <BarChart data={chartData} margin={{ left: 0, right: 20, top: 10, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+        <XAxis
+          dataKey="label"
+          tick={{ fontSize: 11, fill: "var(--text-2)" }}
+          axisLine={false}
+          tickLine={false}
+          interval={0}
+          angle={-20}
+          textAnchor="end"
+          height={60}
+        />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} axisLine={false} tickLine={false} />
+        <Tooltip
+          cursor={{ fill: "var(--surface-2)" }}
+          contentStyle={{
+            borderRadius: "8px",
+            border: "1px solid var(--border)",
+            background: "var(--surface)",
+            fontSize: "12px",
+            boxShadow: "var(--shadow)",
+          }}
+          formatter={(v: any) => Number(v ?? 0).toFixed(1)}
+        />
+        <Bar dataKey="base" stackId="wf" fill="transparent" />
+        <Bar dataKey="barHeight" stackId="wf" radius={[4, 4, 0, 0]} barSize={36}>
+          {chartData.map((entry, i) => (
+            <Cell key={`cell-${i}`} fill={entry.fill} />
+          ))}
+          <LabelList
+            dataKey="value"
+            position="top"
+            style={{ fontSize: 11, fontWeight: 600, fill: "var(--text-2)" }}
+          />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/* --- 场景分析柱图：bear / base / bull --- */
+export interface ScenarioChartDatum {
+  scenario: string;
+  return: number;
+  probability: number;
+  color: string;
+}
+
+export function ScenarioChart({ data }: { data: ScenarioChartDatum[] }) {
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={data} margin={{ left: 0, right: 20, top: 10, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+        <XAxis
+          dataKey="scenario"
+          tick={{ fontSize: 12, fill: "var(--text-2)" }}
+          axisLine={false}
+          tickLine={false}
+        />
+        <YAxis
+          tick={{ fontSize: 11, fill: "var(--text-3)" }}
+          axisLine={false}
+          tickLine={false}
+          unit="%"
+        />
+        <Tooltip
+          cursor={{ fill: "var(--surface-2)" }}
+          contentStyle={{
+            borderRadius: "8px",
+            border: "1px solid var(--border)",
+            background: "var(--surface)",
+            fontSize: "12px",
+            boxShadow: "var(--shadow)",
+          }}
+          formatter={(v: any) => `${Number(v ?? 0) > 0 ? "+" : ""}${Number(v ?? 0)}%`}
+        />
+        <Bar dataKey="return" radius={[4, 4, 0, 0]} barSize={50}>
+          {data.map((entry, i) => (
+            <Cell key={`cell-${i}`} fill={entry.color} />
+          ))}
+          <LabelList
+            dataKey="return"
+            position="top"
+            style={{ fontSize: 12, fontWeight: 600, fill: "var(--text)" }}
+          />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
   );
 }

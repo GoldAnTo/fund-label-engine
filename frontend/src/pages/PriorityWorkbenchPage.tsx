@@ -7,6 +7,7 @@ import {
   type PriorityRunDetail,
   type PriorityRunSummary,
 } from "../api";
+import { Card, Badge, Table, Th, Td } from "../components/ui";
 
 // 请求来源中文映射
 const REQUEST_SOURCE_LABELS: Record<string, string> = {
@@ -34,15 +35,17 @@ const TIER_ORDER = [
   "valuation_watch",
   "data_insufficient",
   "excluded",
-];
+] as const;
 
-// 五档标签配置：中文标签 + 配色
-const TIER_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  research_now: { label: "立即研究", color: "var(--pos-text)", bg: "var(--pos-soft)" },
-  research_next: { label: "下一步研究", color: "var(--accent-text)", bg: "var(--accent-soft)" },
-  valuation_watch: { label: "估值观察", color: "var(--warn-text)", bg: "var(--warn-soft)" },
-  data_insufficient: { label: "数据不足", color: "var(--text-2)", bg: "var(--surface-2)" },
-  excluded: { label: "排除", color: "var(--neg-text)", bg: "var(--neg-soft)" },
+type TierKey = (typeof TIER_ORDER)[number];
+
+// 五档标签配置：中文标签 + Badge variant
+const TIER_CONFIG: Record<TierKey, { label: string; variant: "pos" | "accent" | "warn" | "neutral" | "neg" }> = {
+  research_now: { label: "立即研究", variant: "pos" },
+  research_next: { label: "下一步研究", variant: "accent" },
+  valuation_watch: { label: "估值观察", variant: "warn" },
+  data_insufficient: { label: "数据不足", variant: "neutral" },
+  excluded: { label: "排除", variant: "neg" },
 };
 
 // 原因码中文映射
@@ -195,370 +198,418 @@ export default function PriorityWorkbenchPage() {
   // 错误状态或没有 runId 时，显示输入框卡片
   if (error || !runId) {
     return (
-      <div>
-        <div className="card">
-          <h2>投资假设详情 / 基金研究优先级</h2>
-          {error && (
-            <div className="alert alert-warn" style={{ marginBottom: 12 }} role="alert">
-              {error}
-              <button
-                className="secondary"
-                style={{ marginLeft: 12, fontSize: 11.5 }}
-                onClick={() => {
-                  setError(null);
-                  // 重新触发加载：先清除再恢复 URL 参数
-                  const current = runId;
-                  setSearchParams({}, { replace: true });
-                  setTimeout(() => setSearchParams({ run: current }, { replace: true }), 0);
-                }}
+      <div className="space-y-4">
+        <Card>
+          <div className="p-4 space-y-3">
+            <h2 className="text-base font-semibold text-text m-0">
+              投资假设详情 / 基金研究优先级
+            </h2>
+            {error && (
+              <div
+                className="rounded-lg border border-warn/30 bg-warn-soft px-3 py-2 text-warn-text text-sm flex items-center gap-3"
+                role="alert"
               >
-                重试
+                <span className="flex-1">{error}</span>
+                <button
+                  className="text-xs px-3 py-1 border border-warn/40 bg-surface text-warn-text rounded hover:bg-warn-soft transition-colors"
+                  onClick={() => {
+                    setError(null);
+                    // 重新触发加载：先清除再恢复 URL 参数
+                    const current = runId;
+                    setSearchParams({}, { replace: true });
+                    setTimeout(() => setSearchParams({ run: current }, { replace: true }), 0);
+                  }}
+                >
+                  重试
+                </button>
+              </div>
+            )}
+            <p className="text-sm text-text-2">
+              请输入 PriorityRun ID 加载工作台，或通过 URL 参数 ?run=xxx 直接访问。
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label
+                htmlFor="priority-run-input"
+                className="text-xs text-text-2"
+              >
+                PriorityRun ID
+              </label>
+              <input
+                id="priority-run-input"
+                className="flex-0 w-80 px-3 py-1.5 text-sm border border-border-2 rounded bg-surface text-text focus:outline-none focus:border-accent"
+                placeholder="输入 priority_run_id"
+                value={runInput}
+                onChange={(e) => setRunInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleLoadInput();
+                }}
+                aria-label="PriorityRun ID 输入框"
+              />
+              <button
+                className="px-4 py-1.5 text-sm font-semibold bg-accent text-surface border border-accent rounded hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleLoadInput}
+                disabled={!runInput.trim()}
+              >
+                加载
               </button>
             </div>
-          )}
-          <p className="muted" style={{ marginBottom: 12 }}>
-            请输入 PriorityRun ID 加载工作台，或通过 URL 参数 ?run=xxx 直接访问。
-          </p>
-          <div className="toolbar">
-            <label htmlFor="priority-run-input" style={{ fontSize: 12.5, color: "var(--text-2)" }}>
-              PriorityRun ID
-            </label>
-            <input
-              id="priority-run-input"
-              style={{ flex: "0 0 320px" }}
-              placeholder="输入 priority_run_id"
-              value={runInput}
-              onChange={(e) => setRunInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleLoadInput();
-              }}
-              aria-label="PriorityRun ID 输入框"
-            />
-            <button onClick={handleLoadInput} disabled={!runInput.trim()}>
-              加载
-            </button>
+            <p className="text-xs text-text-3">免责声明：研究顺序，不是买入建议。</p>
           </div>
-          <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-            免责声明：研究顺序，不是买入建议。
-          </p>
-        </div>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div>
+    <div className="space-y-4">
       {/* 加载提示 */}
       {!error && loading && (
-        <div className="alert alert-info" role="status" aria-live="polite">
+        <div
+          className="rounded-lg border border-accent/30 bg-accent-soft px-3 py-2 text-accent-text text-sm"
+          role="status"
+          aria-live="polite"
+        >
           加载中...
         </div>
       )}
 
-      {/* 顶部信息条 */}
+      {/* === 第 1 层：头部摘要 (Header Summary) === */}
       {detail && (
-        <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-          {/* 投资假设原文 */}
-          {detail.thesis && (
-            <div style={{ marginBottom: 14 }}>
-              <h2 style={{ margin: "0 0 6px" }}>{detail.thesis.title || "投资假设"}</h2>
-              <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--text-2)", lineHeight: 1.6 }}>
-                {detail.thesis.belief_statement}
-              </p>
-              {/* 研究请求原文 */}
-              {detail.research_input?.raw_text && (
-                <div
-                  style={{
-                    padding: "8px 10px",
-                    background: "var(--surface-2)",
-                    borderRadius: "var(--r-s)",
-                    fontSize: 12,
-                    color: "var(--text-3)",
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  <strong style={{ color: "var(--text-2)" }}>研究请求：</strong>
-                  {detail.research_input.raw_text}
-                </div>
+        <Card>
+          <div className="p-4 space-y-3">
+            {/* PriorityRun 标签 + 政策版本 + 快照版本 + 方法版本 + 非生产 */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant={
+                  detail.result_status === "completed"
+                    ? "pos"
+                    : detail.result_status === "running"
+                      ? "accent"
+                      : detail.result_status === "failed"
+                        ? "neg"
+                        : "neutral"
+                }
+              >
+                PriorityRun：{detail.result_status}
+              </Badge>
+              <Badge variant="neutral">
+                Strategy Policy: {detail.strategy_policy_id} v{detail.strategy_policy_version}
+              </Badge>
+              {detail.data_snapshot_id && (
+                <Badge variant="neutral">Snapshot: {detail.data_snapshot_id.slice(0, 12)}</Badge>
               )}
+              <Badge variant="neutral">Method: {detail.ranking_method_version}</Badge>
+              {!detail.approved_for_production && (
+                <Badge variant="neg">非生产</Badge>
+              )}
+              <span className="text-xs text-text-3">免责声明：研究顺序，不是买入建议。</span>
             </div>
-          )}
 
-          {/* 元数据网格 */}
-          <div className="kv priority-meta-grid">
-            <dt>Thesis ID</dt>
-            <dd style={{ fontFamily: "ui-monospace, monospace" }}>
-              {fmtText(detail.thesis_id)}
-            </dd>
-            <dt>Strategy Policy</dt>
-            <dd style={{ fontFamily: "ui-monospace, monospace" }}>
-              {fmtText(detail.strategy_policy_id)} (v{detail.strategy_policy_version})
-            </dd>
-            <dt>Data Snapshot</dt>
-            <dd style={{ fontFamily: "ui-monospace, monospace" }}>
-              {fmtText(detail.data_snapshot_id)}
-            </dd>
-            <dt>Ranking Method</dt>
-            <dd style={{ fontFamily: "ui-monospace, monospace" }}>
-              {fmtText(detail.ranking_method_version)}
-            </dd>
-            <dt>PriorityRun ID</dt>
-            <dd style={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>
-              {fmtText(detail.priority_run_id)}
-            </dd>
-            <dt>CandidateSet ID</dt>
-            <dd style={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>
-              {fmtText(detail.candidate_set_id)}
-            </dd>
-            <dt>创建人</dt>
-            <dd>{fmtText(detail.created_by)}</dd>
-            <dt>创建时间</dt>
-            <dd>{detail.created_at?.slice(0, 19).replace("T", " ") || "-"}</dd>
-          </div>
-
-          {/* 投资假设状态条 */}
-          {detail.thesis && (
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 12,
-                marginTop: 10,
-                fontSize: 12,
-                color: "var(--text-2)",
-              }}
-            >
-              {detail.thesis.status && (
-                <span>
-                  状态：<strong>{THESIS_STATUS_LABELS[detail.thesis.status] ?? detail.thesis.status}</strong>
-                </span>
-              )}
-              {detail.thesis.time_horizon && (
-                <span>时间范围：<strong>{detail.thesis.time_horizon}</strong></span>
-              )}
-              {detail.thesis.owner && (
-                <span>研究员：<strong>{detail.thesis.owner}</strong></span>
-              )}
-              {detail.thesis.as_of_date && (
-                <span>截止日期：<strong>{detail.thesis.as_of_date}</strong></span>
-              )}
-              {detail.thesis.next_review_at && (
-                <span>下次复审：<strong>{detail.thesis.next_review_at.slice(0, 10)}</strong></span>
-              )}
-              {detail.research_input && (
-                <span>
-                  来源：<strong>{REQUEST_SOURCE_LABELS[detail.research_input.request_source] ?? detail.research_input.request_source}</strong>
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* 候选集统计 */}
-          {detail.candidate_set_header && (
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 16,
-                marginTop: 10,
-                padding: "8px 12px",
-                background: "var(--surface-2)",
-                borderRadius: "var(--r-s)",
-                fontSize: 12,
-              }}
-            >
-              <span>扫描基金：<strong>{detail.candidate_set_header.scanned_fund_count}</strong></span>
-              <span>映射候选：<strong>{detail.candidate_set_header.mapped_candidate_count}</strong></span>
-              <span>数据不足：<strong>{detail.candidate_set_header.unmapped_due_to_data_count}</strong></span>
-              <span>不相关：<strong>{detail.candidate_set_header.unrelated_fund_count}</strong></span>
-              <span className="muted">
-                Source: {detail.candidate_set_header.source_method_version}
+            {/* URL 输入框 + 历史运行选择器 */}
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
+              <label className="text-xs text-text-2">PriorityRun URL</label>
+              <input
+                className="flex-1 min-w-0 max-w-md px-3 py-1.5 text-sm border border-border-2 rounded bg-surface text-text focus:outline-none focus:border-accent"
+                placeholder="输入 priority_run_id"
+                value={runInput}
+                onChange={(e) => setRunInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleLoadInput();
+                }}
+                aria-label="PriorityRun ID 输入框"
+              />
+              <button
+                className="px-4 py-1.5 text-sm font-semibold bg-accent text-surface border border-accent rounded hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleLoadInput}
+                disabled={!runInput.trim()}
+              >
+                加载
+              </button>
+              <label className="text-xs text-text-2 ml-2">历史运行</label>
+              <select
+                className="min-w-70 px-3 py-1.5 text-sm border border-border-2 rounded bg-surface text-text focus:outline-none focus:border-accent"
+                value={runId}
+                onChange={(e) => handleRunChange(e.target.value)}
+              >
+                {historyRuns.length === 0 ? (
+                  <option value={runId}>{runId.slice(0, 16)}</option>
+                ) : (
+                  <>
+                    {!historyRuns.some((r) => r.priority_run_id === runId) && (
+                      <option value={runId}>{runId.slice(0, 16)} (当前)</option>
+                    )}
+                    {historyRuns.map((r) => (
+                      <option key={r.priority_run_id} value={r.priority_run_id}>
+                        {r.created_at?.slice(0, 19).replace("T", " ")} (
+                        {r.priority_run_id.slice(0, 8)})
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+              <span className="text-xs text-text-3">
+                共 {historyRuns.length} 个历史运行
               </span>
             </div>
-          )}
-
-          {/* 失效条件 */}
-          {detail.thesis?.invalidation_conditions &&
-            Array.isArray(detail.thesis.invalidation_conditions) &&
-            detail.thesis.invalidation_conditions.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <h3 style={{ margin: "0 0 4px", color: "var(--neg-text)" }}>失效条件</h3>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--text-2)" }}>
-                  {detail.thesis.invalidation_conditions.map((c, i) => (
-                    <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-          {/* 支持证据 */}
-          {detail.thesis?.supporting_evidence &&
-            Array.isArray(detail.thesis.supporting_evidence) &&
-            detail.thesis.supporting_evidence.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <h3 style={{ margin: "0 0 4px", color: "var(--pos-text)" }}>支持证据</h3>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--text-2)" }}>
-                  {detail.thesis.supporting_evidence.map((c, i) => (
-                    <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-          {/* 反对证据 */}
-          {detail.thesis?.opposing_evidence &&
-            Array.isArray(detail.thesis.opposing_evidence) &&
-            detail.thesis.opposing_evidence.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <h3 style={{ margin: "0 0 4px", color: "var(--warn-text)" }}>反对证据</h3>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--text-2)" }}>
-                  {detail.thesis.opposing_evidence.map((c, i) => (
-                    <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-          {/* 催化剂 */}
-          {detail.thesis?.catalysts &&
-            Array.isArray(detail.thesis.catalysts) &&
-            detail.thesis.catalysts.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <h3 style={{ margin: "0 0 4px", color: "var(--accent-text)" }}>催化剂</h3>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--text-2)" }}>
-                  {detail.thesis.catalysts.map((c, i) => (
-                    <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-          {/* 关键指标 */}
-          {detail.thesis?.key_metrics &&
-            Array.isArray(detail.thesis.key_metrics) &&
-            detail.thesis.key_metrics.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <h3 style={{ margin: "0 0 4px" }}>关键指标</h3>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--text-2)" }}>
-                  {detail.thesis.key_metrics.map((c, i) => (
-                    <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-          {/* 非生产警告条 */}
-          {!detail.approved_for_production && (
-            <div
-              style={{
-                marginTop: 10,
-                padding: "8px 12px",
-                borderRadius: "var(--r-s)",
-                background: "var(--neg-soft)",
-                color: "var(--neg-text)",
-                fontWeight: 700,
-                fontSize: 12.5,
-                border: "1px solid var(--neg)",
-              }}
-            >
-              非生产：该 PriorityRun 尚未批准用于生产环境，结果仅供研究参考。
-            </div>
-          )}
-
-          {/* 免责声明 */}
-          <div className="muted" style={{ marginTop: 8, fontSize: 11.5 }}>
-            免责声明：研究顺序，不是买入建议。
           </div>
-        </div>
+        </Card>
       )}
 
-      {/* 历史运行选择器 */}
+      {/* === 第 2 层：投资假设详情 (Thesis Card) === */}
       {detail && (
-        <div className="toolbar" style={{ marginBottom: 12 }}>
-          <label>历史运行</label>
-          <select
-            value={runId}
-            onChange={(e) => handleRunChange(e.target.value)}
-            style={{ minWidth: 280 }}
-          >
-            {historyRuns.length === 0 ? (
-              <option value={runId}>{runId.slice(0, 16)}</option>
-            ) : (
-              <>
-                {!historyRuns.some((r) => r.priority_run_id === runId) && (
-                  <option value={runId}>{runId.slice(0, 16)} (当前)</option>
-                )}
-                {historyRuns.map((r) => (
-                  <option key={r.priority_run_id} value={r.priority_run_id}>
-                    {r.created_at?.slice(0, 19).replace("T", " ")} (
-                    {r.priority_run_id.slice(0, 8)})
-                  </option>
-                ))}
-              </>
+        <Card>
+          <div className="p-4 space-y-4">
+            {/* 标题 + 信念陈述 */}
+            {detail.thesis && (
+              <div>
+                <h2 className="text-base font-semibold text-text m-0 mb-2">
+                  {detail.thesis.title || "投资假设"}
+                </h2>
+                <p className="text-sm text-text-2 leading-relaxed m-0">
+                  {detail.thesis.belief_statement}
+                </p>
+              </div>
             )}
-          </select>
-          <span className="muted" style={{ fontSize: 11.5 }}>
-            共 {historyRuns.length} 个历史运行
-          </span>
-        </div>
+
+            {/* 研究请求原文 */}
+            {detail.research_input?.raw_text && (
+              <div className="px-3 py-2 bg-surface-2 rounded border border-border text-xs text-text-3">
+                <strong className="text-text-2">研究请求：</strong>
+                {detail.research_input.raw_text}
+              </div>
+            )}
+
+            {/* 元数据栅格 */}
+            <div className="grid grid-cols-1 md:grid-cols-[140px_1fr_140px_1fr] gap-x-4 gap-y-1 text-sm">
+              <div className="text-text-3">Thesis ID</div>
+              <div className="font-mono font-medium">{fmtText(detail.thesis_id)}</div>
+              <div className="text-text-3">Strategy Policy</div>
+              <div className="font-mono font-medium">
+                {fmtText(detail.strategy_policy_id)} (v{detail.strategy_policy_version})
+              </div>
+              <div className="text-text-3">Data Snapshot</div>
+              <div className="font-mono font-medium">{fmtText(detail.data_snapshot_id)}</div>
+              <div className="text-text-3">Ranking Method</div>
+              <div className="font-mono font-medium">
+                {fmtText(detail.ranking_method_version)}
+              </div>
+              <div className="text-text-3">PriorityRun ID</div>
+              <div className="font-mono text-xs">{fmtText(detail.priority_run_id)}</div>
+              <div className="text-text-3">CandidateSet ID</div>
+              <div className="font-mono text-xs">{fmtText(detail.candidate_set_id)}</div>
+              <div className="text-text-3">创建人</div>
+              <div className="font-medium">{fmtText(detail.created_by)}</div>
+              <div className="text-text-3">创建时间</div>
+              <div className="font-medium">
+                {detail.created_at?.slice(0, 19).replace("T", " ") || "-"}
+              </div>
+            </div>
+
+            {/* 投资假设状态条 */}
+            {detail.thesis && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-2">
+                {detail.thesis.status && (
+                  <span>
+                    状态：
+                    <strong className="text-text font-semibold">
+                      {THESIS_STATUS_LABELS[detail.thesis.status] ?? detail.thesis.status}
+                    </strong>
+                  </span>
+                )}
+                {detail.thesis.time_horizon && (
+                  <span>
+                    时间范围：<strong className="text-text font-semibold">{detail.thesis.time_horizon}</strong>
+                  </span>
+                )}
+                {detail.thesis.owner && (
+                  <span>
+                    研究员：<strong className="text-text font-semibold">{detail.thesis.owner}</strong>
+                  </span>
+                )}
+                {detail.thesis.as_of_date && (
+                  <span>
+                    截止日期：<strong className="text-text font-semibold">{detail.thesis.as_of_date}</strong>
+                  </span>
+                )}
+                {detail.thesis.next_review_at && (
+                  <span>
+                    下次复审：
+                    <strong className="text-text font-semibold">
+                      {detail.thesis.next_review_at.slice(0, 10)}
+                    </strong>
+                  </span>
+                )}
+                {detail.research_input && (
+                  <span>
+                    来源：
+                    <strong className="text-text font-semibold">
+                      {REQUEST_SOURCE_LABELS[detail.research_input.request_source] ??
+                        detail.research_input.request_source}
+                    </strong>
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* 候选集统计 */}
+            {detail.candidate_set_header && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 bg-surface-2 rounded text-xs">
+                <span>
+                  扫描基金：
+                  <strong className="font-semibold text-text">
+                    {detail.candidate_set_header.scanned_fund_count}
+                  </strong>
+                </span>
+                <span>
+                  映射候选：
+                  <strong className="font-semibold text-text">
+                    {detail.candidate_set_header.mapped_candidate_count}
+                  </strong>
+                </span>
+                <span>
+                  数据不足：
+                  <strong className="font-semibold text-text">
+                    {detail.candidate_set_header.unmapped_due_to_data_count}
+                  </strong>
+                </span>
+                <span>
+                  不相关：
+                  <strong className="font-semibold text-text">
+                    {detail.candidate_set_header.unrelated_fund_count}
+                  </strong>
+                </span>
+                <span className="text-text-3">
+                  Source: {detail.candidate_set_header.source_method_version}
+                </span>
+              </div>
+            )}
+
+            {/* 失效条件 */}
+            {detail.thesis?.invalidation_conditions &&
+              Array.isArray(detail.thesis.invalidation_conditions) &&
+              detail.thesis.invalidation_conditions.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-neg-text m-0 mb-1">
+                    失效条件
+                  </h3>
+                  <ul className="m-0 pl-5 text-xs text-text-2 space-y-0.5">
+                    {detail.thesis.invalidation_conditions.map((c, i) => (
+                      <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+            {/* 支持证据 */}
+            {detail.thesis?.supporting_evidence &&
+              Array.isArray(detail.thesis.supporting_evidence) &&
+              detail.thesis.supporting_evidence.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-pos-text m-0 mb-1">
+                    支持证据
+                  </h3>
+                  <ul className="m-0 pl-5 text-xs text-text-2 space-y-0.5">
+                    {detail.thesis.supporting_evidence.map((c, i) => (
+                      <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+            {/* 反对证据 */}
+            {detail.thesis?.opposing_evidence &&
+              Array.isArray(detail.thesis.opposing_evidence) &&
+              detail.thesis.opposing_evidence.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-warn-text m-0 mb-1">
+                    反对证据
+                  </h3>
+                  <ul className="m-0 pl-5 text-xs text-text-2 space-y-0.5">
+                    {detail.thesis.opposing_evidence.map((c, i) => (
+                      <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+            {/* 催化剂 */}
+            {detail.thesis?.catalysts &&
+              Array.isArray(detail.thesis.catalysts) &&
+              detail.thesis.catalysts.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-accent-text m-0 mb-1">
+                    催化剂
+                  </h3>
+                  <ul className="m-0 pl-5 text-xs text-text-2 space-y-0.5">
+                    {detail.thesis.catalysts.map((c, i) => (
+                      <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+            {/* 关键指标 */}
+            {detail.thesis?.key_metrics &&
+              Array.isArray(detail.thesis.key_metrics) &&
+              detail.thesis.key_metrics.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-text-2 m-0 mb-1">
+                    关键指标
+                  </h3>
+                  <ul className="m-0 pl-5 text-xs text-text-2 space-y-0.5">
+                    {detail.thesis.key_metrics.map((c, i) => (
+                      <li key={i}>{typeof c === "string" ? c : JSON.stringify(c)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+            {/* 非生产警告条 */}
+            {!detail.approved_for_production && (
+              <div className="px-3 py-2 rounded-lg bg-neg-soft text-neg-text font-bold text-sm border border-neg/40">
+                非生产：该 PriorityRun 尚未批准用于生产环境，结果仅供研究参考。
+              </div>
+            )}
+
+            {/* 免责声明 */}
+            <div className="text-xs text-text-3 pt-2 border-t border-border">
+              免责声明：研究顺序，不是买入建议。
+            </div>
+          </div>
+        </Card>
       )}
 
-      {/* 主区：五档基金列表 + 侧栏 */}
+      {/* === 第 3 层：基金候选 (Main Content) === */}
       {detail && (
-        <div className="priority-layout">
-          {/* 左侧：五档基金列表 */}
-          <div>
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-3 items-start">
+          {/* 左侧：5 档基金列表 */}
+          <div className="space-y-3 min-w-0">
             {TIER_ORDER.map((tier) => {
               const config = TIER_CONFIG[tier];
               const candidates = detail.candidates_by_tier?.[tier] ?? [];
               const count = detail.tier_counts?.[tier] ?? candidates.length;
               return (
-                <div className="card" key={tier} style={{ marginBottom: 12 }}>
-                  {/* 档位标题 + 数量 */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      marginBottom: candidates.length > 0 ? 10 : 0,
-                    }}
-                  >
-                    <span
-                      className="badge"
-                      style={{
-                        background: config.bg,
-                        color: config.color,
-                        fontSize: 11.5,
-                        padding: "2px 8px",
-                      }}
-                    >
-                      {config.label}
-                    </span>
-                    <span className="muted" style={{ fontSize: 11.5 }}>
-                      {count} 只
-                    </span>
-                  </div>
+                <Card key={tier}>
+                  <div className="p-4">
+                    {/* 档位标题 + 数量 */}
+                    <div className="flex items-center gap-2 mb-2">
+                      <Badge variant={config.variant}>{config.label}</Badge>
+                      <span className="text-xs text-text-3">{count} 只</span>
+                    </div>
 
-                  {/* 基金表格（空档位不显示表格） */}
-                  {candidates.length > 0 && (
-                    <div className="priority-table-scroll">
-                      <table>
+                    {/* 基金表格（空档位不显示表格） */}
+                    {candidates.length > 0 ? (
+                      <Table>
                         <thead>
                           <tr>
-                            <th className="num" style={{ width: 56 }}>档内排名</th>
-                            <th style={{ width: 90 }}>基金代码</th>
-                            <th>基金名称</th>
-                            <th className="num" style={{ width: 100 }}>
-                              真实目标持仓
-                            </th>
-                            <th className="num" style={{ width: 80 }}>
-                              披露覆盖
-                            </th>
-                            <th style={{ width: 90 }}>数据质量</th>
-                            <th style={{ width: 90 }}>估值状态</th>
-                            <th className="num" style={{ width: 70 }}>
-                              证据分
-                            </th>
+                            <Th className="w-14 text-right">档内排名</Th>
+                            <Th className="w-24">基金代码</Th>
+                            <Th>基金名称</Th>
+                            <Th className="w-28 text-right">真实目标持仓</Th>
+                            <Th className="w-24 text-right">披露覆盖</Th>
+                            <Th className="w-28">数据质量</Th>
+                            <Th className="w-28">估值状态</Th>
+                            <Th className="w-20 text-right">证据分</Th>
                           </tr>
                         </thead>
                         <tbody>
@@ -574,56 +625,63 @@ export default function PriorityWorkbenchPage() {
                                   handleSelect(c.priority_result_id);
                                 }
                               }}
-                              className={
+                              className={`cursor-pointer outline-none focus:outline-2 focus:outline-accent focus:-outline-offset-2 ${
                                 selectedResultId === c.priority_result_id
-                                  ? "priority-row-selected priority-row-focus"
-                                  : "priority-row-focus"
-                              }
-                              style={{ cursor: "pointer" }}
+                                  ? "bg-accent-soft"
+                                  : "hover:bg-surface-2"
+                              }`}
                             >
-                              <td className="num">{c.priority_rank ?? "-"}</td>
-                              <td
-                                style={{
-                                  fontFamily: "ui-monospace, monospace",
-                                  fontWeight: 700,
-                                }}
-                              >
-                                {c.fund_code}
-                              </td>
-                              <td style={{ color: "var(--text-2)" }}>
-                                {fmtText(c.fund_name)}
-                              </td>
-                              <td className="num">
+                              <Td className="text-right tabular-nums">
+                                {c.priority_rank ?? "-"}
+                              </Td>
+                              <Td className="font-mono font-bold">{c.fund_code}</Td>
+                              <Td className="text-text-2">{fmtText(c.fund_name)}</Td>
+                              <Td className="text-right tabular-nums">
                                 {fmtWeight(c.matched_holding_weight)}
-                              </td>
-                              <td className="num">
+                              </Td>
+                              <Td className="text-right tabular-nums">
                                 {fmtWeight(c.disclosed_holding_weight)}
-                              </td>
-                              <td>{fmtText(c.data_quality_status)}</td>
-                              <td>{fmtText(c.valuation_status)}</td>
-                              <td className="num">{fmtScore(c.evidence_score)}</td>
+                              </Td>
+                              <Td>{fmtText(c.data_quality_status)}</Td>
+                              <Td>{fmtText(c.valuation_status)}</Td>
+                              <Td className="text-right tabular-nums">
+                                {fmtScore(c.evidence_score)}
+                              </Td>
                             </tr>
                           ))}
                         </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
+                      </Table>
+                    ) : (
+                      <div className="text-center py-6 text-xs text-text-3">
+                        该档位暂无候选
+                      </div>
+                    )}
+                  </div>
+                </Card>
               );
             })}
           </div>
 
           {/* 右侧：选中基金详情侧栏 */}
-          <div className="priority-sidebar">
+          <div className="lg:sticky lg:top-2 lg:max-h-[calc(100vh-16px)] lg:overflow-auto space-y-3">
             {selectedCandidate ? (
               <CandidateDetail candidate={selectedCandidate} />
             ) : (
-              <div className="card">
-                <h2>选中基金详情</h2>
-                <p className="muted">点击左侧基金行查看详情。</p>
-              </div>
+              <Card>
+                <div className="p-4 space-y-2">
+                  <h2 className="text-base font-semibold text-text m-0">选中基金详情</h2>
+                  <p className="text-sm text-text-3 m-0">点击左侧基金行查看详情。</p>
+                </div>
+              </Card>
             )}
           </div>
+        </div>
+      )}
+
+      {/* 底部免责声明 */}
+      {detail && (
+        <div className="text-xs text-text-3 text-center py-2">
+          免责声明：研究顺序，不是买入建议。
         </div>
       )}
     </div>
@@ -632,132 +690,131 @@ export default function PriorityWorkbenchPage() {
 
 // 选中基金详情侧栏
 function CandidateDetail({ candidate }: { candidate: PriorityCandidate }) {
-  const config = TIER_CONFIG[candidate.priority_tier] ?? {
-    label: candidate.priority_tier,
-    color: "var(--text-2)",
-    bg: "var(--surface-2)",
-  };
+  const tier = candidate.priority_tier as TierKey | undefined;
+  const config = tier ? TIER_CONFIG[tier] : undefined;
 
   return (
-    <div className="card">
-      <h2>基金详情</h2>
+    <Card>
+      <div className="p-4 space-y-3">
+        <div className="flex items-center justify-between border-b border-border pb-2">
+          <h2 className="text-base font-semibold text-text m-0">基金详情</h2>
+          {config ? (
+            <Badge variant={config.variant}>{config.label}</Badge>
+          ) : (
+            <Badge variant="neutral">{candidate.priority_tier}</Badge>
+          )}
+        </div>
 
-      {/* 基本信息 */}
-      <h3>基本信息</h3>
-      <div className="kv">
-        <dt>基金代码</dt>
-        <dd style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
-          {candidate.fund_code}
-        </dd>
-        <dt>基金名称</dt>
-        <dd>{fmtText(candidate.fund_name)}</dd>
-        <dt>档位</dt>
-        <dd>
-          <span
-            className="badge"
-            style={{
-              background: config.bg,
-              color: config.color,
-              fontSize: 11.5,
-              padding: "2px 8px",
-            }}
-          >
-            {config.label}
-          </span>
-        </dd>
-        <dt>档内排名</dt>
-        <dd>{candidate.priority_rank ?? "-"}</dd>
+        {/* 基本信息 */}
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-text-2 m-0 mb-2">
+            基本信息
+          </h3>
+          <div className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-1 text-sm">
+            <div className="text-text-3">基金代码</div>
+            <div className="font-mono font-bold">{candidate.fund_code}</div>
+            <div className="text-text-3">基金名称</div>
+            <div className="font-medium">{fmtText(candidate.fund_name)}</div>
+            <div className="text-text-3">档内排名</div>
+            <div className="font-medium">{candidate.priority_rank ?? "-"}</div>
+          </div>
+        </div>
+
+        {/* 稳定原因码 */}
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-text-2 m-0 mb-2">
+            稳定原因码
+          </h3>
+          {candidate.priority_reasons.length > 0 ? (
+            <ul className="m-0 pl-5 text-xs space-y-0.5">
+              {candidate.priority_reasons.map((r, i) => (
+                <li key={`${r.code}-${i}`}>
+                  <strong className="font-semibold">{reasonLabel(r.code)}</strong>
+                  {r.message && (
+                    <span className="text-text-3 ml-1.5">· {r.message}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span className="text-xs text-text-3">无</span>
+          )}
+        </div>
+
+        {/* 排除原因码（如有） */}
+        {candidate.exclusion_reasons.length > 0 && (
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wide text-neg-text m-0 mb-2">
+              排除原因码
+            </h3>
+            <ul className="m-0 pl-5 text-xs space-y-0.5 text-neg-text">
+              {candidate.exclusion_reasons.map((r, i) => (
+                <li key={`${r.code}-${i}`}>
+                  <strong className="font-semibold">{reasonLabel(r.code)}</strong>
+                  {r.message && (
+                    <span className="text-text-3 ml-1.5">· {r.message}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* 关键指标 */}
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-text-2 m-0 mb-2">
+            关键指标
+          </h3>
+          <div className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-1 text-sm">
+            <div className="text-text-3">真实目标持仓</div>
+            <div className="font-mono tabular-nums">
+              {fmtWeight(candidate.matched_holding_weight)}
+            </div>
+            <div className="text-text-3">已披露持仓</div>
+            <div className="font-mono tabular-nums">
+              {fmtWeight(candidate.disclosed_holding_weight)}
+            </div>
+            <div className="text-text-3">归一化匹配率</div>
+            <div className="font-mono tabular-nums">
+              {fmtWeight(candidate.normalized_match_pct)}
+            </div>
+            <div className="text-text-3">适配分</div>
+            <div className="font-mono tabular-nums">{fmtScore(candidate.fit_score)}</div>
+            <div className="text-text-3">证据分</div>
+            <div className="font-mono tabular-nums">
+              {fmtScore(candidate.evidence_score)}
+            </div>
+          </div>
+        </div>
+
+        {/* 持仓报告日期 */}
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-text-2 m-0 mb-2">
+            持仓报告日期
+          </h3>
+          <div className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-1 text-sm">
+            <div className="text-text-3">报告日期</div>
+            <div className="font-medium">{fmtText(candidate.holding_report_date)}</div>
+          </div>
+        </div>
+
+        {/* 状态信息 */}
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-text-2 m-0 mb-2">
+            状态信息
+          </h3>
+          <div className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-1 text-sm">
+            <div className="text-text-3">数据质量</div>
+            <div className="font-medium">{fmtText(candidate.data_quality_status)}</div>
+            <div className="text-text-3">估值状态</div>
+            <div className="font-medium">{fmtText(candidate.valuation_status)}</div>
+            <div className="text-text-3">持仓真实度</div>
+            <div className="font-medium">{fmtText(candidate.holdings_truth_status)}</div>
+            <div className="text-text-3">资格状态</div>
+            <div className="font-medium">{fmtText(candidate.eligibility_status)}</div>
+          </div>
+        </div>
       </div>
-
-      {/* 稳定原因码 */}
-      <h3>稳定原因码</h3>
-      {candidate.priority_reasons.length > 0 ? (
-        <ul style={{ margin: "4px 0", paddingLeft: 18, fontSize: 12.5 }}>
-          {candidate.priority_reasons.map((r, i) => (
-            <li key={`${r.code}-${i}`} style={{ marginBottom: 2 }}>
-              <strong>{reasonLabel(r.code)}</strong>
-              {r.message && (
-                <span className="muted" style={{ marginLeft: 6 }}>
-                  · {r.message}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <span className="muted">无</span>
-      )}
-
-      {/* 排除原因码（如有） */}
-      {candidate.exclusion_reasons.length > 0 && (
-        <>
-          <h3>排除原因码</h3>
-          <ul
-            style={{
-              margin: "4px 0",
-              paddingLeft: 18,
-              fontSize: 12.5,
-              color: "var(--neg-text)",
-            }}
-          >
-            {candidate.exclusion_reasons.map((r, i) => (
-              <li key={`${r.code}-${i}`} style={{ marginBottom: 2 }}>
-                <strong>{reasonLabel(r.code)}</strong>
-                {r.message && (
-                  <span className="muted" style={{ marginLeft: 6 }}>
-                    · {r.message}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-
-      {/* 关键指标 */}
-      <h3>关键指标</h3>
-      <div className="kv">
-        <dt>真实目标持仓</dt>
-        <dd style={{ fontVariantNumeric: "tabular-nums" }}>
-          {fmtWeight(candidate.matched_holding_weight)}
-        </dd>
-        <dt>已披露持仓</dt>
-        <dd style={{ fontVariantNumeric: "tabular-nums" }}>
-          {fmtWeight(candidate.disclosed_holding_weight)}
-        </dd>
-        <dt>归一化匹配率</dt>
-        <dd style={{ fontVariantNumeric: "tabular-nums" }}>
-          {fmtWeight(candidate.normalized_match_pct)}
-        </dd>
-        <dt>适配分</dt>
-        <dd style={{ fontVariantNumeric: "tabular-nums" }}>
-          {fmtScore(candidate.fit_score)}
-        </dd>
-        <dt>证据分</dt>
-        <dd style={{ fontVariantNumeric: "tabular-nums" }}>
-          {fmtScore(candidate.evidence_score)}
-        </dd>
-      </div>
-
-      {/* 持仓报告日期 */}
-      <h3>持仓报告日期</h3>
-      <div className="kv">
-        <dt>报告日期</dt>
-        <dd>{fmtText(candidate.holding_report_date)}</dd>
-      </div>
-
-      {/* 状态信息 */}
-      <h3>状态信息</h3>
-      <div className="kv">
-        <dt>数据质量</dt>
-        <dd>{fmtText(candidate.data_quality_status)}</dd>
-        <dt>估值状态</dt>
-        <dd>{fmtText(candidate.valuation_status)}</dd>
-        <dt>持仓真实度</dt>
-        <dd>{fmtText(candidate.holdings_truth_status)}</dd>
-        <dt>资格状态</dt>
-        <dd>{fmtText(candidate.eligibility_status)}</dd>
-      </div>
-    </div>
+    </Card>
   );
 }
