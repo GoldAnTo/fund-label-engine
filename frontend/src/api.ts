@@ -22,6 +22,76 @@ export async function downloadFile(url: string, fallbackName: string): Promise<v
   URL.revokeObjectURL(a.href);
 }
 
+// ===================================================================
+// Pipeline 工作流编排
+// ===================================================================
+
+// Pipeline 步骤状态
+export type PipelineStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+// Pipeline 运行状态
+export type PipelineRunStatus = "running" | "completed" | "failed" | "cancelled";
+
+// Pipeline 阶段类型
+export type PipelineStageType = "screener" | "cognition" | "ic_review" | "memo" | "portfolio" | "monitoring";
+
+// Pipeline 步骤
+export interface PipelineStep {
+  step_id: string;
+  run_id: string;
+  stage: string;
+  item_ref: string;
+  status: PipelineStepStatus;
+  attempt: number;
+  detail: Record<string, unknown>;
+  error: string;
+  started_at: string;
+  finished_at: string;
+}
+
+// Pipeline 运行
+export interface PipelineRun {
+  run_id: string;
+  kind: string;
+  status: PipelineRunStatus;
+  trigger: string;
+  direction: string;
+  steps: PipelineStep[];
+  stats: Record<string, unknown>;
+  error: string;
+  started_at: string;
+  finished_at: string;
+  server_session_id: string;
+}
+
+// Pipeline 执行结果
+export interface PipelineResult {
+  run: PipelineRun;
+  stages_completed: string[];
+  stages_failed: string[];
+  partial: boolean;
+  output: Record<string, unknown>;
+}
+
+// 执行认知研究 pipeline
+export async function runPipeline(direction: string): Promise<PipelineResult> {
+  return postJSON(
+    `/v1/governance/pipeline/run?direction=${encodeURIComponent(direction)}`,
+    {}
+  );
+}
+
+// 列出 pipeline runs
+export async function fetchPipelineRuns(direction?: string): Promise<PipelineRun[]> {
+  const qs = direction ? `?direction=${encodeURIComponent(direction)}` : "";
+  return json(`/v1/governance/pipeline/runs${qs}`);
+}
+
+// 获取 pipeline run 详情
+export async function fetchPipelineRun(runId: string): Promise<PipelineRun> {
+  return json(`/v1/governance/pipeline/runs/${encodeURIComponent(runId)}`);
+}
+
 // ============================================================
 // 治理 API: CandidateSet + PriorityRun
 // ============================================================

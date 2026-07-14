@@ -560,3 +560,51 @@ def compile_constitution(
     # 编译宪法
     constitution = create_constitution_from_policy(policy, policy_id, version)
     return constitution.to_dict()
+
+
+# ============================================================
+# Pipeline 工作流编排 API
+# ============================================================
+@router.post(
+    "/pipeline/run",
+    summary="执行认知研究 pipeline",
+)
+async def run_pipeline(direction: str):
+    """执行认知研究 pipeline。
+
+    - 按阶段顺序执行：screener -> cognition -> ic_review -> memo -> portfolio -> monitoring
+    - 漏斗阶段失败则 pipeline 立即 fail
+    - 非漏斗阶段失败不 fail pipeline，标记为 partial
+    """
+    from app.governance.pipeline import execute_cognition_pipeline
+
+    result = execute_cognition_pipeline(direction)
+    return result.to_dict()
+
+
+@router.get(
+    "/pipeline/runs",
+    summary="列出 pipeline runs",
+)
+async def list_runs(direction: str | None = None):
+    """列出 pipeline runs，可按 direction 过滤。"""
+    from app.governance.pipeline import get_run_store
+
+    store = get_run_store()
+    runs = store.list_runs(direction)
+    return [r.to_dict() for r in runs]
+
+
+@router.get(
+    "/pipeline/runs/{run_id}",
+    summary="获取 pipeline run 详情",
+)
+async def get_run(run_id: str):
+    """获取 pipeline run 详情。不存在返回 404。"""
+    from app.governance.pipeline import get_run_store
+
+    store = get_run_store()
+    run = store.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    return run.to_dict()

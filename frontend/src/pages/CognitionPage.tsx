@@ -8,6 +8,7 @@ import {
   postStockCognition,
   exportCognition,
   fetchMonitorOverview,
+  runPipeline,
   type ThemeInfo,
   type ChainLink,
   type CognitionResponse,
@@ -19,6 +20,7 @@ import {
   type AttentionItem,
   type InboxSnapshot,
   type ScreenSnapshot,
+  type PipelineResult,
 } from "../api";
 import { DonutChart, HorizontalBarChart, SkeletonCard } from "../charts";
 import {
@@ -38,6 +40,26 @@ const TREND_LABEL: Record<string, string> = { increasing: "加仓", decreasing: 
 const CONVICTION_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低" };
 const RISK_LABEL: Record<string, string> = { conservative: "保守", balanced: "适中", aggressive: "进取" };
 const HORIZON_LABEL: Record<string, string> = { short: "短期", medium: "中期", long: "长期" };
+
+// Pipeline 阶段标签
+const PIPELINE_STAGE_LABELS: Record<string, string> = {
+  screener: "筛选",
+  cognition: "认知分析",
+  ic_review: "投决会审查",
+  memo: "投资备忘录",
+  portfolio: "组合构建",
+  monitoring: "投后监控",
+};
+const PIPELINE_STAGE_ORDER = ["screener", "cognition", "ic_review", "memo", "portfolio", "monitoring"];
+
+// Pipeline 步骤状态样式
+const PIPELINE_STEP_STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
+  completed: { bg: "rgba(22,163,74,0.1)", color: "#16a34a", label: "完成" },
+  failed: { bg: "rgba(220,38,38,0.1)", color: "#dc2626", label: "失败" },
+  skipped: { bg: "rgba(156,163,175,0.1)", color: "#6b7280", label: "跳过" },
+  running: { bg: "rgba(59,130,246,0.1)", color: "#3b82f6", label: "运行中" },
+  pending: { bg: "rgba(209,213,219,0.1)", color: "#9ca3af", label: "等待" },
+};
 
 function fmt(v: number | null | undefined, suffix = ""): string {
   if (v === null || v === undefined) return "-";
@@ -108,6 +130,7 @@ export default function CognitionPage() {
   const [riskTolerance, setRiskTolerance] = useState("balanced");
   const [timeHorizon, setTimeHorizon] = useState("medium");
   const [result, setResult] = useState<CognitionResponse | null>(null);
+  const [pipelineResult, setPipelineResult] = useState<PipelineResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -210,6 +233,9 @@ export default function CognitionPage() {
         setActiveTab("candidates");
         setSelectedFundCode(null);
         setMonitorFundCode(null);
+        // 同时触发 pipeline 运行，获取阶段状态
+        setPipelineResult(null);
+        runPipeline(direction.trim()).then(setPipelineResult).catch(() => {});
       })
       .catch(() => setError("分析失败，请重试"))
       .finally(() => setLoading(false));
@@ -229,6 +255,9 @@ export default function CognitionPage() {
         setActiveTab("candidates");
         setSelectedFundCode(null);
         setMonitorFundCode(null);
+        // 同时触发 pipeline 运行，获取阶段状态
+        setPipelineResult(null);
+        runPipeline(concept.name).then(setPipelineResult).catch(() => {});
       })
       .catch(() => setError("概念分析失败"))
       .finally(() => setLoading(false));
@@ -248,6 +277,9 @@ export default function CognitionPage() {
         setActiveTab("candidates");
         setSelectedFundCode(null);
         setMonitorFundCode(null);
+        // 同时触发 pipeline 运行，获取阶段状态
+        setPipelineResult(null);
+        runPipeline(stock.stock_name).then(setPipelineResult).catch(() => {});
       })
       .catch(() => setError("个股分析失败"))
       .finally(() => setLoading(false));
@@ -257,6 +289,7 @@ export default function CognitionPage() {
     setStep(1);
     setDirection("");
     setResult(null);
+    setPipelineResult(null);
     setSearchKeyword("");
     setSelectedFundCode(null);
     setMonitorFundCode(null);
@@ -621,6 +654,65 @@ export default function CognitionPage() {
     return (
       <CognitionErrorBoundary>
         <div className="main">
+          {/* Pipeline 状态条 */}
+          {pipelineResult && (
+            <section className="card" style={{ marginBottom: "12px", padding: "10px 16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>Pipeline</span>
+                <span style={{ fontSize: 11, color: "var(--text-3)", fontFamily: "monospace" }}>
+                  {pipelineResult.run.run_id}
+                </span>
+                {pipelineResult.partial && (
+                  <span style={{
+                    fontSize: 11,
+                    padding: "2px 8px",
+                    borderRadius: "3px",
+                    background: "rgba(243,156,18,0.1)",
+                    color: "#ca8a04",
+                    fontWeight: 600,
+                  }}>
+                    部分完成
+                  </span>
+                )}
+                {/* 整体运行状态 */}
+                <span style={{
+                  fontSize: 11,
+                  padding: "2px 8px",
+                  borderRadius: "3px",
+                  background: pipelineResult.run.status === "completed" ? "rgba(22,163,74,0.1)" : "rgba(220,38,38,0.1)",
+                  color: pipelineResult.run.status === "completed" ? "#16a34a" : "#dc2626",
+                  fontWeight: 600,
+                }}>
+                  {pipelineResult.run.status === "completed" ? "完成" : pipelineResult.run.status === "failed" ? "失败" : pipelineResult.run.status}
+                </span>
+                {/* 各阶段状态徽章 */}
+                <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginLeft: "auto" }}>
+                  {PIPELINE_STAGE_ORDER.map((stage) => {
+                    const step = pipelineResult.run.steps.find((s) => s.stage === stage);
+                    const status = step?.status ?? "pending";
+                    const style = PIPELINE_STEP_STATUS_STYLE[status] ?? PIPELINE_STEP_STATUS_STYLE.pending;
+                    return (
+                      <span
+                        key={stage}
+                        title={step?.error || style.label}
+                        style={{
+                          fontSize: 11,
+                          padding: "2px 8px",
+                          borderRadius: "3px",
+                          background: style.bg,
+                          color: style.color,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {PIPELINE_STAGE_LABELS[stage]}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* 顶部摘要条 */}
           <div className="cognition-selection-bar">
             <div className="cognition-selection-info">
