@@ -1481,6 +1481,118 @@ export interface InvestmentMemo {
   };
 }
 
+// 证据源：冻结的确定性数据来源
+export interface EvidenceSourceItem {
+  source_id: string;
+  kind: string;
+  locator: string;
+  title: string;
+  publisher: string;
+  content_hash: string;
+  excerpt: string;
+  has_snapshot: boolean;
+  fetched_at: string;
+}
+
+// 冻结的证据包
+export interface EvidenceBundleInfo {
+  bundle_id: string;
+  manifest: Record<string, unknown>;
+  created_at: string;
+  source_ids: string[];
+}
+
+// 确定性筛选器：单个准则评估条目
+export interface ScreenCriterionEntry {
+  criterion_id: string;
+  metric: string;
+  operator: string;
+  threshold: number;
+  observed: number | null;
+  passed: boolean | null;
+  reason: string;
+}
+
+// 确定性筛选器：排名明细
+export interface ScreenRankComponent {
+  metric: string;
+  weight: number;
+  observed: number | null;
+  percentile: number;
+  contribution: number;
+}
+
+// 确定性筛选器：单个基金的筛选结果
+export interface ScreenResult {
+  fund_code: string;
+  fund_name: string;
+  passed: boolean;
+  fail_reasons: ScreenCriterionEntry[];
+  pass_evidence: ScreenCriterionEntry[];
+  metrics: Record<string, number | null>;
+  rank_score: number;
+  rank_components: ScreenRankComponent[];
+}
+
+// 确定性筛选器：筛选快照
+export interface ScreenSnapshot {
+  direction: string;
+  total_funds: number;
+  passed_funds: number;
+  failed_funds: number;
+  results: ScreenResult[];
+  screen_criteria_count: number;
+  ranking_blend: Array<{ metric: string; weight: number; invert: boolean }>;
+  created_at: string;
+}
+
+// 基金证据包：Thesis/IC/Memo 共用的确定性证据
+export interface FundEvidencePacket {
+  fund_code: string;
+  fund_name: string;
+  identity: Record<string, unknown>;
+  latest_metrics: Record<string, unknown>;
+  holdings: Record<string, unknown>[];
+  holdings_history: Record<string, unknown>[];
+  valuation: Record<string, unknown>;
+  trend: Record<string, unknown>;
+  manager: Record<string, unknown> | null;
+  match_analysis: Record<string, unknown>;
+  data_quality_notes: string[];
+  evidence_sources: EvidenceSourceItem[];
+  evidence_bundle: EvidenceBundleInfo | null;
+}
+
+// 决策队列：attention item
+export interface AttentionItem {
+  item_id: string;
+  source_type: string;
+  source_type_display: string;
+  source_id: string;
+  source_version: string;
+  title: string;
+  body: string;
+  severity: "high" | "medium" | "low" | string;
+  fund_code: string | null;
+  direction: string | null;
+  response_set: string[];
+  status: "open" | "resolved" | "dismissed" | "snoozed" | string;
+  response: string | null;
+  response_note: string;
+  created_at: string;
+  responded_at: string | null;
+}
+
+// 决策队列快照
+export interface InboxSnapshot {
+  total_items: number;
+  open_items: number;
+  high_severity: number;
+  medium_severity: number;
+  low_severity: number;
+  items: AttentionItem[];
+}
+
 export interface CognitionResponse {
   direction: string;
   available_links: string[];
@@ -1543,6 +1655,12 @@ export interface CognitionResponse {
   ic_review?: ICReview;
   // 投资备忘录
   investment_memo?: InvestmentMemo;
+  // 证据系统：基金证据包
+  evidence_packets?: FundEvidencePacket[];
+  // 决策队列：attention items
+  inbox?: InboxSnapshot;
+  // 确定性筛选器：筛选快照（可选）
+  screen_snapshot?: ScreenSnapshot;
 }
 
 export interface PortfolioMetrics {

@@ -33,6 +33,9 @@ from app.cognition.theme_registry import load_themes
 from app.cognition.thesis_tracker import create_tracker_from_cognition
 from app.cognition.validator import validate_cognition
 from app.cognition.valuation_gate import calculate_valuation, check_hard_limits
+from app.governance.evidence import build_fund_evidence_packet
+from app.governance.inbox import build_inbox_snapshot, create_inbox_from_cognition
+from app.governance.screener import run_screener
 from app.services.candidate_priority import FundCandidateEvidence
 
 _MATCH_THRESHOLD = 5.0
@@ -1209,7 +1212,58 @@ class CognitionEngine:
             gated_out=gated_out,
         )
 
-        return {
+        # === 证据系统：为顶部基金构建证据包 ===
+        # 在 artifact 输出前冻结证据，供 IC Review / Memo / Thesis 共用
+        evidence_packets: list[dict[str, Any]] = []
+        for fm in top_funds[:3]:  # 只为前 3 个基金构建
+            packet = build_fund_evidence_packet(
+                fund_code=fm["fund_code"],
+                fund_name=fm.get("fund_name", ""),
+                fund_match=fm,
+                holdings=all_holdings.get(fm["fund_code"], []),
+                holdings_history=[],  # 可选：从多期数据构建
+                direction=direction,
+            )
+            evidence_packets.append(packet.to_dict())
+
+        # === Inbox：决策队列 ===
+        attention_items = create_inbox_from_cognition(
+            direction=direction,
+            ic_review=ic_review.to_dict() if hasattr(ic_review, "to_dict") else ic_review,
+            thesis_health=health,
+            fund_matches=fund_matches,
+            gated_out=[
+                {
+                    "fund_code": f["fund_code"],
+                    "match_pct": f["match_pct"],
+                    "violations": f["gate"]["violations"],
+                }
+                for f in gated_out
+            ],
+        )
+        inbox = build_inbox_snapshot(attention_items)
+
+        # === 确定性筛选器：评估准则 + 百分位排名 + 失败原因记录 ===
+        # 筛选器失败不影响主流程
+        screen_snapshot: dict[str, Any] | None = None
+        try:
+            from app.governance.constitution import create_constitution_from_policy
+
+            # 从 judgment 构建策略字典
+            policy_dict = {
+                "valuation_policy": {
+                    "max_valuation_percentile": judgment.get("hard_limits", {}).get("max_valuation_percentile"),
+                    "max_peg": judgment.get("hard_limits", {}).get("max_peg"),
+                    "max_pe": judgment.get("hard_limits", {}).get("max_pe"),
+                },
+            }
+            constitution = create_constitution_from_policy(policy_dict, direction, 1)
+            snapshot = run_screener(direction, fund_matches + gated_out, constitution.compiled)
+            screen_snapshot = snapshot.to_dict()
+        except Exception:
+            pass  # 筛选器失败不影响主流程
+
+        result = {
             "direction": direction,
             "available_links": [
                 link["name"] for link in chain["chain"] if not link.get("exclude")
@@ -1225,6 +1279,8 @@ class CognitionEngine:
             "thesis_tracker": thesis_tracker_data,
             "ic_review": ic_review.to_dict(),
             "investment_memo": memo.to_dict(),
+            "evidence_packets": evidence_packets,
+            "inbox": inbox.to_dict(),
             "gated_out_funds": [
                 {
                     "fund_code": f["fund_code"],
@@ -1235,6 +1291,11 @@ class CognitionEngine:
                 for f in gated_out[:5]
             ],
         }
+
+        if screen_snapshot:
+            result["screen_snapshot"] = screen_snapshot
+
+        return result
 
     # ------------------------------------------------------------------
     # 完整候选证据构建（未截断）

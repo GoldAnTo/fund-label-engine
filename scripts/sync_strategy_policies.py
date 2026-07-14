@@ -178,13 +178,29 @@ def main(argv: list[str]) -> int:
 
     # 不删除已有数据库;复用或新建
     _ensure_migrations(db_path)
-    print(f"[1/3] migrations OK: {db_path}")
+    print(f"[1/4] migrations OK: {db_path}")
 
     results = []
     for ypath in sorted(yaml_dir.glob("*.yaml")):
         r = sync_yaml_to_db(ypath, db_path)
         results.append((ypath.name, r))
-        print(f"[2/3] synced: {ypath.name} → policy_id={r['policy_id']} v{r['version']}")
+        print(f"[2/4] synced: {ypath.name} -> policy_id={r['policy_id']} v{r['version']}")
+
+    # 同步策略后,编译宪法
+    from app.governance.constitution import create_constitution_from_policy
+
+    for ypath in sorted(yaml_dir.glob("*.yaml")):
+        policy_dict = _parse_yaml(ypath)
+        policy_id = str(policy_dict["policy_id"])
+        version = int(policy_dict["version"])
+        constitution = create_constitution_from_policy(policy_dict, policy_id, version)
+        print(
+            f"[3/4] constitution: {ypath.name} -> "
+            f"{len(constitution.criteria)} criteria, valid={constitution.validation.valid}"
+        )
+        if constitution.validation.warnings:
+            for w in constitution.validation.warnings:
+                print(f"        warning: {w}")
 
     conn = sqlite3.connect(str(db_path))
     try:
@@ -193,7 +209,7 @@ def main(argv: list[str]) -> int:
         ).fetchall()
     finally:
         conn.close()
-    print(f"[3/3] strategy_policies now has {len(rows)} rows:")
+    print(f"[4/4] strategy_policies now has {len(rows)} rows:")
     for r in rows:
         print(f"  - {r[0]} v{r[1]} ({r[2]}) [{r[3]}] {r[4]}")
     return 0

@@ -459,3 +459,104 @@ def list_priority_runs(
 ) -> list[dict[str, Any]]:
     """按投资假设查询历史 PriorityRun 列表。"""
     return service.list_priority_runs(thesis_id)
+
+
+# ============================================================
+# 策略宪法 API: 从策略政策编译宪法
+# ============================================================
+@router.get(
+    "/constitutions/{policy_id}",
+    summary="获取策略宪法版本",
+)
+def get_constitution(
+    policy_id: str,
+    version: int | None = None,
+    service: GovernanceService = Depends(get_governance_service),
+) -> dict[str, Any]:
+    """获取宪法版本(默认返回最新版本)。
+
+    - 如果指定 version,编译该版本策略政策对应的宪法
+    - 如果不指定 version,优先找 active 状态的版本,其次找最大版本号
+    """
+    from app.governance.constitution import create_constitution_from_policy
+
+    # 确定要查询的版本
+    target_version = version
+    if target_version is None:
+        # 查找该 policy_id 的所有版本,优先取 active,其次取最大 version
+        import sqlite3
+
+        db_path = (
+            getattr(service, "_repo", None)
+            and getattr(service._repo, "_db_path", None)
+        )
+        if not db_path:
+            raise HTTPException(status_code=503, detail="数据库路径未配置")
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            # 优先找 active 版本
+            row = conn.execute(
+                "SELECT version FROM strategy_policies "
+                "WHERE policy_id = ? AND policy_status = 'active' "
+                "ORDER BY version DESC LIMIT 1",
+                (policy_id,),
+            ).fetchone()
+            if row is not None:
+                target_version = row["version"]
+            else:
+                # 回退:找最大 version
+                row = conn.execute(
+                    "SELECT MAX(version) AS max_version FROM strategy_policies WHERE policy_id = ?",
+                    (policy_id,),
+                ).fetchone()
+                if row is not None and row["max_version"] is not None:
+                    target_version = row["max_version"]
+
+        if target_version is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"策略政策不存在: {policy_id}",
+            )
+
+    # 读取策略政策
+    policy = service._repo.get_strategy_policy(policy_id, target_version)
+    if policy is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"策略政策不存在: {policy_id} v{target_version}",
+        )
+
+    # 编译宪法
+    constitution = create_constitution_from_policy(policy, policy_id, target_version)
+    return constitution.to_dict()
+
+
+@router.post(
+    "/constitutions/{policy_id}/compile",
+    summary="从策略政策编译宪法",
+    status_code=201,
+)
+def compile_constitution(
+    policy_id: str,
+    version: int,
+    service: GovernanceService = Depends(get_governance_service),
+) -> dict[str, Any]:
+    """从策略政策编译宪法。
+
+    - 从数据库读取指定版本的策略政策
+    - 调用 create_constitution_from_policy 生成宪法版本
+    - 返回编译后的宪法(含准则列表、校验结果、编译输出)
+    """
+    from app.governance.constitution import create_constitution_from_policy
+
+    # 读取策略政策
+    policy = service._repo.get_strategy_policy(policy_id, version)
+    if policy is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"策略政策不存在: {policy_id} v{version}",
+        )
+
+    # 编译宪法
+    constitution = create_constitution_from_policy(policy, policy_id, version)
+    return constitution.to_dict()

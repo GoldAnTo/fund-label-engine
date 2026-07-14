@@ -15,6 +15,10 @@ import {
   type StockSearchResult,
   type MonitorOverview,
   type ICReview,
+  type FundEvidencePacket,
+  type AttentionItem,
+  type InboxSnapshot,
+  type ScreenSnapshot,
 } from "../api";
 import { DonutChart, HorizontalBarChart, SkeletonCard } from "../charts";
 import {
@@ -132,6 +136,9 @@ export default function CognitionPage() {
 
   // 导出
   const [exporting, setExporting] = useState(false);
+
+  // Inbox 展开状态
+  const [inboxExpanded, setInboxExpanded] = useState(false);
 
   // useScrollSpy 必须在所有条件 return 之前调用，避免 Hooks 顺序变化
   const sectionIds = ["tab-candidates", "tab-chain", "tab-validation", "tab-portfolio", "tab-memo"];
@@ -543,6 +550,8 @@ export default function CognitionPage() {
     const pf = result.step5_portfolio;
     const fundMatches = result.step4_fund_matches ?? [];
     const gatedOut = result.gated_out_funds ?? [];
+    const screenSnapshot: ScreenSnapshot | null = result.screen_snapshot ?? null;
+    const inbox: InboxSnapshot | null = result.inbox ?? null;
 
     // 安全读取 as_of_date（类型中未定义，运行时可能存在）
     const asOfDate = (result as { step1_judgment?: { as_of_date?: string | null } }).step1_judgment?.as_of_date ?? null;
@@ -550,6 +559,11 @@ export default function CognitionPage() {
     // 选中基金
     const selectedFund = selectedFundCode
       ? fundMatches.find((f) => f.fund_code === selectedFundCode) ?? null
+      : null;
+
+    // 选中基金的证据包（可选字段，安全访问）
+    const evidencePacket: FundEvidencePacket | null = selectedFundCode
+      ? result.evidence_packets?.find((p) => p.fund_code === selectedFundCode) ?? null
       : null;
 
     // 顶部关键指标（最多 3 个）
@@ -638,6 +652,140 @@ export default function CognitionPage() {
             </div>
           )}
 
+          {/* Inbox：决策队列 */}
+          {inbox && inbox.open_items > 0 && (
+            <section className="card" style={{ marginBottom: "12px" }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer" }}
+                onClick={() => setInboxExpanded(!inboxExpanded)}
+              >
+                <span style={{ fontWeight: 600, fontSize: 14 }}>Inbox</span>
+                {/* 高优先级红色徽章 */}
+                {inbox.high_severity > 0 && (
+                  <span style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minWidth: "22px",
+                    height: "22px",
+                    padding: "0 6px",
+                    borderRadius: "11px",
+                    background: "#dc2626",
+                    color: "#fff",
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}>
+                    {inbox.high_severity}
+                  </span>
+                )}
+                {/* 中优先级黄色徽章 */}
+                {inbox.medium_severity > 0 && (
+                  <span style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minWidth: "22px",
+                    height: "22px",
+                    padding: "0 6px",
+                    borderRadius: "11px",
+                    background: "#ca8a04",
+                    color: "#fff",
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}>
+                    {inbox.medium_severity}
+                  </span>
+                )}
+                {/* 低优先级灰色徽章 */}
+                {inbox.low_severity > 0 && (
+                  <span style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minWidth: "22px",
+                    height: "22px",
+                    padding: "0 6px",
+                    borderRadius: "11px",
+                    background: "#6b7280",
+                    color: "#fff",
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}>
+                    {inbox.low_severity}
+                  </span>
+                )}
+                <span style={{ fontSize: 12, color: "var(--text-3)", marginLeft: "auto" }}>
+                  {inboxExpanded ? "收起" : "展开"}（共 {inbox.open_items} 项）
+                </span>
+              </div>
+
+              {/* 展开的 attention items 列表 */}
+              {inboxExpanded && inbox.items.length > 0 && (
+                <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {inbox.items.map((item: AttentionItem) => {
+                    const severityColor = item.severity === "high" ? "#dc2626" : item.severity === "medium" ? "#ca8a04" : "#6b7280";
+                    const severityLabel = item.severity === "high" ? "高" : item.severity === "medium" ? "中" : "低";
+                    return (
+                      <div
+                        key={item.item_id}
+                        style={{
+                          padding: "10px 12px",
+                          background: "var(--surface-2, #f5f5f5)",
+                          borderRadius: "6px",
+                          borderLeft: `3px solid ${severityColor}`,
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span style={{ fontSize: 13, fontWeight: 600 }}>{item.title}</span>
+                            <span style={{
+                              fontSize: 11,
+                              padding: "1px 6px",
+                              borderRadius: "3px",
+                              background: severityColor,
+                              color: "#fff",
+                              fontWeight: 600,
+                            }}>
+                              {severityLabel}
+                            </span>
+                            <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: "3px", background: "var(--surface, #e0e0e0)", color: "var(--text-3)" }}>
+                              {item.source_type_display}
+                            </span>
+                          </div>
+                          {item.fund_code && (
+                            <span style={{ fontSize: 12, color: "var(--text-3)", fontFamily: "monospace" }}>{item.fund_code}</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
+                          {item.body}
+                        </div>
+                        {item.response_set.length > 0 && (
+                          <div style={{ marginTop: "6px", display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                            {item.response_set.map((r) => (
+                              <span
+                                key={r}
+                                style={{
+                                  fontSize: 11,
+                                  padding: "2px 8px",
+                                  borderRadius: "3px",
+                                  border: "1px solid var(--border, #e0e0e0)",
+                                  color: "var(--text-3)",
+                                  background: "transparent",
+                                }}
+                              >
+                                {r}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+
           {/* Tab 导航 */}
           <div id="tab-nav" style={{ display: "flex", gap: "4px", borderBottom: "1px solid var(--border)", marginBottom: "16px" }}>
             <button type="button" style={tabStyle(activeTab === "candidates")} onClick={() => setActiveTab("candidates")}>
@@ -685,12 +833,15 @@ export default function CognitionPage() {
                             <th>估值分位</th>
                             <th>门禁</th>
                             <th>趋势</th>
+                            <th>排名分</th>
                           </tr>
                         </thead>
                         <tbody>
                           {fundMatches.map((f) => {
                             const v = (f.valuation ?? {}) as Record<string, unknown>;
                             const isSelected = selectedFundCode === f.fund_code;
+                            // 从筛选快照中查找该基金的排名分
+                            const screenResult = screenSnapshot?.results.find((r) => r.fund_code === f.fund_code);
                             return (
                               <tr
                                 key={f.fund_code}
@@ -713,6 +864,9 @@ export default function CognitionPage() {
                                   ) : "-"}
                                 </td>
                                 <td style={{ fontSize: 12 }}>{TREND_LABEL[f.trend?.trend] ?? f.trend?.trend ?? "-"}</td>
+                                <td style={{ fontWeight: 600, color: "var(--accent)" }}>
+                                  {screenResult && screenResult.passed ? fmt(screenResult.rank_score) : "-"}
+                                </td>
                               </tr>
                             );
                           })}
@@ -750,6 +904,95 @@ export default function CognitionPage() {
                           ))}
                         </tbody>
                       </table>
+                    </details>
+                  )}
+
+                  {/* 筛选详情（折叠）：展示筛选准则、通过/失败统计、失败原因 */}
+                  {screenSnapshot && (
+                    <details className="card" style={{ marginBottom: "12px" }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 600, color: "var(--text-2)" }}>
+                        筛选详情（{screenSnapshot.passed_funds} 通过 / {screenSnapshot.failed_funds} 未通过 / 共 {screenSnapshot.total_funds} 只）
+                      </summary>
+
+                      {/* 统计概览 */}
+                      <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginTop: "12px", marginBottom: "12px", fontSize: 13 }}>
+                        <span>
+                          <span style={{ color: "var(--text-3)" }}>筛选准则 </span>
+                          <span style={{ fontWeight: 600 }}>{screenSnapshot.screen_criteria_count}</span> 条
+                        </span>
+                        {screenSnapshot.ranking_blend.length > 0 && (
+                          <span>
+                            <span style={{ color: "var(--text-3)" }}>排名指标 </span>
+                            <span style={{ fontWeight: 600 }}>{screenSnapshot.ranking_blend.length}</span> 个
+                            <span style={{ color: "var(--text-3)", marginLeft: "4px" }}>
+                              （{screenSnapshot.ranking_blend.map((b) => b.metric).join("、")}）
+                            </span>
+                          </span>
+                        )}
+                        <span style={{ color: "var(--text-3)" }}>生成于 {screenSnapshot.created_at}</span>
+                      </div>
+
+                      {/* 未通过基金及失败原因 */}
+                      {screenSnapshot.results.filter((r) => !r.passed).length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: "8px" }}>未通过基金及失败原因</div>
+                          <table className="table-v2">
+                            <thead>
+                              <tr>
+                                <th>代码</th>
+                                <th>名称</th>
+                                <th>失败准则</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {screenSnapshot.results.filter((r) => !r.passed).map((r) => (
+                                <tr key={r.fund_code}>
+                                  <td>{r.fund_code}</td>
+                                  <td>{r.fund_name}</td>
+                                  <td style={{ fontSize: 12, color: "var(--neg)" }}>
+                                    {r.fail_reasons.map((fr) => {
+                                      const valStr = fr.observed !== null ? String(fr.observed) : "数据不足";
+                                      return `${fr.metric} ${fr.operator} ${fr.threshold}（观测值 ${valStr}）`;
+                                    }).join("；")}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {/* 通过基金排名明细 */}
+                      {screenSnapshot.results.filter((r) => r.passed && r.rank_components.length > 0).length > 0 && (
+                        <div style={{ marginTop: "12px" }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: "8px" }}>通过基金排名明细</div>
+                          <table className="table-v2">
+                            <thead>
+                              <tr>
+                                <th>代码</th>
+                                <th>名称</th>
+                                <th>排名分</th>
+                                <th>排名明细</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {screenSnapshot.results.filter((r) => r.passed && r.rank_components.length > 0).map((r) => (
+                                <tr key={r.fund_code}>
+                                  <td>{r.fund_code}</td>
+                                  <td>{r.fund_name}</td>
+                                  <td style={{ fontWeight: 600, color: "var(--accent)" }}>{fmt(r.rank_score)}</td>
+                                  <td style={{ fontSize: 12, color: "var(--text-2)" }}>
+                                    {r.rank_components.map((rc) => {
+                                      const obsStr = rc.observed !== null ? String(rc.observed) : "-";
+                                      return `${rc.metric}: 百分位 ${fmt(rc.percentile)}, 贡献 ${fmt(rc.contribution)}（观测值 ${obsStr}）`;
+                                    }).join("；")}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </details>
                   )}
                 </div>
@@ -1694,6 +1937,89 @@ export default function CognitionPage() {
             {/* 右侧详情栏 */}
             <div style={{ width: "320px", flexShrink: 0, position: "sticky", top: "12px" }}>
               <FundDetailPanel fund={selectedFund} />
+
+              {/* 证据溯源：展示冻结的证据源、bundle ID、数据缺口 */}
+              {selectedFund && evidencePacket && (
+                <section className="card" style={{ marginTop: "12px" }}>
+                  <div style={{ fontWeight: 600, marginBottom: "8px" }}>证据溯源</div>
+
+                  {/* 冻结的 bundle ID */}
+                  {evidencePacket.evidence_bundle && (
+                    <div style={{
+                      padding: "6px 10px",
+                      background: "var(--surface-2, #f5f5f5)",
+                      borderRadius: "4px",
+                      fontSize: 12,
+                      marginBottom: "8px",
+                      wordBreak: "break-all",
+                    }}>
+                      <span style={{ color: "var(--text-3)" }}>Bundle ID：</span>
+                      <span style={{ fontFamily: "monospace", fontWeight: 600 }}>
+                        {evidencePacket.evidence_bundle.bundle_id}
+                      </span>
+                      <span style={{ color: "var(--text-3)", marginLeft: "8px" }}>
+                        ({evidencePacket.evidence_bundle.source_ids.length} 个证据源)
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 证据源列表 */}
+                  {evidencePacket.evidence_sources.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {evidencePacket.evidence_sources.map((src) => (
+                        <div
+                          key={src.source_id}
+                          style={{
+                            padding: "6px 8px",
+                            background: "var(--surface-2, #f5f5f5)",
+                            borderRadius: "4px",
+                            fontSize: 12,
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "2px" }}>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "1px 6px",
+                                borderRadius: "3px",
+                                background: "var(--accent-soft, rgba(59,130,246,0.1))",
+                                color: "var(--accent, #3b82f6)",
+                                fontSize: 10,
+                                fontWeight: 600,
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {src.kind}
+                            </span>
+                            <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {src.title}
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text-3)", fontSize: 11 }}>
+                            <span>{src.publisher}</span>
+                            <span style={{ fontFamily: "monospace" }}>{src.content_hash}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 数据缺口说明 */}
+                  {evidencePacket.data_quality_notes.length > 0 && (
+                    <div style={{ marginTop: "8px" }}>
+                      <div style={{ fontSize: 12, color: "var(--warn)", fontWeight: 600, marginBottom: "4px" }}>
+                        数据缺口
+                      </div>
+                      {evidencePacket.data_quality_notes.map((note, i) => (
+                        <div key={i} style={{ fontSize: 12, color: "var(--text-2)", padding: "2px 0" }}>
+                          - {note}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
+
               {monitorFundCode && (
                 <div style={{ marginTop: "12px" }}>
                   <MonitorPanel
