@@ -40,6 +40,15 @@ class LabelRunReader:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _has_table(self, table_name: str) -> bool:
+        """检查输出库中是否存在某张表。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table_name,),
+            ).fetchone()
+            return row is not None
+
     def list_runs(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -111,6 +120,25 @@ class LabelRunReader:
             if not label_rows:
                 return None
 
+            # 从 fund_profiles 表查询基金名称和类型
+            profile_row = conn.execute(
+                "SELECT fund_name, fund_type FROM fund_profiles "
+                "WHERE fund_code = ?",
+                (fund_code,),
+            ).fetchone()
+            fund_name = profile_row["fund_name"] if profile_row else ""
+            fund_type = profile_row["fund_type"] if profile_row else ""
+
+            # 从 fund_classification_results 表查询风格
+            try:
+                style_row = conn.execute(
+                    "SELECT style_code, style_name FROM fund_classification_results "
+                    "WHERE run_id = ? AND fund_code = ?",
+                    (run_id, fund_code),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                style_row = None
+
             evidence_rows = conn.execute(
                 "SELECT label_code, metric, value, threshold, source, message "
                 "FROM fund_label_evidence "
@@ -134,6 +162,10 @@ class LabelRunReader:
         return {
             "run_id": run_id,
             "fund_code": fund_code,
+            "fund_name": fund_name,
+            "fund_type": fund_type,
+            "style_code": style_row["style_code"] if style_row else "",
+            "style_name": style_row["style_name"] if style_row else "",
             "review_action": review_action,
             "coverage": coverage,
             "labels": [dict(row) for row in label_rows],
@@ -1048,12 +1080,16 @@ class LabelRunReader:
         where = " AND ".join(clauses)
         sql = (
             "SELECT r.fund_code AS fund_code, "
+            "p.fund_name AS fund_name, "
+            "p.fund_type AS fund_type, "
             "COUNT(DISTINCT r.label_code) AS label_count, "
             "(SELECT cov.review_action FROM fund_run_coverage cov "
             " WHERE cov.run_id = r.run_id AND cov.fund_code = r.fund_code LIMIT 1) AS review_action, "
             "(SELECT COUNT(*) FROM fund_run_coverage cov "
             " WHERE cov.run_id = r.run_id AND cov.fund_code = r.fund_code AND cov.present = 0) AS missing_field_count "
-            f"FROM fund_label_results r WHERE {where} "
+            f"FROM fund_label_results r "
+            "LEFT JOIN fund_profiles p ON p.fund_code = r.fund_code "
+            f"WHERE {where} "
             "GROUP BY r.fund_code "
             "ORDER BY r.fund_code LIMIT ?"
         )

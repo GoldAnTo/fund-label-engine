@@ -23,6 +23,8 @@
 """
 from __future__ import annotations
 
+import json
+import time
 from typing import Any
 
 from app.persistence.candidate_priority import CandidatePriorityRepository
@@ -40,6 +42,7 @@ from app.services.governance_service import (
     SnapshotNotFoundError,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 
@@ -580,6 +583,115 @@ async def run_pipeline(direction: str):
 
     result = execute_cognition_pipeline(direction)
     return result.to_dict()
+
+
+@router.get(
+    "/pipeline/stream",
+    summary="SSE 流式推送 pipeline 执行进度",
+)
+async def stream_pipeline(direction: str):
+    """SSE 流式推送 pipeline 执行进度。
+
+    - 实时推送每个阶段的开始和完成事件
+    - 认知阶段额外推送 cognition_running / cognition_complete 事件
+    - 前端可通过 SSE 实时展示进度，失败时回退到轮询
+    """
+    import asyncio
+
+    from app.governance.pipeline import (
+        FUNNEL_STAGES,
+        RunStatus,
+        StageType,
+        StepStatus,
+        get_run_store,
+    )
+
+    async def event_generator():
+        # 发送 start 事件
+        yield f"data: {json.dumps({'type': 'start', 'direction': direction})}\n\n"
+
+        store = get_run_store()
+        run = store.create_run(kind="pipeline", direction=direction)
+        run_id = run.run_id
+
+        stages = ["screener", "cognition", "ic_review", "memo", "portfolio", "monitoring"]
+        completed: list[str] = []
+        failed: list[str] = []
+        output: dict[str, Any] = {}
+        partial = False
+
+        for stage in stages:
+            # 发送阶段开始事件
+            yield f"data: {json.dumps({'type': 'stage_start', 'stage': stage, 'run_id': run_id})}\n\n"
+
+            step = store.add_step(run.run_id, stage, direction)
+            store.update_step(run.run_id, step.step_id, StepStatus.RUNNING)
+
+            try:
+                if stage == "screener":
+                    result: dict[str, Any] = {"status": "screener_completed", "direction": direction}
+                elif stage == "cognition":
+                    # 认知阶段是最耗时的操作，发送 cognition_running 事件
+                    yield f"data: {json.dumps({'type': 'cognition_running', 'stage': stage, 'run_id': run_id})}\n\n"
+
+                    from app.cognition.engine import CognitionEngine
+
+                    engine = CognitionEngine(source_db_path="", factor_db_path="")
+                    result = engine.run(direction=direction, conviction="medium")
+
+                    # 认知完成，发送 cognition_complete 事件及摘要
+                    summary = {
+                        "fund_count": len(result.get("step4_fund_matches", [])),
+                        "ic_verdict": result.get("ic_review", {}).get("verdict", ""),
+                        "direction": direction,
+                    }
+                    yield f"data: {json.dumps({'type': 'cognition_complete', 'stage': stage, 'summary': summary, 'run_id': run_id})}\n\n"
+                elif stage == "ic_review":
+                    cognition_result = output.get("cognition", {})
+                    result = cognition_result.get("ic_review", {})
+                elif stage == "memo":
+                    cognition_result = output.get("cognition", {})
+                    result = cognition_result.get("investment_memo", {})
+                elif stage == "portfolio":
+                    cognition_result = output.get("cognition", {})
+                    result = cognition_result.get("step5_portfolio", {})
+                elif stage == "monitoring":
+                    cognition_result = output.get("cognition", {})
+                    tracker = cognition_result.get("thesis_tracker", {})
+                    result = tracker.get("health", {})
+                else:
+                    result = {}
+
+                step_detail = {"result_keys": list(result.keys()) if isinstance(result, dict) else []}
+                store.update_step(run.run_id, step.step_id, StepStatus.COMPLETED, detail=step_detail)
+                completed.append(stage)
+                if isinstance(result, dict):
+                    output[stage] = result
+
+                yield f"data: {json.dumps({'type': 'stage_complete', 'stage': stage, 'status': 'completed', 'run_id': run_id})}\n\n"
+
+            except Exception as e:
+                store.update_step(run.run_id, step.step_id, StepStatus.FAILED, error=str(e))
+                failed.append(stage)
+
+                yield f"data: {json.dumps({'type': 'stage_complete', 'stage': stage, 'status': 'failed', 'error': str(e), 'run_id': run_id})}\n\n"
+
+                # 漏斗阶段失败 -> pipeline fail
+                if StageType(stage) in FUNNEL_STAGES:
+                    store.update_run_status(run.run_id, RunStatus.FAILED, error=f"funnel stage {stage} failed: {e}")
+                    yield f"data: {json.dumps({'type': 'done', 'run_id': run_id, 'status': 'failed'})}\n\n"
+                    return
+                else:
+                    # 非漏斗阶段失败，继续执行
+                    partial = True
+
+            # 短暂延迟，让前端有时间更新 UI
+            await asyncio.sleep(0.1)
+
+        store.update_run_status(run.run_id, RunStatus.COMPLETED)
+        yield f"data: {json.dumps({'type': 'done', 'run_id': run_id, 'status': 'completed', 'partial': partial})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get(

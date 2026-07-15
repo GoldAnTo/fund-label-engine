@@ -4,6 +4,7 @@ import ReadyPoolPage from "./pages/ReadyPoolPage";
 import SearchPage from "./pages/SearchPage";
 import ComparePage from "./pages/ComparePage";
 import CognitionPage from "./pages/CognitionPage";
+import MultiCognitionPage from "./pages/MultiCognitionPage";
 import LabelDefinitionsPage from "./pages/LabelDefinitionsPage";
 import PriorityWorkbenchPage from "./pages/PriorityWorkbenchPage";
 import { useEffect } from "react";
@@ -13,6 +14,7 @@ const NAV_GROUPS = [
     title: "选基",
     links: [
       { to: "/cognition", label: "认知选基" },
+      { to: "/multi-cognition", label: "多认知组合" },
     ],
   },
   {
@@ -34,6 +36,7 @@ const NAV_GROUPS = [
 
 const CRUMB_MAP: Record<string, string> = {
   cognition: "认知选基",
+  "multi-cognition": "多认知组合",
   compare: "竞品横评",
   explorer: "风格总览",
   search: "风格筛选",
@@ -107,6 +110,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Navigate to="/cognition" replace />} />
             <Route path="/cognition" element={<CognitionPage />} />
+            <Route path="/multi-cognition" element={<MultiCognitionPage />} />
             <Route path="/compare" element={<ComparePage />} />
             <Route path="/explorer" element={<ReadyPoolPage />} />
             <Route path="/search" element={<SearchPage />} />

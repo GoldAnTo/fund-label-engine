@@ -1,6 +1,6 @@
 # 阶段 0 · 私募内部投研 smoke 演示报告
 
-> 生成时间:`2026-07-13T02:21:56Z`
+> 生成时间:`2026-07-14T07:56:19Z`
 > data_snapshot_id:`snap_smoke`
 > strategy_policy_id + version:`private_equity_growth` + `v1`
 > business_mode:`private_strategy`(主业务)
@@ -19,8 +19,8 @@
 ## A · 投资观点
 
 - research_input_id:`ri_test_api_a`
-- thesis_id:`th_1b00692ddaef`
-- candidate_set_id:`cs_e56791a3484f`
+- thesis_id:`th_43cdf9487c47`
+- candidate_set_id:`cs_3183087d3745`
 - persist_status:`created`
 - actor_role:`researcher`
 - raw_text:"我看好消费白马(高 ROE、稳定盈利、低估值的龙头企业)。"
@@ -45,8 +45,8 @@
 ## B · 行业方向
 
 - research_input_id:`ri_test_api_b`
-- thesis_id:`th_546d9d6ff5c9`
-- candidate_set_id:`cs_f98442fe6add`
+- thesis_id:`th_d9578b16632d`
+- candidate_set_id:`cs_5dbda344f3b3`
 - persist_status:`created`
 - actor_role:`researcher`
 - raw_text:"我看好食品饮料行业的稳定盈利能力。"
@@ -71,8 +71,8 @@
 ## C · 具体标的
 
 - research_input_id:`ri_test_api_c`
-- thesis_id:`th_98d7e4638a68`
-- candidate_set_id:`cs_6985b61bf712`
+- thesis_id:`th_5b59f9ae7805`
+- candidate_set_id:`cs_b7db5afc627f`
 - persist_status:`created`
 - actor_role:`researcher`
 - raw_text:"我想知道哪些基金重仓了贵州茅台(600519)。"

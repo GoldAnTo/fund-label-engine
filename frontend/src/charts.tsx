@@ -529,3 +529,36 @@ export function ScenarioChart({ data }: { data: ScenarioChartDatum[] }) {
     </ResponsiveContainer>
   );
 }
+
+/* --- 估值仪表盘：半圆形 Gauge --- */
+export function ValuationGauge({ percentile, label = "估值分位" }: { percentile: number; label?: string }) {
+  const pct = Math.min(100, Math.max(0, percentile));
+  const angle = 180 - (pct / 100) * 180; // 0% = 180deg, 100% = 0deg
+  const radian = (angle * Math.PI) / 180;
+  const cx = 100, cy = 90, r = 70;
+  const needleX = cx + r * Math.cos(radian);
+  const needleY = cy - r * Math.sin(radian);
+
+  const zoneColor = pct < 30 ? "#16a34a" : pct < 70 ? "#ca8a04" : "#dc2626";
+  const zoneLabel = pct < 30 ? "偏低" : pct < 70 ? "合理" : pct > 85 ? "极度偏贵" : "偏贵";
+
+  return (
+    <div className="flex flex-col items-center">
+      <svg width="200" height="110" viewBox="0 0 200 110">
+        {/* Background semicircle */}
+        <path d={`M 30 90 A 70 70 0 0 1 170 90`} fill="none" stroke="var(--surface-2)" strokeWidth="16" strokeLinecap="round" />
+        {/* Green zone */}
+        <path d={`M 30 90 A 70 70 0 0 1 70 28`} fill="none" stroke="#16a34a" strokeWidth="16" strokeLinecap="round" opacity="0.3" />
+        {/* Yellow zone */}
+        <path d={`M 70 28 A 70 70 0 0 1 130 28`} fill="none" stroke="#ca8a04" strokeWidth="16" strokeLinecap="round" opacity="0.3" />
+        {/* Red zone */}
+        <path d={`M 130 28 A 70 70 0 0 1 170 90`} fill="none" stroke="#dc2626" strokeWidth="16" strokeLinecap="round" opacity="0.3" />
+        {/* Needle */}
+        <line x1={cx} y1={cy} x2={needleX} y2={needleY} stroke={zoneColor} strokeWidth="3" strokeLinecap="round" />
+        <circle cx={cx} cy={cy} r="5" fill={zoneColor} />
+      </svg>
+      <div className="text-2xl font-bold font-mono" style={{ color: zoneColor, marginTop: -8 }}>{pct.toFixed(0)}%</div>
+      <div className="text-xs text-text-3">{label} · {zoneLabel}</div>
+    </div>
+  );
+}

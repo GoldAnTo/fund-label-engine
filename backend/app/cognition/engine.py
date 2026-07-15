@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -74,6 +75,7 @@ class CognitionEngine:
         self._themes = load_themes()
         self._chains = load_chains()
         self._conn: sqlite3.Connection | None = None
+        self._lock = threading.Lock()
         # 行业数据库：用于产业链匹配的补充查询，为 None 时回退到纯关键词匹配
         self._industry_db = industry_db
 
@@ -638,6 +640,69 @@ class CognitionEngine:
         except HoldingSourceUnavailableError:
             return []
 
+    def _find_candidate_funds(
+        self,
+        conn: sqlite3.Connection,
+        stock_keywords: list[str],
+        industry_keywords: list[str],
+    ) -> list[str]:
+        """用关键词预筛基金，避免对全部基金逐个查持仓。
+
+        通过单条 SQL 在 stock_holdings 中搜索持仓股票名匹配关键词的基金，
+        同时在 stock_industry_map 中搜索行业匹配的基金。
+        """
+        if not stock_keywords and not industry_keywords:
+            return self._load_fund_codes(conn)
+
+        fund_codes: set[str] = set()
+
+        # 1. 按股票名/代码关键词筛选
+        if stock_keywords:
+            conditions = " OR ".join(
+                "stock_name LIKE ? OR stock_code LIKE ?" for _ in stock_keywords
+            )
+            params: list[str] = []
+            for kw in stock_keywords:
+                params.extend([f"%{kw}%", f"%{kw}%"])
+            try:
+                rows = conn.execute(
+                    f"SELECT DISTINCT fund_code FROM stock_holdings "
+                    f"WHERE ({conditions}) "
+                    f"AND report_period = (SELECT MAX(report_period) FROM stock_holdings WHERE fund_code = stock_holdings.fund_code) "
+                    f"LIMIT 500",
+                    params,
+                ).fetchall()
+                fund_codes.update(r[0] for r in rows)
+            except sqlite3.OperationalError:
+                pass
+
+        # 2. 按行业关键词筛选（通过 stock_industry_map JOIN）
+        if industry_keywords:
+            ind_conditions = " OR ".join(
+                "industry_name LIKE ? OR sector_group LIKE ?" for _ in industry_keywords
+            )
+            ind_params: list[str] = []
+            for kw in industry_keywords:
+                ind_params.extend([f"%{kw}%", f"%{kw}%"])
+            try:
+                rows = conn.execute(
+                    f"SELECT DISTINCT h.fund_code FROM stock_holdings h "
+                    f"JOIN stock_industry_map m ON m.stock_code = h.stock_code "
+                    f"WHERE ({ind_conditions}) "
+                    f"AND h.report_period = (SELECT MAX(report_period) FROM stock_holdings WHERE fund_code = h.fund_code) "
+                    f"LIMIT 500",
+                    ind_params,
+                ).fetchall()
+                fund_codes.update(r[0] for r in rows)
+            except sqlite3.OperationalError:
+                pass
+
+        if not fund_codes:
+            # 关键词没匹配到，回退到全部基金（但限制数量）
+            return self._load_fund_codes(conn)[:500]
+
+        return sorted(fund_codes)
+
     def _get_industry_pe_medians(self, conn: sqlite3.Connection) -> dict[str, float]:
         """获取各行业PE中位数（横截面估值对比基准）。
 
@@ -871,6 +936,23 @@ class CognitionEngine:
         max_valuation_percentile: float | None = None,
         top_n: int = 5,
     ) -> dict[str, Any]:
+        """7步认知转化（线程安全包装）。"""
+        with self._lock:
+            return self._run_impl(
+                direction, belief_link, conviction, time_horizon,
+                risk_tolerance, max_valuation_percentile, top_n,
+            )
+
+    def _run_impl(
+        self,
+        direction: str,
+        belief_link: str | None = None,
+        conviction: str = "medium",
+        time_horizon: str = "long",
+        risk_tolerance: str = "moderate",
+        max_valuation_percentile: float | None = None,
+        top_n: int = 5,
+    ) -> dict[str, Any]:
         """7步认知转化：采集 -> 拆解 -> 预期差 -> 穿透+门禁 -> 验证 -> 组合 -> 输出
 
         direction: 投资方向（预设的如"AI"，或自定义的如"新能源"）
@@ -913,9 +995,18 @@ class CognitionEngine:
         }
 
         # === Step 2: 产业链拆解 ===
-        fund_codes = self._load_fund_codes(conn)
+        # 优化：先用关键词筛选相关基金，避免对全部 26953 只基金逐个查持仓
+        chain_stock_kws: list[str] = []
+        chain_ind_kws: list[str] = []
+        for link in chain["chain"]:
+            if link.get("exclude"):
+                continue
+            chain_stock_kws.extend(link.get("stocks", []))
+            chain_ind_kws.extend(link.get("industry_keywords", []))
+
+        candidate_funds = self._find_candidate_funds(conn, chain_stock_kws, chain_ind_kws)
         all_holdings: dict[str, list[dict[str, Any]]] = {}
-        for fc in fund_codes:
+        for fc in candidate_funds:
             h = get_holdings(conn, fc)
             if h:
                 all_holdings[fc] = h
@@ -990,7 +1081,7 @@ class CognitionEngine:
                 holdings, good_keywords, good_industry_kws, revenue_exposure,
             )
             if match["match_pct"] >= _MATCH_THRESHOLD:
-                valuation = calculate_valuation(holdings)
+                valuation = calculate_valuation(holdings, level=judgment.get("level"))
                 # 横截面估值对比
                 self._enrich_cross_sectional(holdings, valuation, industry_pe_medians)
                 trend = calculate_holding_trend(
@@ -1007,7 +1098,8 @@ class CognitionEngine:
                 )
 
                 # 估值门禁：检查硬约束
-                gate = check_hard_limits(valuation, hard_limits)
+                level = judgment.get("level")
+                gate = check_hard_limits(valuation, hard_limits, level=level)
 
                 fund_data = {
                     "fund_code": fc,
@@ -1334,10 +1426,17 @@ class CognitionEngine:
         if max_valuation_percentile is not None:
             hard_limits["max_valuation_percentile"] = max_valuation_percentile
 
-        # 加载所有基金持仓
-        fund_codes = self._load_fund_codes(conn)
+        # 加载相关基金持仓（预筛优化，避免全量加载）
+        chain_stock_kws: list[str] = []
+        chain_ind_kws: list[str] = []
+        for link in chain["chain"]:
+            if link.get("exclude"):
+                continue
+            chain_stock_kws.extend(link.get("stocks", []))
+            chain_ind_kws.extend(link.get("industry_keywords", []))
+        candidate_funds = self._find_candidate_funds(conn, chain_stock_kws, chain_ind_kws)
         all_holdings: dict[str, list[dict[str, Any]]] = {}
-        for fc in fund_codes:
+        for fc in candidate_funds:
             h = get_holdings(conn, fc)
             if h:
                 all_holdings[fc] = h
@@ -1448,7 +1547,7 @@ class CognitionEngine:
             )
 
             # 估值
-            valuation = calculate_valuation(holdings)
+            valuation = calculate_valuation(holdings, level=judgment.get("level"))
             self._enrich_cross_sectional(holdings, valuation, industry_pe_medians)
 
             # 持仓趋势
@@ -1466,7 +1565,8 @@ class CognitionEngine:
             )
 
             # 估值门禁
-            gate = check_hard_limits(valuation, hard_limits)
+            level = judgment.get("level")
+            gate = check_hard_limits(valuation, hard_limits, level=level)
 
             # 基金经理
             manager = fund_managers.get(fc)

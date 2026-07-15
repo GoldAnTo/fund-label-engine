@@ -36,23 +36,26 @@ def calculate_link_expectation_gap(
 
         # 1. 尝试收入暴露
         if revenue_data and code in revenue_data:
+            matched_by_revenue = False
             for segment, pct in revenue_data[code].items():
                 if any(kw in segment for kw in all_kws):
                     # 收入暴露匹配，用营收占比作为权重系数
                     h_copy = dict(h)
                     h_copy["_exposure"] = pct / 100.0
                     matched.append(h_copy)
+                    matched_by_revenue = True
                     break
-            else:
-                # 收入暴露未命中，不匹配
+            if matched_by_revenue:
                 continue
+            # 收入暴露未命中，继续尝试关键词匹配
         # 2. 关键词回退
-        elif any(kw in name for kw in stock_kws) or any(kw in ind for kw in ind_kws):
+        if any(kw in name for kw in stock_kws) or any(kw in ind for kw in ind_kws):
             matched.append(h)
 
     if not matched:
         return {
             "link_name": link["name"],
+            "match_pct": 0,
             "pe": None,
             "growth_pct": None,
             "peg": None,
@@ -139,6 +142,7 @@ def calculate_link_expectation_gap(
 
     return {
         "link_name": link["name"],
+        "match_pct": min(round(total_weight * 100, 1), 100.0),
         "pe": round(pe, 1) if pe else None,
         "growth_pct": round(growth * 100, 0) if growth else None,
         "peg": round(peg, 2) if peg else None,

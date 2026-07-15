@@ -6,9 +6,9 @@ import {
   type ThemeInfo, type CognitionResponse, type ConceptBoard,
   type StockSearchResult, type MonitorOverview, type ICReview,
   type FundEvidencePacket, type AttentionItem, type InboxSnapshot,
-  type ScreenSnapshot, type PipelineResult,
+  type ScreenSnapshot, type PipelineResult, type DebateRound,
 } from "../api";
-import { DonutChart, HorizontalBarChart, ScenarioChart } from "../charts";
+import { DonutChart, HorizontalBarChart, ScenarioChart, ValuationGauge, RadarChartViz } from "../charts";
 import {
   Card, CardHeader, CardBody, Badge, ProgressBar, Stat, Table, Th, Td,
   Loading, ErrorBox, EmptyState, TabBar,
@@ -83,6 +83,7 @@ export default function CognitionPage() {
   const [timeHorizon, setTimeHorizon] = useState("medium");
   const [result, setResult] = useState<CognitionResponse | null>(null);
   const [pipelineResult, setPipelineResult] = useState<PipelineResult | null>(null);
+  const [pipelineProgress, setPipelineProgress] = useState<{ stage: string; label: string; progress: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -137,8 +138,35 @@ export default function CognitionPage() {
   }, [monitorFundCode]);
 
   // === 动作 ===
+  const startProgressStream = (dirText: string) => {
+    const BASE = import.meta.env.VITE_API_BASE ?? "";
+    const url = `${BASE}/v1/cognition/stream?direction=${encodeURIComponent(dirText)}&conviction=${conviction}&risk_tolerance=${riskTolerance}&time_horizon=${timeHorizon}`;
+
+    const eventSource = new EventSource(url);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "complete") {
+          setPipelineProgress(null);
+          eventSource.close();
+        } else {
+          setPipelineProgress({ stage: data.stage, label: data.label, progress: data.progress });
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+
+    eventSource.onerror = () => {
+      setPipelineProgress(null);
+      eventSource.close();
+    };
+  };
+
   const triggerAnalysis = (dirText: string, run: () => Promise<CognitionResponse>) => {
     setLoading(true); setError(null);
+    startProgressStream(dirText);
     run().then((r) => {
       setResult(r); setStep(2); setDirection(dirText);
       setSelectedFundCode(null); setMonitorFundCode(null); setPipelineResult(null);
@@ -166,6 +194,7 @@ export default function CognitionPage() {
   };
   const reset = () => {
     setStep(1); setDirection(""); setResult(null); setPipelineResult(null);
+    setPipelineProgress(null);
     setSearchKeyword(""); setSelectedFundCode(null); setMonitorFundCode(null); setError(null);
   };
 
@@ -320,7 +349,36 @@ export default function CognitionPage() {
           className="w-full px-4 py-3.5 text-sm font-semibold bg-accent text-white border border-accent rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
           {loading ? "分析中…" : "开始分析"}
         </button>
-        {loading && <Loading text="正在分析方向并推导配置…" />}
+        {loading && pipelineProgress && (
+          <div className="mt-4 p-4 bg-surface border border-border rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-semibold text-accent">{pipelineProgress.label}</span>
+              <span className="text-xs text-text-3 font-mono">{pipelineProgress.progress.toFixed(0)}%</span>
+            </div>
+            <div className="w-full h-2 bg-surface-2 rounded-full overflow-hidden">
+              <div className="h-full bg-accent rounded-full transition-all duration-300" style={{ width: `${pipelineProgress.progress}%` }} />
+            </div>
+            <div className="mt-2 flex gap-1 flex-wrap">
+              {["cognition_input", "chain_analysis", "expectation_gap", "asset_penetration", "validation", "portfolio", "output"].map((s, i) => {
+                const stageLabels: Record<string, string> = {
+                  cognition_input: "认知采集", chain_analysis: "产业链拆解", expectation_gap: "预期差分析",
+                  asset_penetration: "资产穿透", validation: "认知验证", portfolio: "组合构建", output: "结果输出",
+                };
+                const currentIdx = ["cognition_input", "chain_analysis", "expectation_gap", "asset_penetration", "validation", "portfolio", "output"].indexOf(pipelineProgress.stage);
+                const isDone = i < currentIdx;
+                const isActive = i === currentIdx;
+                return (
+                  <span key={s} className={`text-[10px] px-1.5 py-0.5 rounded ${
+                    isDone ? "bg-pos-soft text-pos" : isActive ? "bg-accent-soft text-accent" : "bg-surface-2 text-text-3"
+                  }`}>
+                    {stageLabels[s]}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {loading && !pipelineProgress && <Loading text="正在分析方向并推导配置…" />}
       </div>
     );
   }
@@ -514,6 +572,9 @@ export default function CognitionPage() {
                   items={supportingTop5} extra={supportingExtra} />
                 <EvidenceList kind="neg" title="反对证据" count={validation?.evidence_counts.opposing ?? opposingTop5.length}
                   items={opposingTop5} extra={opposingExtra} />
+                {validation?.debate && validation.debate.length > 0 && (
+                  <DebateView debate={validation.debate} />
+                )}
               </section>
               )}
               {activeTab === "candidates" && (
@@ -612,7 +673,7 @@ export default function CognitionPage() {
                             <Td className="font-mono text-xs">{f.fund_code}</Td>
                             <Td>{f.fund_name}</Td>
                             <Td>{fmt(f.match_pct, "%")}</Td>
-                            <Td className="text-neg text-xs">{f.gate.violations.join("; ")}</Td>
+                            <Td className="text-neg text-xs">{(f.gate?.violations ?? []).join("; ")}</Td>
                           </tr>
                         ))}
                       </tbody>
@@ -624,6 +685,17 @@ export default function CognitionPage() {
               {activeTab === "portfolio" && (
               <>
               <section>
+                {pf && (
+                  <div className="mb-4">
+                    <RadarChartViz data={[
+                      { metric: "匹配度", value: Number(pf.top_funds?.[0]?.match_pct ?? 0) },
+                      { metric: "估值安全", value: 100 - Number(fundMatches[0]?.valuation?.weighted_val_pct ?? 50) },
+                      { metric: "分散度", value: Math.min(100, (pf.top_funds?.length ?? 0) * 20) },
+                      { metric: "防守覆盖", value: pf.defense_weight ?? 0 },
+                      { metric: "流动性", value: 80 },
+                    ]} />
+                  </div>
+                )}
                 {pf && pf.top_funds && pf.top_funds.length > 0 ? (
                   <Card className="mb-4">
                     <CardHeader title="组合草案" subtitle={pf.rationale} />
@@ -848,6 +920,48 @@ function EvidenceList({ kind, title, count, items, extra }: {
   );
 }
 
+// === 多空辩论（Bull vs Bear 对抗性分析） ===
+function DebateView({ debate }: { debate: DebateRound[] }) {
+  if (!debate || debate.length === 0) return null;
+  return (
+    <Card className="mb-4">
+      <CardHeader title="多空辩论" subtitle="Bull vs Bear 对抗性分析（借鉴 TradingAgents）" />
+      <CardBody className="space-y-3">
+        {debate.map((round) => (
+          <div key={round.round} className="border border-border rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Badge variant="accent">第 {round.round} 轮</Badge>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {/* Bull argument */}
+              <div className="p-3 bg-pos-soft border-l-4 border-pos rounded-r">
+                <div className="text-xs font-semibold text-pos mb-1">BULL 看多</div>
+                <div className="text-sm">{round.bull_argument?.claim ?? "无论点"}</div>
+                {round.bull_argument?.source && <div className="text-[11px] text-text-3 mt-1">来源：{round.bull_argument.source}</div>}
+                {round.bull_argument?.context && <div className="text-xs text-text-3 mt-1">{round.bull_argument.context}</div>}
+              </div>
+              {/* Bear rebuttal */}
+              <div className="p-3 bg-neg-soft border-l-4 border-neg rounded-r">
+                <div className="text-xs font-semibold text-neg mb-1">BEAR 反驳</div>
+                <div className="text-sm">{round.bear_rebuttal?.claim ?? "无反驳"}</div>
+                {round.bear_rebuttal?.source && <div className="text-[11px] text-text-3 mt-1">来源：{round.bear_rebuttal.source}</div>}
+                {round.bear_rebuttal?.context && <div className="text-xs text-text-3 mt-1">{round.bear_rebuttal.context}</div>}
+              </div>
+              {/* Bull response */}
+              <div className="p-3 bg-accent-soft border-l-4 border-accent rounded-r">
+                <div className="text-xs font-semibold text-accent mb-1">BULL 回应</div>
+                <div className="text-sm">{round.bull_response?.claim ?? "无回应"}</div>
+                {round.bull_response?.source && <div className="text-[11px] text-text-3 mt-1">来源：{round.bull_response.source}</div>}
+                {round.bull_response?.context && <div className="text-xs text-text-3 mt-1">{round.bull_response.context}</div>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </CardBody>
+    </Card>
+  );
+}
+
 // === 基金详情（取代 FundDetailPanel） ===
 function FundDetailInline({ fund }: { fund: CognitionResponse["step4_fund_matches"][number] | null }) {
   if (!fund) {
@@ -887,6 +1001,11 @@ function FundDetailInline({ fund }: { fund: CognitionResponse["step4_fund_matche
         </div>
         <div className="mb-4">
           <div className="text-xs uppercase tracking-wide text-text-3 mb-2">估值</div>
+          {v.weighted_val_pct != null && (
+            <div className="mb-3">
+              <ValuationGauge percentile={Number(v.weighted_val_pct)} />
+            </div>
+          )}
           <div className="space-y-1.5">
             <DetailRow label="加权 PE" value={fmt(v.weighted_pe as number | null)} />
             <DetailRow label="估值分位" value={fmt(v.weighted_val_pct as number | null, "%")} />

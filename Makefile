@@ -35,7 +35,7 @@ RELATIVE_ELIGIBILITY_CSV ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.c
 RELATIVE_ELIGIBILITY_MD  ?= $(BENCHMARK_REPORT_DIR)/relative-label-eligibility.md
 READY_POOL_MD  ?= $(BENCHMARK_REPORT_DIR)/phase1-v1-ready-pool-sample.md
 
-.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark import-authorized-benchmark-components fetch-investoday-benchmark audit-benchmark audit-relative-eligibility render-ready-pool-report render-data-quality-report run-batch-v1-with-benchmark test lint lint-fix backup-db
+.PHONY: help refresh-factors refresh-nav copy-source run-batch run-batch-v1 refresh-benchmark import-authorized-benchmark-components fetch-investoday-benchmark audit-benchmark audit-relative-eligibility render-ready-pool-report render-data-quality-report run-batch-v1-with-benchmark test lint lint-fix backup-db refresh-data
 
 help:
 	@echo "Available targets:"
@@ -56,6 +56,10 @@ help:
 	@echo "  make lint               跑 ruff 代码风格检查"
 	@echo "  make lint-fix           自动修复 ruff 问题"
 	@echo "  make backup-db          备份 $(OUTPUT_DB) 和 $(SOURCE_DB) 到 ./backups"
+	@echo "  make refresh-data       一键刷新：拷贝缓存库 + 因子 + 行业映射 + 补充缺失数据"
+
+refresh-data:
+	$(PYTHON) scripts/refresh_data.py
 
 refresh-factors:
 	$(PYTHON) scripts/fetch_stock_factors.py \

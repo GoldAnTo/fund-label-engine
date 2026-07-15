@@ -81,6 +81,62 @@ export async function runPipeline(direction: string): Promise<PipelineResult> {
   );
 }
 
+// SSE 流式事件类型
+export interface PipelineStreamEvent {
+  type: "start" | "stage_start" | "stage_complete" | "done" | "cognition_running" | "cognition_complete";
+  stage?: string;
+  status?: string;
+  run_id?: string;
+  direction?: string;
+  error?: string;
+  has_result?: boolean;
+  summary?: Record<string, unknown>;
+  partial?: boolean;
+}
+
+// 消费 SSE 流式推送 pipeline 进度
+export async function streamPipeline(
+  direction: string,
+  onEvent: (event: PipelineStreamEvent) => void,
+  onError: (error: Error) => void,
+): Promise<void> {
+  const BASE = import.meta.env.VITE_API_BASE ?? "";
+  const url = `${BASE}/v1/governance/pipeline/stream?direction=${encodeURIComponent(direction)}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No response body");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const event = JSON.parse(line.slice(6)) as PipelineStreamEvent;
+            onEvent(event);
+          } catch {
+            // Skip malformed lines
+          }
+        }
+      }
+    }
+  } catch (err) {
+    onError(err instanceof Error ? err : new Error(String(err)));
+  }
+}
+
 // 列出 pipeline runs
 export async function fetchPipelineRuns(direction?: string): Promise<PipelineRun[]> {
   const qs = direction ? `?direction=${encodeURIComponent(direction)}` : "";
@@ -1471,7 +1527,7 @@ export interface ICReview {
 
 export interface DebateRound {
   round: number;
-  bull_argument: Evidence;
+  bull_argument: Evidence | null;
   bear_rebuttal: Evidence | null;
   bull_response: Evidence | null;
 }
@@ -1867,17 +1923,40 @@ export async function postStockCognition(
 export interface MultiCognitionItem {
   direction: string;
   belief_link?: string | null;
-  conviction?: string;
+  conviction: string;
   weight_pct: number;
+}
+
+export interface MultiCognitionResponse {
+  cognition_count: number;
+  cognitions: Array<{
+    direction: string;
+    weight_pct: number;
+    conviction: string;
+    result: Record<string, unknown>;
+  }>;
+  combined_portfolio: {
+    suggested_weight?: number;
+    defense_weight?: number;
+    cash_pct?: number;
+    total_invested?: number;
+    rationale?: string;
+    top_funds?: Array<{ fund_code: string; fund_name: string; match_pct: number }>;
+    [key: string]: unknown;
+  };
 }
 
 export async function postMultiCognition(
   items: MultiCognitionItem[],
-  riskTolerance?: string,
-): Promise<{ cognition_count: number; cognitions: unknown[]; combined_portfolio: unknown }> {
+  riskTolerance = "moderate",
+  timeHorizon = "long",
+  topN = 5,
+): Promise<MultiCognitionResponse> {
   return postJSON("/v1/cognition/multi", {
     items,
-    risk_tolerance: riskTolerance ?? "moderate",
+    risk_tolerance: riskTolerance,
+    time_horizon: timeHorizon,
+    top_n: topN,
   });
 }
 

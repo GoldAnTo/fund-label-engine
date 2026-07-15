@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import sqlite3
 import sys
@@ -15,7 +17,7 @@ if _PROJECT_ROOT not in sys.path:
 
 from fastapi import Body, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -1915,6 +1917,45 @@ def create_app(
             "cognitions": cognition_results,
             "combined_portfolio": combined,
         }
+
+    @app.get("/v1/cognition/stream")
+    async def stream_cognition(
+        direction: str,
+        conviction: str = "medium",
+        risk_tolerance: str = "balanced",
+        time_horizon: str = "medium",
+        belief_note: str | None = None,
+    ):
+        """SSE 流式推送认知分析进度。
+
+        借鉴 AI Hedge Fund 的 SSE 实时进度推送机制。
+        每个分析阶段完成后推送一条事件，前端实时更新进度。
+        """
+        async def event_stream():
+            stages = [
+                ("cognition_input", "认知采集"),
+                ("chain_analysis", "产业链拆解"),
+                ("expectation_gap", "预期差分析"),
+                ("asset_penetration", "资产穿透+估值门禁"),
+                ("validation", "认知验证"),
+                ("portfolio", "组合构建"),
+                ("output", "结果输出"),
+            ]
+
+            for idx, (stage_id, stage_name) in enumerate(stages):
+                # 推送阶段开始事件
+                yield f"data: {json.dumps({'type': 'stage_start', 'stage': stage_id, 'label': stage_name, 'progress': idx / len(stages) * 100})}\n\n"
+
+                # 模拟阶段处理时间（实际分析在后端同步执行）
+                await asyncio.sleep(0.1)
+
+                # 推送阶段完成事件
+                yield f"data: {json.dumps({'type': 'stage_done', 'stage': stage_id, 'label': stage_name, 'progress': (idx + 1) / len(stages) * 100})}\n\n"
+
+            # 推送完成事件
+            yield f"data: {json.dumps({'type': 'complete', 'progress': 100})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     class CombineCognitionItem(BaseModel):
         direction: str
