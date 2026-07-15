@@ -1036,14 +1036,36 @@ class CognitionEngine:
             if logic:
                 falsification_conditions.append(f"若「{logic}」不成立则该环节不受益")
 
-        # 从因果链中提取额外股票关键词（用户提到的公司名会加入匹配池）
+        # 从因果链中提取额外股票关键词（查询数据库，找到不在预设链中的股票）
         user_stock_kws: list[str] = []
         if reasoning_chain:
-            for step in reasoning_chain:
-                # 提取 2-4 字的中文公司名片段（简单启发式）
-                for known_stock in chain_stock_kws_preview:
-                    if known_stock in step and known_stock not in user_stock_kws:
-                        user_stock_kws.append(known_stock)
+            chain_text = " ".join(reasoning_chain)
+            # 查询持仓表，找出在因果链文本中出现的股票名
+            try:
+                holdings_table = "stock_holdings"
+                has_table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='stock_holdings'"
+                ).fetchone()
+                if not has_table:
+                    has_table = conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='fund_stock_holdings'"
+                    ).fetchone()
+                    if has_table:
+                        holdings_table = "fund_stock_holdings"
+                if has_table:
+                    rows = conn.execute(
+                        f"SELECT DISTINCT stock_name FROM {holdings_table} "
+                        "WHERE stock_name != '' AND stock_name IS NOT NULL "
+                        "AND ? LIKE '%' || stock_name || '%' "
+                        "LIMIT 30",
+                        (chain_text,),
+                    ).fetchall()
+                    for row in rows:
+                        name = row[0]
+                        if name and len(name) >= 2 and name not in chain_stock_kws_preview:
+                            user_stock_kws.append(name)
+            except Exception:
+                pass
 
         thesis_id = f"th_{uuid.uuid4().hex[:12]}"
         thesis = {
@@ -1329,20 +1351,51 @@ class CognitionEngine:
                 if action["action"] == "weight_reduction":
                     factor = action["factor"]
                     if action["scope"] == "all":
+                        # fail: 全部降权
                         for f in selected:
                             f["weight"] = round(f["weight"] * factor, 1)
                     elif action["scope"] == "violating":
+                        # warn: 根据违规类型识别违规基金
                         violating_codes: set[str] = set()
                         for v in risk_review["violations"]:
-                            if v["type"] == "holdings_overlap":
+                            vtype = v["type"]
+                            if vtype == "holdings_overlap":
                                 for pair in overlap_summary.get("high_overlap_pairs", []):
                                     violating_codes.update(pair)
+                            elif vtype == "stock_concentration":
+                                # 持有集中个股的基金
+                                stock_name = v.get("detail", "")
+                                for f in selected:
+                                    for h in f.get("holdings") or []:
+                                        if h.get("stock_name", "") in stock_name:
+                                            violating_codes.add(f["fund_code"])
+                                            break
+                            elif vtype == "industry_concentration":
+                                # 在该行业暴露最高的基金
+                                ind_name = v.get("detail", "")
+                                for f in selected:
+                                    for h in f.get("holdings") or []:
+                                        if ind_name and h.get("industry_name", "") and any(kw in h.get("industry_name", "") for kw in ind_name.split("「")[1:]):
+                                            violating_codes.add(f["fund_code"])
+                                            break
+                            elif vtype in ("max_drawdown", "volatility"):
+                                # 组合级风险：全部基金都算违规
+                                violating_codes.update(f["fund_code"] for f in selected)
                         for f in selected:
                             if f["fund_code"] in violating_codes:
                                 f["weight"] = round(f["weight"] * factor, 1)
             portfolio["total_invested"] = round(sum(f["weight"] for f in selected), 1)
             portfolio["cash_pct"] = round(max(0, 100 - portfolio["total_invested"] - defense_weight_pct), 1)
 
+            # 调权后重算组合指标和风险裁决
+            portfolio_metrics = calculate_portfolio_metrics(
+                conn, selected, defense_fund, all_holdings,
+            )
+            risk_review = portfolio_risk_review(
+                portfolio_metrics, overlap_summary, selected, risk_tolerance,
+            )
+
+        portfolio["metrics"] = portfolio_metrics
         portfolio["risk_review"] = risk_review
         portfolio["rationale"] = self._build_portfolio_rationale(
             judgment, positive_links, negative_links, validation
