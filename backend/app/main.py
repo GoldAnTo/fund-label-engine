@@ -36,11 +36,12 @@ _DEFAULT_POLICY_ID = "cognition_default"
 _DEFAULT_POLICY_VERSION = 1
 
 
-def _persist_thesis(app, result: dict, request: CognitionRequest) -> None:
+def _persist_thesis(app, result: dict, request, direction: str | None = None) -> None:
     """将运行时 step0_thesis 持久化到 investment_theses 表。
 
     失败时不阻断主流程，仅保留运行时 thesis_id。
-    成功时替换 result["step0_thesis"]["thesis_id"] 为持久化 ID。
+    成功时替换 result["step0_thesis"]["thesis_id"] 为持久化 ID，
+    并同步更新 thesis_tracker 的 thesis_id。
     """
     import logging
 
@@ -49,6 +50,9 @@ def _persist_thesis(app, result: dict, request: CognitionRequest) -> None:
     thesis = result.get("step0_thesis")
     if not thesis:
         return
+
+    # 方向：优先参数传入，其次从 request 字段推断
+    dir_name = direction or getattr(request, "theme_key", None) or getattr(request, "concept_name", None) or getattr(request, "stock_name", None) or "cognition"
 
     try:
         from app.persistence.governance import GovernanceRepository
@@ -79,9 +83,14 @@ def _persist_thesis(app, result: dict, request: CognitionRequest) -> None:
             "VALUES (?, ?, 'private_strategy', 'active', '认知驱动选基默认策略', 'equity_long_only')",
             (_DEFAULT_POLICY_ID, _DEFAULT_POLICY_VERSION),
         )
-        # 确保数据快照存在
+        # 确保数据快照存在（用 source_db mtime 生成唯一 ID，支持同日多次更新）
         source_db = getattr(app.state, "source_db_path", None) or gov_db
-        snapshot_id = f"snap_{thesis.get('as_of_date', 'unknown')}"
+        import os as _os
+        try:
+            mtime = int(_os.path.getmtime(source_db))
+            snapshot_id = f"snap_{mtime}"
+        except (OSError, TypeError):
+            snapshot_id = f"snap_{thesis.get('as_of_date', 'unknown')}"
         conn.execute(
             "INSERT OR IGNORE INTO data_snapshots (snapshot_id, source_db_path, created_at) "
             "VALUES (?, ?, ?)",
@@ -89,6 +98,13 @@ def _persist_thesis(app, result: dict, request: CognitionRequest) -> None:
         )
         conn.commit()
         conn.close()
+
+        # 从 request 中提取字段（兼容 CognitionRequest / ConceptCognitionRequest / StockCognitionRequest）
+        req_belief = getattr(request, "belief_note", None) or thesis.get("belief", "")
+        req_chain = getattr(request, "reasoning_chain", None) or []
+        req_conviction = getattr(request, "conviction", "medium")
+        req_horizon = getattr(request, "time_horizon", "long")
+        req_risk = getattr(request, "risk_tolerance", "moderate")
 
         # 创建 ResearchInput
         ri_result = service.create_research_input(
@@ -99,13 +115,13 @@ def _persist_thesis(app, result: dict, request: CognitionRequest) -> None:
             actor_role="researcher",
             actor_id="cognition_user",
             request_source="ad_hoc_research",
-            raw_text=request.belief_note or thesis.get("belief", ""),
+            raw_text=req_belief,
             structured_intent={
-                "direction": request.theme_key,
-                "conviction": request.conviction,
-                "time_horizon": request.time_horizon,
-                "risk_tolerance": request.risk_tolerance,
-                "reasoning_chain": request.reasoning_chain or [],
+                "direction": dir_name,
+                "conviction": req_conviction,
+                "time_horizon": req_horizon,
+                "risk_tolerance": req_risk,
+                "reasoning_chain": req_chain,
             },
             as_of_date=thesis.get("as_of_date"),
             data_snapshot_id=snapshot_id,
@@ -116,14 +132,14 @@ def _persist_thesis(app, result: dict, request: CognitionRequest) -> None:
             user_input_id=ri_result["user_input_id"],
             strategy_policy_id=_DEFAULT_POLICY_ID,
             strategy_policy_version=_DEFAULT_POLICY_VERSION,
-            title=f"{request.theme_key} 认知假设",
+            title=f"{dir_name} 认知假设",
             belief_statement=thesis.get("belief", ""),
             actor_id="cognition_user",
-            time_horizon=request.time_horizon,
+            time_horizon=req_horizon,
             invalidation_conditions=thesis.get("falsification_conditions", []),
             key_metrics={
-                "conviction": request.conviction,
-                "risk_tolerance": request.risk_tolerance,
+                "conviction": req_conviction,
+                "risk_tolerance": req_risk,
                 "user_stock_keywords": thesis.get("user_stock_keywords", []),
                 "source": thesis.get("source", "preset"),
             },
@@ -132,10 +148,17 @@ def _persist_thesis(app, result: dict, request: CognitionRequest) -> None:
         )
 
         # 用持久化 thesis_id 替换运行时临时 ID
-        result["step0_thesis"]["thesis_id"] = th_result["thesis_id"]
+        persisted_id = th_result["thesis_id"]
+        result["step0_thesis"]["thesis_id"] = persisted_id
         result["step0_thesis"]["persisted"] = True
         result["step0_thesis"]["status"] = th_result.get("status", "draft")
-        logger.info("Thesis 持久化成功: thesis_id=%s", th_result["thesis_id"])
+
+        # 同步更新 thesis_tracker 的 thesis_id（下游共同引用正式 ID）
+        tracker_data = result.get("thesis_tracker", {})
+        if tracker_data:
+            tracker_data["thesis_id"] = persisted_id
+
+        logger.info("Thesis 持久化成功: thesis_id=%s", persisted_id)
 
     except Exception as e:
         logger.warning("Thesis 持久化失败（不影响认知结果）: %s", e)
@@ -1951,7 +1974,10 @@ def create_app(
             belief_note=request.belief_note,
             reasoning_chain=request.reasoning_chain,
         )
+        _persist_thesis(app, result, request, direction=request.concept_name)
+        # 兼容前端：fund_matches 也作为 matches / candidates 返回
         result["matches"] = result.get("step4_fund_matches", [])
+        result["candidates"] = result.get("step4_fund_matches", [])
         return result
 
     # === 个股认知 API ===
@@ -1989,6 +2015,7 @@ def create_app(
             belief_note=request.belief_note,
             reasoning_chain=request.reasoning_chain,
         )
+        _persist_thesis(app, result, request, direction=request.stock_name or request.stock_code)
         result["matches"] = result.get("step4_fund_matches", [])
         return result
 
@@ -2026,6 +2053,8 @@ def create_app(
                 max_valuation_percentile=request.max_valuation_percentile,
                 top_n=request.top_n,
             )
+            # 持久化每个认知的 Thesis
+            _persist_thesis(app, result, request, direction=item.direction)
             cognition_results.append({
                 "direction": item.direction,
                 "weight_pct": item.weight_pct,

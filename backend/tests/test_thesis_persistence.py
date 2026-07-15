@@ -76,14 +76,15 @@ def test_thesis_research_input_created(tmp_path: Path) -> None:
 
 
 def test_thesis_persistence_failure_graceful(tmp_path: Path) -> None:
-    """持久化失败时不应阻断认知结果，应保留运行时 thesis_id。"""
+    """持久化失败时不应阻断认知结果，应保留运行时 thesis_id 且 persisted 不为 True。"""
     db = tmp_path / "fund.sqlite"
     seed(db)
 
     app = create_app(db_path=db)
+    # 设置一个不存在的 output_db 路径，让持久化失败
+    app.state.output_db_path = str(tmp_path / "nonexistent_dir" / "gov.sqlite")
     client = TestClient(app)
 
-    # 正常请求应成功
     response = client.post("/v1/cognition", json={
         "theme_key": "AI",
         "conviction": "low",
@@ -92,3 +93,5 @@ def test_thesis_persistence_failure_graceful(tmp_path: Path) -> None:
     result = response.json()
     thesis = result.get("step0_thesis", {})
     assert "thesis_id" in thesis
+    # 持久化应失败，persisted 不应为 True
+    assert thesis.get("persisted") is not True
