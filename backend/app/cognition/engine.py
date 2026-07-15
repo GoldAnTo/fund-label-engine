@@ -165,6 +165,8 @@ class CognitionEngine:
         risk_tolerance: str = "moderate",
         max_valuation_percentile: float | None = None,
         top_n: int = 5,
+        belief_note: str | None = None,
+        reasoning_chain: list[str] | None = None,
     ) -> dict[str, Any]:
         """用概念板块成分股作为产业链 stocks 运行 7 步认知转化。
 
@@ -210,6 +212,7 @@ class CognitionEngine:
         return self._run_with_chain(
             chain, concept_name, None, conviction,
             time_horizon, risk_tolerance, max_valuation_percentile, top_n,
+            belief_note, reasoning_chain,
         )
 
     # ------------------------------------------------------------------
@@ -264,6 +267,8 @@ class CognitionEngine:
         risk_tolerance: str = "moderate",
         max_valuation_percentile: float | None = None,
         top_n: int = 5,
+        belief_note: str | None = None,
+        reasoning_chain: list[str] | None = None,
     ) -> dict[str, Any]:
         """个股认知：找到持有该股票占比最高的基金，附估值检查。
 
@@ -425,6 +430,13 @@ class CognitionEngine:
             "stock_info": stock_info,
             "valuation_assessment": val_assessment,
             "conviction": conviction,
+            "step0_thesis": {
+                "belief": belief_note or f"我相信{stock_name or stock_code}的价值",
+                "reasoning_chain": reasoning_chain or [],
+                "direction": stock_name or stock_code,
+                "conviction": conviction,
+                "source": "user" if belief_note else "preset",
+            },
             "step4_fund_matches": top_funds,
             "matches": top_funds,
             "candidates": top_funds,
@@ -601,6 +613,8 @@ class CognitionEngine:
         risk_tolerance: str,
         max_valuation_percentile: float | None,
         top_n: int,
+        belief_note: str | None = None,
+        reasoning_chain: list[str] | None = None,
     ) -> dict[str, Any]:
         """用指定 chain 运行 7 步流程（供 run() 和 run_concept() 复用）。"""
         # 临时把 chain 放进 self._chains 以复用 run() 的逻辑
@@ -611,6 +625,7 @@ class CognitionEngine:
                 direction, belief_link, conviction,
                 time_horizon, risk_tolerance,
                 max_valuation_percentile, top_n,
+                belief_note, reasoning_chain,
             )
         finally:
             if original is not None:
@@ -935,12 +950,15 @@ class CognitionEngine:
         risk_tolerance: str = "moderate",
         max_valuation_percentile: float | None = None,
         top_n: int = 5,
+        belief_note: str | None = None,
+        reasoning_chain: list[str] | None = None,
     ) -> dict[str, Any]:
         """7步认知转化（线程安全包装）。"""
         with self._lock:
             return self._run_impl(
                 direction, belief_link, conviction, time_horizon,
                 risk_tolerance, max_valuation_percentile, top_n,
+                belief_note, reasoning_chain,
             )
 
     def _run_impl(
@@ -952,6 +970,8 @@ class CognitionEngine:
         risk_tolerance: str = "moderate",
         max_valuation_percentile: float | None = None,
         top_n: int = 5,
+        belief_note: str | None = None,
+        reasoning_chain: list[str] | None = None,
     ) -> dict[str, Any]:
         """7步认知转化：采集 -> 拆解 -> 预期差 -> 穿透+门禁 -> 验证 -> 组合 -> 输出
 
@@ -962,6 +982,8 @@ class CognitionEngine:
         risk_tolerance: 风险偏好 conservative/moderate/aggressive
         max_valuation_percentile: 估值分位上限覆盖（None用chain默认值）
         top_n: 返回基金数量
+        belief_note: 投资人的原始观点（自由文本）
+        reasoning_chain: 因果链（为什么相信，如["AI是生产力变革","生产资产最值钱","台积电"]）
         """
         conn = self._get_conn()
         chain = self._chains.get(direction)
@@ -992,6 +1014,28 @@ class CognitionEngine:
             "portfolio_role": judgment["portfolio_role"],
             "role_weight_range": judgment["role_weight_range"],
             "hard_limits": hard_limits,
+        }
+
+        # === Step 0: 投资假设（不可变 Thesis） ===
+        # 用户的原始观点 + 因果链 + 自动推导的证伪条件
+        user_belief = belief_note or judgment["belief"]
+        falsification_conditions: list[str] = []
+        for link in chain["chain"]:
+            if link.get("exclude"):
+                continue
+            logic = link.get("benefit_logic", "")
+            if logic:
+                falsification_conditions.append(f"若「{logic}」不成立则该环节不受益")
+        thesis = {
+            "belief": user_belief,
+            "reasoning_chain": reasoning_chain or [],
+            "direction": direction,
+            "conviction": conviction,
+            "time_horizon": time_horizon,
+            "risk_tolerance": risk_tolerance,
+            "level": judgment["level"],
+            "falsification_conditions": falsification_conditions[:5],
+            "source": "user" if belief_note else "preset",
         }
 
         # === Step 2: 产业链拆解 ===
@@ -1362,6 +1406,7 @@ class CognitionEngine:
             ],
             "belief_link": belief_link,
             "conviction": conviction,
+            "step0_thesis": thesis,
             "step1_judgment": step1,
             "step2_chain": link_analysis,
             "step3_expectation_gap": step3,
@@ -1626,7 +1671,7 @@ class CognitionEngine:
         return FundCandidateEvidenceBatch(
             all_candidates=tuple(all_candidates),
             valuation_gated_candidates=tuple(valuation_gated),
-            scanned_fund_count=len(fund_codes),
+            scanned_fund_count=len(candidate_funds),
             mapped_candidate_count=mapped_count,
             unmapped_due_to_data_count=named_missing_count,
             unrelated_fund_count=unrelated_count,

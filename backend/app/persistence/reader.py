@@ -120,14 +120,18 @@ class LabelRunReader:
             if not label_rows:
                 return None
 
-            # 从 fund_profiles 表查询基金名称和类型
-            profile_row = conn.execute(
-                "SELECT fund_name, fund_type FROM fund_profiles "
-                "WHERE fund_code = ?",
-                (fund_code,),
-            ).fetchone()
-            fund_name = profile_row["fund_name"] if profile_row else ""
-            fund_type = profile_row["fund_type"] if profile_row else ""
+            # 从 fund_profiles 表查询基金名称和类型（输出库可能没有此表）
+            try:
+                profile_row = conn.execute(
+                    "SELECT fund_name, fund_type FROM fund_profiles "
+                    "WHERE fund_code = ?",
+                    (fund_code,),
+                ).fetchone()
+                fund_name = profile_row["fund_name"] if profile_row else ""
+                fund_type = profile_row["fund_type"] if profile_row else ""
+            except sqlite3.OperationalError:
+                fund_name = ""
+                fund_type = ""
 
             # 从 fund_classification_results 表查询风格
             try:
@@ -1078,23 +1082,43 @@ class LabelRunReader:
             params.append(classification_code)
 
         where = " AND ".join(clauses)
-        sql = (
-            "SELECT r.fund_code AS fund_code, "
-            "p.fund_name AS fund_name, "
-            "p.fund_type AS fund_type, "
-            "COUNT(DISTINCT r.label_code) AS label_count, "
-            "(SELECT cov.review_action FROM fund_run_coverage cov "
-            " WHERE cov.run_id = r.run_id AND cov.fund_code = r.fund_code LIMIT 1) AS review_action, "
-            "(SELECT COUNT(*) FROM fund_run_coverage cov "
-            " WHERE cov.run_id = r.run_id AND cov.fund_code = r.fund_code AND cov.present = 0) AS missing_field_count "
-            f"FROM fund_label_results r "
-            "LEFT JOIN fund_profiles p ON p.fund_code = r.fund_code "
-            f"WHERE {where} "
-            "GROUP BY r.fund_code "
-            "ORDER BY r.fund_code LIMIT ?"
-        )
-        params.append(limit)
         with self._connect() as conn:
+            has_profiles = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='fund_profiles'"
+            ).fetchone() is not None
+
+            if has_profiles:
+                sql = (
+                    "SELECT r.fund_code AS fund_code, "
+                    "p.fund_name AS fund_name, "
+                    "p.fund_type AS fund_type, "
+                    "COUNT(DISTINCT r.label_code) AS label_count, "
+                    "(SELECT cov.review_action FROM fund_run_coverage cov "
+                    " WHERE cov.run_id = r.run_id AND cov.fund_code = r.fund_code LIMIT 1) AS review_action, "
+                    "(SELECT COUNT(*) FROM fund_run_coverage cov "
+                    " WHERE cov.run_id = r.run_id AND cov.fund_code = r.fund_code AND cov.present = 0) AS missing_field_count "
+                    f"FROM fund_label_results r "
+                    "LEFT JOIN fund_profiles p ON p.fund_code = r.fund_code "
+                    f"WHERE {where} "
+                    "GROUP BY r.fund_code "
+                    "ORDER BY r.fund_code LIMIT ?"
+                )
+            else:
+                sql = (
+                    "SELECT r.fund_code AS fund_code, "
+                    "'' AS fund_name, "
+                    "'' AS fund_type, "
+                    "COUNT(DISTINCT r.label_code) AS label_count, "
+                    "(SELECT cov.review_action FROM fund_run_coverage cov "
+                    " WHERE cov.run_id = r.run_id AND cov.fund_code = r.fund_code LIMIT 1) AS review_action, "
+                    "(SELECT COUNT(*) FROM fund_run_coverage cov "
+                    " WHERE cov.run_id = r.run_id AND cov.fund_code = r.fund_code AND cov.present = 0) AS missing_field_count "
+                    f"FROM fund_label_results r "
+                    f"WHERE {where} "
+                    "GROUP BY r.fund_code "
+                    "ORDER BY r.fund_code LIMIT ?"
+                )
+            params.append(limit)
             rows = conn.execute(sql, tuple(params)).fetchall()
         return [dict(row) for row in rows]
 

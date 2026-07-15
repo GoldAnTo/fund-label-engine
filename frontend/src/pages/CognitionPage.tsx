@@ -95,6 +95,7 @@ export default function CognitionPage() {
   const [showDropdown, setShowDropdown] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [beliefNote, setBeliefNote] = useState("");
+  const [reasoningSteps, setReasoningSteps] = useState<string[]>([""]);
 
   // 状态：详情栏 / 监控 / 导出
   const [selectedFundCode, setSelectedFundCode] = useState<string | null>(null);
@@ -176,20 +177,23 @@ export default function CognitionPage() {
 
   const runThemeCognition = () => {
     if (!direction.trim()) return;
+    const chain = reasoningSteps.filter(s => s.trim());
     triggerAnalysis(direction.trim(), () =>
-      postCognition(direction.trim(), undefined, conviction, riskTolerance, timeHorizon, beliefNote || undefined)
+      postCognition(direction.trim(), undefined, conviction, riskTolerance, timeHorizon, beliefNote || undefined, chain.length ? chain : undefined)
     );
   };
   const pickConcept = (concept: ConceptBoard) => {
     setSearchKeyword(""); setShowDropdown(false);
+    const chain = reasoningSteps.filter(s => s.trim());
     triggerAnalysis(concept.name, () =>
-      postConceptCognition(concept.code, concept.name, conviction, riskTolerance, timeHorizon, beliefNote || undefined)
+      postConceptCognition(concept.code, concept.name, conviction, riskTolerance, timeHorizon, beliefNote || undefined, chain.length ? chain : undefined)
     );
   };
   const pickStock = (stock: StockSearchResult) => {
     setSearchKeyword(""); setShowDropdown(false);
+    const chain = reasoningSteps.filter(s => s.trim());
     triggerAnalysis(`${stock.stock_name}（个股认知）`, () =>
-      postStockCognition(stock.stock_code, stock.stock_name, conviction, riskTolerance, timeHorizon, beliefNote || undefined).then((r) => r as CognitionResponse)
+      postStockCognition(stock.stock_code, stock.stock_name, conviction, riskTolerance, timeHorizon, beliefNote || undefined, chain.length ? chain : undefined).then((r) => r as CognitionResponse)
     );
   };
   const reset = () => {
@@ -339,6 +343,27 @@ export default function CognitionPage() {
                 <textarea className="w-full min-h-[80px] px-3 py-2 text-sm bg-surface border border-border rounded-lg font-sans resize-y focus:outline-none focus:border-accent"
                   value={beliefNote} onChange={(e) => setBeliefNote(e.target.value.slice(0, 1000))}
                   placeholder="例如：受益于国产替代 + 下游需求扩张 + 估值合理..." />
+              </div>
+              <div>
+                <div className="text-xs text-text-3 mb-2">因果链（为什么相信？按顺序填写推理步骤）</div>
+                <div className="space-y-1.5">
+                  {reasoningSteps.map((step, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-xs text-text-3 w-5 text-right shrink-0">{i + 1}.</span>
+                      <input className="flex-1 px-2.5 py-1.5 text-sm bg-surface border border-border rounded-lg font-sans focus:outline-none focus:border-accent"
+                        value={step} onChange={(e) => setReasoningSteps(prev => prev.map((s, j) => j === i ? e.target.value : s))}
+                        placeholder={i === 0 ? "例如：AI是生产力变革" : i === 1 ? "例如：生产资产最值钱" : "继续推理..."} />
+                      {reasoningSteps.length > 1 && (
+                        <button type="button" onClick={() => setReasoningSteps(prev => prev.filter((_, j) => j !== i))}
+                          className="text-text-3 hover:text-neg text-sm shrink-0">✕</button>
+                      )}
+                    </div>
+                  ))}
+                  {reasoningSteps.length < 6 && (
+                    <button type="button" onClick={() => setReasoningSteps(prev => [...prev, ""])}
+                      className="text-xs text-accent hover:underline">+ 添加步骤</button>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -533,12 +558,43 @@ export default function CognitionPage() {
               )}
               {activeTab === "evidence" && (
               <section>
-                {result.step1_judgment?.belief && (
+                {(result as { step0_thesis?: { belief?: string; reasoning_chain?: string[]; falsification_conditions?: string[]; source?: string } }).step0_thesis && (
                   <div className="p-6 bg-surface border border-border rounded-lg mb-4">
-                    <div className="text-xs uppercase tracking-wide text-text-3 mb-2">投资信念</div>
-                    <p className="text-sm leading-relaxed m-0">{result.step1_judgment.belief}</p>
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-xs uppercase tracking-wide text-text-3">投资假设（Thesis）</span>
+                      {(result as { step0_thesis?: { source?: string } }).step0_thesis?.source === "user" && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-accent-soft text-accent rounded">用户输入</span>
+                      )}
+                    </div>
+                    <p className="text-sm leading-relaxed m-0 font-medium">{(result as { step0_thesis?: { belief?: string } }).step0_thesis?.belief}</p>
+                    {(result as { step0_thesis?: { reasoning_chain?: string[] } }).step0_thesis?.reasoning_chain && (result as { step0_thesis?: { reasoning_chain?: string[] } }).step0_thesis!.reasoning_chain!.length > 0 && (
+                      <div className="mt-3 space-y-1">
+                        <div className="text-xs text-text-3">因果链：</div>
+                        <ol className="text-sm text-text-1 m-0 pl-5 list-decimal space-y-0.5">
+                          {(result as { step0_thesis?: { reasoning_chain?: string[] } }).step0_thesis!.reasoning_chain!.map((step, i) => (
+                            <li key={i}>{step}</li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+                    {(result as { step0_thesis?: { falsification_conditions?: string[] } }).step0_thesis?.falsification_conditions && (result as { step0_thesis?: { falsification_conditions?: string[] } }).step0_thesis!.falsification_conditions!.length > 0 && (
+                      <div className="mt-3">
+                        <div className="text-xs text-text-3 mb-1">证伪条件（出现则假设不成立）：</div>
+                        <ul className="text-sm text-neg m-0 pl-5 list-disc space-y-0.5">
+                          {(result as { step0_thesis?: { falsification_conditions?: string[] } }).step0_thesis!.falsification_conditions!.map((c, i) => (
+                            <li key={i}>{c}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {result.step1_judgment?.belief && (
+                  <div className="p-4 bg-surface border border-border rounded-lg mb-4">
+                    <div className="text-xs uppercase tracking-wide text-text-3 mb-1">系统判断模板</div>
+                    <p className="text-sm text-text-2 m-0">{result.step1_judgment.belief}</p>
                     {result.step1_judgment.key_metric && (
-                      <div className="text-xs text-text-3 mt-3">核心指标：{result.step1_judgment.key_metric}</div>
+                      <div className="text-xs text-text-3 mt-2">核心指标：{result.step1_judgment.key_metric}</div>
                     )}
                   </div>
                 )}

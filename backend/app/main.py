@@ -40,6 +40,8 @@ class CognitionRequest(BaseModel):
     risk_tolerance: str = "moderate"
     max_valuation_percentile: float | None = None  # None=用chain默认硬约束
     top_n: int = 5
+    belief_note: str | None = None  # 投资人的原始观点
+    reasoning_chain: list[str] | None = None  # 因果链（为什么相信）
 
 
 def _get_cognition_engine(app: FastAPI):
@@ -1750,6 +1752,8 @@ def create_app(
             risk_tolerance=request.risk_tolerance,
             max_valuation_percentile=request.max_valuation_percentile,
             top_n=request.top_n,
+            belief_note=request.belief_note,
+            reasoning_chain=request.reasoning_chain,
         )
         # 兼容前端：fund_matches 也作为 matches / candidates 返回
         result["matches"] = result.get("step4_fund_matches", [])
@@ -1802,6 +1806,8 @@ def create_app(
         risk_tolerance: str = "moderate"
         max_valuation_percentile: float | None = None
         top_n: int = 5
+        belief_note: str | None = None
+        reasoning_chain: list[str] | None = None
 
     @app.get("/v1/concepts/search")
     def search_concepts(keyword: str, limit: int = 20) -> dict[str, Any]:
@@ -1829,6 +1835,8 @@ def create_app(
             risk_tolerance=request.risk_tolerance,
             max_valuation_percentile=request.max_valuation_percentile,
             top_n=request.top_n,
+            belief_note=request.belief_note,
+            reasoning_chain=request.reasoning_chain,
         )
         result["matches"] = result.get("step4_fund_matches", [])
         return result
@@ -1843,6 +1851,8 @@ def create_app(
         risk_tolerance: str = "moderate"
         max_valuation_percentile: float | None = None
         top_n: int = 5
+        belief_note: str | None = None
+        reasoning_chain: list[str] | None = None
 
     @app.get("/v1/stocks/search")
     def search_stocks(keyword: str, limit: int = 20) -> dict[str, Any]:
@@ -1863,6 +1873,8 @@ def create_app(
             risk_tolerance=request.risk_tolerance,
             max_valuation_percentile=request.max_valuation_percentile,
             top_n=request.top_n,
+            belief_note=request.belief_note,
+            reasoning_chain=request.reasoning_chain,
         )
         result["matches"] = result.get("step4_fund_matches", [])
         return result
