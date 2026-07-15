@@ -1165,6 +1165,11 @@ class CognitionEngine:
                     good_keywords.extend(link.get("stocks", []))
                     good_industry_kws.extend(link.get("industry_keywords", []))
 
+        # Thesis 决策输入：用户因果链中的股票加入最终匹配关键词
+        for kw in user_stock_kws:
+            if kw not in good_keywords:
+                good_keywords.append(kw)
+
         fund_matches: list[dict[str, Any]] = []
         gated_out: list[dict[str, Any]] = []
 

@@ -46,7 +46,12 @@ def test_thesis_has_id_and_audit_fields(tmp_path):
 
 
 def test_thesis_user_stock_expands_candidate_pool(tmp_path):
-    """用户因果链中提到不在预设链的股票，该股票的持有基金应出现在候选中。"""
+    """用户因果链中提到不在预设链的股票，该股票的持有基金应出现在最终候选中。
+
+    端到端断言：
+    - 无 Thesis：F999 不在最终候选（中微公司不在预设链）
+    - 有 Thesis：F999 在最终候选（user_stock_keywords 进入 good_keywords）
+    """
     db = tmp_path / "test.sqlite"
     _setup_db(db)
     # 插入一只持有"中微公司"的基金（中微公司不在 AI 预设链中）
@@ -57,11 +62,12 @@ def test_thesis_user_stock_expands_candidate_pool(tmp_path):
 
     engine = CognitionEngine(source_db=str(db), factor_db=None)
 
-    # 不带 reasoning_chain：中微公司不在预设链，F999 不应被匹配
+    # 不带 reasoning_chain：中微公司不在预设链，F999 不应出现在最终候选
     result_no_thesis = engine.run(direction="AI", conviction="medium")
     fund_codes_no = {f["fund_code"] for f in result_no_thesis.get("step4_fund_matches", [])}
+    assert "F999" not in fund_codes_no, "无 Thesis 时 F999 不应出现在候选中"
 
-    # 带 reasoning_chain 提到中微公司：应扩展候选池
+    # 带 reasoning_chain 提到中微公司：F999 应出现在最终候选
     result_with_thesis = engine.run(
         direction="AI",
         conviction="medium",
@@ -69,10 +75,9 @@ def test_thesis_user_stock_expands_candidate_pool(tmp_path):
         reasoning_chain=["AI算力需求爆发", "半导体设备国产替代", "中微公司是关键"],
     )
     fund_codes_with = {f["fund_code"] for f in result_with_thesis.get("step4_fund_matches", [])}
-
-    # 有 Thesis 时候选池应包含 F999（或至少候选池不同）
     thesis = result_with_thesis.get("step0_thesis", {})
     assert "中微公司" in thesis.get("user_stock_keywords", [])
+    assert "F999" in fund_codes_with, "有 Thesis 时 F999 应出现在最终候选中"
 
 
 def test_thesis_preset_when_no_belief_note(tmp_path):
