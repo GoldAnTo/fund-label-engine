@@ -31,6 +31,115 @@ from app.exporters import (
 )
 from app.persistence import LabelRunReader, LabelRunWriter
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_DEFAULT_POLICY_ID = "cognition_default"
+_DEFAULT_POLICY_VERSION = 1
+
+
+def _persist_thesis(app, result: dict, request: CognitionRequest) -> None:
+    """将运行时 step0_thesis 持久化到 investment_theses 表。
+
+    失败时不阻断主流程，仅保留运行时 thesis_id。
+    成功时替换 result["step0_thesis"]["thesis_id"] 为持久化 ID。
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    thesis = result.get("step0_thesis")
+    if not thesis:
+        return
+
+    try:
+        from app.persistence.governance import GovernanceRepository
+        from app.persistence.migrations_runner import run_migrations
+        from app.services.governance_service import GovernanceService
+
+        # 确定 governance DB 路径
+        gov_db = (
+            getattr(app.state, "output_db_path", None)
+            or getattr(app.state, "db_path", None)
+            or getattr(app.state, "source_db_path", None)
+        )
+        if not gov_db:
+            return
+
+        # 确保治理表存在
+        run_migrations(gov_db)
+
+        repo = GovernanceRepository(gov_db)
+        service = GovernanceService(repo)
+
+        # 确保默认策略存在
+        import sqlite3
+        conn = sqlite3.connect(gov_db)
+        conn.execute(
+            "INSERT OR IGNORE INTO strategy_policies "
+            "(policy_id, version, business_mode, policy_status, strategy_name, strategy_type) "
+            "VALUES (?, ?, 'private_strategy', 'active', '认知驱动选基默认策略', 'equity_long_only')",
+            (_DEFAULT_POLICY_ID, _DEFAULT_POLICY_VERSION),
+        )
+        # 确保数据快照存在
+        source_db = getattr(app.state, "source_db_path", None) or gov_db
+        snapshot_id = f"snap_{thesis.get('as_of_date', 'unknown')}"
+        conn.execute(
+            "INSERT OR IGNORE INTO data_snapshots (snapshot_id, source_db_path, created_at) "
+            "VALUES (?, ?, ?)",
+            (snapshot_id, str(source_db), thesis.get("as_of_date", "")),
+        )
+        conn.commit()
+        conn.close()
+
+        # 创建 ResearchInput
+        ri_result = service.create_research_input(
+            input_type="philosophy",
+            business_mode="private_strategy",
+            strategy_policy_id=_DEFAULT_POLICY_ID,
+            strategy_policy_version=_DEFAULT_POLICY_VERSION,
+            actor_role="researcher",
+            actor_id="cognition_user",
+            request_source="ad_hoc_research",
+            raw_text=request.belief_note or thesis.get("belief", ""),
+            structured_intent={
+                "direction": request.theme_key,
+                "conviction": request.conviction,
+                "time_horizon": request.time_horizon,
+                "risk_tolerance": request.risk_tolerance,
+                "reasoning_chain": request.reasoning_chain or [],
+            },
+            as_of_date=thesis.get("as_of_date"),
+            data_snapshot_id=snapshot_id,
+        )
+
+        # 创建 InvestmentThesis
+        th_result = service.create_thesis(
+            user_input_id=ri_result["user_input_id"],
+            strategy_policy_id=_DEFAULT_POLICY_ID,
+            strategy_policy_version=_DEFAULT_POLICY_VERSION,
+            title=f"{request.theme_key} 认知假设",
+            belief_statement=thesis.get("belief", ""),
+            actor_id="cognition_user",
+            time_horizon=request.time_horizon,
+            invalidation_conditions=thesis.get("falsification_conditions", []),
+            key_metrics={
+                "conviction": request.conviction,
+                "risk_tolerance": request.risk_tolerance,
+                "user_stock_keywords": thesis.get("user_stock_keywords", []),
+                "source": thesis.get("source", "preset"),
+            },
+            as_of_date=thesis.get("as_of_date"),
+            data_snapshot_id=snapshot_id,
+        )
+
+        # 用持久化 thesis_id 替换运行时临时 ID
+        result["step0_thesis"]["thesis_id"] = th_result["thesis_id"]
+        result["step0_thesis"]["persisted"] = True
+        result["step0_thesis"]["status"] = th_result.get("status", "draft")
+        logger.info("Thesis 持久化成功: thesis_id=%s", th_result["thesis_id"])
+
+    except Exception as e:
+        logger.warning("Thesis 持久化失败（不影响认知结果）: %s", e)
+
 
 class CognitionRequest(BaseModel):
     theme_key: str
@@ -1755,6 +1864,10 @@ def create_app(
             belief_note=request.belief_note,
             reasoning_chain=request.reasoning_chain,
         )
+
+        # Thesis 持久化：将运行时 step0_thesis 落库为 investment_theses 记录
+        _persist_thesis(app, result, request)
+
         # 兼容前端：fund_matches 也作为 matches / candidates 返回
         result["matches"] = result.get("step4_fund_matches", [])
         result["candidates"] = result.get("step4_fund_matches", [])
