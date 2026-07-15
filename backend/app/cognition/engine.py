@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -1017,6 +1018,13 @@ class CognitionEngine:
             "hard_limits": hard_limits,
         }
 
+        # 预览所有环节的股票关键词（供 Thesis 提取用户提及的股票）
+        chain_stock_kws_preview: list[str] = []
+        for link in chain["chain"]:
+            if link.get("exclude"):
+                continue
+            chain_stock_kws_preview.extend(link.get("stocks", []))
+
         # === Step 0: 投资假设（不可变 Thesis） ===
         # 用户的原始观点 + 因果链 + 自动推导的证伪条件
         user_belief = belief_note or judgment["belief"]
@@ -1027,7 +1035,19 @@ class CognitionEngine:
             logic = link.get("benefit_logic", "")
             if logic:
                 falsification_conditions.append(f"若「{logic}」不成立则该环节不受益")
+
+        # 从因果链中提取额外股票关键词（用户提到的公司名会加入匹配池）
+        user_stock_kws: list[str] = []
+        if reasoning_chain:
+            for step in reasoning_chain:
+                # 提取 2-4 字的中文公司名片段（简单启发式）
+                for known_stock in chain_stock_kws_preview:
+                    if known_stock in step and known_stock not in user_stock_kws:
+                        user_stock_kws.append(known_stock)
+
+        thesis_id = f"th_{uuid.uuid4().hex[:12]}"
         thesis = {
+            "thesis_id": thesis_id,
             "belief": user_belief,
             "reasoning_chain": reasoning_chain or [],
             "direction": direction,
@@ -1037,6 +1057,9 @@ class CognitionEngine:
             "level": judgment["level"],
             "falsification_conditions": falsification_conditions[:5],
             "source": "user" if belief_note else "preset",
+            "user_stock_keywords": user_stock_kws,
+            "as_of_date": date.today().isoformat(),
+            "status": "draft",
         }
 
         # === Step 2: 产业链拆解 ===
@@ -1048,6 +1071,11 @@ class CognitionEngine:
                 continue
             chain_stock_kws.extend(link.get("stocks", []))
             chain_ind_kws.extend(link.get("industry_keywords", []))
+
+        # Thesis 决策输入：用户因果链中提到的股票加入匹配池
+        for kw in user_stock_kws:
+            if kw not in chain_stock_kws:
+                chain_stock_kws.append(kw)
 
         candidate_funds = self._find_candidate_funds(conn, chain_stock_kws, chain_ind_kws)
         all_holdings: dict[str, list[dict[str, Any]]] = {}
@@ -1289,9 +1317,33 @@ class CognitionEngine:
         portfolio["defense_weight_pct"] = defense_weight_pct
         portfolio["overlap_analysis"] = overlap_summary
         portfolio["metrics"] = portfolio_metrics
-        portfolio["risk_review"] = portfolio_risk_review(
-            portfolio_metrics, overlap_summary, selected, conviction,
+
+        # 组合级二次裁决（阈值由 risk_tolerance 决定）
+        risk_review = portfolio_risk_review(
+            portfolio_metrics, overlap_summary, selected, risk_tolerance,
         )
+
+        # 强制执行：fail 全降 50%，warn 违规方向降 75%
+        if risk_review["enforced_actions"]:
+            for action in risk_review["enforced_actions"]:
+                if action["action"] == "weight_reduction":
+                    factor = action["factor"]
+                    if action["scope"] == "all":
+                        for f in selected:
+                            f["weight"] = round(f["weight"] * factor, 1)
+                    elif action["scope"] == "violating":
+                        violating_codes: set[str] = set()
+                        for v in risk_review["violations"]:
+                            if v["type"] == "holdings_overlap":
+                                for pair in overlap_summary.get("high_overlap_pairs", []):
+                                    violating_codes.update(pair)
+                        for f in selected:
+                            if f["fund_code"] in violating_codes:
+                                f["weight"] = round(f["weight"] * factor, 1)
+            portfolio["total_invested"] = round(sum(f["weight"] for f in selected), 1)
+            portfolio["cash_pct"] = round(max(0, 100 - portfolio["total_invested"] - defense_weight_pct), 1)
+
+        portfolio["risk_review"] = risk_review
         portfolio["rationale"] = self._build_portfolio_rationale(
             judgment, positive_links, negative_links, validation
         )

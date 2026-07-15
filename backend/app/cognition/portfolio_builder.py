@@ -474,22 +474,24 @@ def portfolio_risk_review(
     metrics: dict[str, Any],
     overlap_summary: dict[str, Any],
     selected_funds: list[dict[str, Any]],
-    conviction: str = "medium",
+    risk_tolerance: str = "moderate",
 ) -> dict[str, Any]:
     """组合级二次裁决：行业暴露/持仓重叠/回撤/波动率约束。
 
+    阈值由 risk_tolerance 决定（不是 conviction）：越保守越严格。
     返回：
     - verdict: "pass" / "warn" / "fail"
     - violations: 具体违规项列表
     - recommendations: 调整建议
+    - enforced_actions: 强制执行的动作（权重调整）
     """
-    # 约束阈值随信心强度调整：高信心更宽容
+    # 风险限额由风险偏好决定
     thresholds = {
-        "high": {"max_industry": 50, "max_stock": 12, "max_overlap": 50, "max_drawdown": -35, "max_volatility": 35},
-        "medium": {"max_industry": 40, "max_stock": 10, "max_overlap": 40, "max_drawdown": -25, "max_volatility": 30},
-        "low": {"max_industry": 30, "max_stock": 8, "max_overlap": 30, "max_drawdown": -20, "max_volatility": 25},
+        "conservative": {"max_industry": 30, "max_stock": 8, "max_overlap": 30, "max_drawdown": -20, "max_volatility": 25},
+        "moderate": {"max_industry": 40, "max_stock": 10, "max_overlap": 40, "max_drawdown": -30, "max_volatility": 35},
+        "aggressive": {"max_industry": 50, "max_stock": 12, "max_overlap": 50, "max_drawdown": -40, "max_volatility": 45},
     }
-    th = thresholds.get(conviction, thresholds["medium"])
+    th = thresholds.get(risk_tolerance, thresholds["moderate"])
 
     violations: list[dict[str, Any]] = []
     recommendations: list[str] = []
@@ -556,10 +558,28 @@ def portfolio_risk_review(
     else:
         verdict = "pass"
 
+    # 强制执行动作
+    enforced_actions: list[dict[str, Any]] = []
+    if verdict == "fail":
+        enforced_actions.append({
+            "action": "weight_reduction",
+            "scope": "all",
+            "factor": 0.5,
+            "reason": "组合风险裁决 fail，全部持仓权重降至 50%",
+        })
+    elif verdict == "warn":
+        enforced_actions.append({
+            "action": "weight_reduction",
+            "scope": "violating",
+            "factor": 0.75,
+            "reason": "组合风险裁决 warn，违规方向持仓权重降至 75%",
+        })
+
     return {
         "verdict": verdict,
         "violations": violations,
         "recommendations": recommendations,
         "thresholds": th,
         "fund_count": len(selected_funds),
+        "enforced_actions": enforced_actions,
     }
