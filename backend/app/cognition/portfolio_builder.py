@@ -468,3 +468,98 @@ def calculate_portfolio_metrics(
         "industry_exposure": industry_exposure,
         "sector_exposure": sector_exposure,
     }
+
+
+def portfolio_risk_review(
+    metrics: dict[str, Any],
+    overlap_summary: dict[str, Any],
+    selected_funds: list[dict[str, Any]],
+    conviction: str = "medium",
+) -> dict[str, Any]:
+    """组合级二次裁决：行业暴露/持仓重叠/回撤/波动率约束。
+
+    返回：
+    - verdict: "pass" / "warn" / "fail"
+    - violations: 具体违规项列表
+    - recommendations: 调整建议
+    """
+    # 约束阈值随信心强度调整：高信心更宽容
+    thresholds = {
+        "high": {"max_industry": 50, "max_stock": 12, "max_overlap": 50, "max_drawdown": -35, "max_volatility": 35},
+        "medium": {"max_industry": 40, "max_stock": 10, "max_overlap": 40, "max_drawdown": -25, "max_volatility": 30},
+        "low": {"max_industry": 30, "max_stock": 8, "max_overlap": 30, "max_drawdown": -20, "max_volatility": 25},
+    }
+    th = thresholds.get(conviction, thresholds["medium"])
+
+    violations: list[dict[str, Any]] = []
+    recommendations: list[str] = []
+
+    # 1. 行业集中度
+    industry_exposure = metrics.get("industry_exposure", [])
+    for ind in industry_exposure:
+        if ind["weight"] > th["max_industry"]:
+            violations.append({
+                "type": "industry_concentration",
+                "severity": "warn",
+                "detail": f"行业「{ind['name']}」占比 {ind['weight']:.1f}%，超过上限 {th['max_industry']}%",
+            })
+            recommendations.append(f"考虑降低「{ind['name']}」行业暴露，增加其他行业配置")
+
+    # 2. 个股集中度
+    for stock in metrics.get("holdings_penetration", []):
+        if stock["weight"] > th["max_stock"]:
+            violations.append({
+                "type": "stock_concentration",
+                "severity": "warn",
+                "detail": f"个股「{stock.get('stock_name', stock.get('stock_code', ''))}」占比 {stock['weight']:.2f}%，超过上限 {th['max_stock']}%",
+            })
+            recommendations.append(f"个股「{stock.get('stock_name', '')}」过于集中，考虑分散")
+
+    # 3. 持仓重叠度
+    max_overlap = overlap_summary.get("max_overlap_pct", 0)
+    high_pairs = overlap_summary.get("high_overlap_pairs", [])
+    if max_overlap > th["max_overlap"]:
+        violations.append({
+            "type": "holdings_overlap",
+            "severity": "warn",
+            "detail": f"基金间最大持仓重叠 {max_overlap:.1f}%，超过上限 {th['max_overlap']}%（{len(high_pairs)} 对高重叠）",
+        })
+        recommendations.append("高重叠基金实质上是同一头寸的重复，考虑去重或替换其中一只")
+
+    # 4. 最大回撤
+    max_dd = metrics.get("portfolio_max_drawdown")
+    if max_dd is not None and max_dd < th["max_drawdown"]:
+        violations.append({
+            "type": "max_drawdown",
+            "severity": "fail" if max_dd < th["max_drawdown"] - 10 else "warn",
+            "detail": f"组合历史最大回撤 {max_dd:.1f}%，超过容忍线 {th['max_drawdown']}%",
+        })
+        recommendations.append("组合回撤风险偏高，考虑增加防守仓位或降低整体仓位")
+
+    # 5. 波动率
+    vol = metrics.get("portfolio_volatility")
+    if vol is not None and vol > th["max_volatility"]:
+        violations.append({
+            "type": "volatility",
+            "severity": "warn",
+            "detail": f"组合年化波动率 {vol:.1f}%，超过上限 {th['max_volatility']}%",
+        })
+        recommendations.append("波动率偏高，考虑增加低波动资产")
+
+    # 裁决
+    has_fail = any(v["severity"] == "fail" for v in violations)
+    has_warn = any(v["severity"] == "warn" for v in violations)
+    if has_fail:
+        verdict = "fail"
+    elif has_warn:
+        verdict = "warn"
+    else:
+        verdict = "pass"
+
+    return {
+        "verdict": verdict,
+        "violations": violations,
+        "recommendations": recommendations,
+        "thresholds": th,
+        "fund_count": len(selected_funds),
+    }

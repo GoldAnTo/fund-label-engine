@@ -29,6 +29,7 @@ from app.cognition.portfolio_builder import (
     calculate_overlap,
     calculate_portfolio_metrics,
     optimize_portfolio,
+    portfolio_risk_review,
 )
 from app.cognition.theme_registry import load_themes
 from app.cognition.thesis_tracker import create_tracker_from_cognition
@@ -1288,6 +1289,9 @@ class CognitionEngine:
         portfolio["defense_weight_pct"] = defense_weight_pct
         portfolio["overlap_analysis"] = overlap_summary
         portfolio["metrics"] = portfolio_metrics
+        portfolio["risk_review"] = portfolio_risk_review(
+            portfolio_metrics, overlap_summary, selected, conviction,
+        )
         portfolio["rationale"] = self._build_portfolio_rationale(
             judgment, positive_links, negative_links, validation
         )

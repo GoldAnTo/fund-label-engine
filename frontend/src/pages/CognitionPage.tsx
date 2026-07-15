@@ -736,6 +736,43 @@ export default function CognitionPage() {
                     </Table>
                   </details>
                 )}
+                {(result as { step5_portfolio?: { risk_review?: { verdict?: string; violations?: Array<{ type: string; severity: string; detail: string }>; recommendations?: string[] } } }).step5_portfolio?.risk_review && (() => {
+                  const rr = (result as { step5_portfolio?: { risk_review?: { verdict?: string; violations?: Array<{ type: string; severity: string; detail: string }>; recommendations?: string[] } } }).step5_portfolio!.risk_review!;
+                  const verdictColor = rr.verdict === "pass" ? "var(--color-pos, #16a34a)" : rr.verdict === "warn" ? "var(--color-warn, #d97706)" : "var(--color-neg, #dc2626)";
+                  const verdictText = rr.verdict === "pass" ? "通过" : rr.verdict === "warn" ? "警告" : "不通过";
+                  return (
+                    <Card className="mt-4">
+                      <CardHeader title="组合级二次裁决"
+                        subtitle={`裁决结果：${verdictText}（基于信心强度 ${conviction}）`} />
+                      <CardBody>
+                        <div className="mb-3 px-3 py-2 rounded-lg" style={{ background: `${verdictColor}15`, border: `1px solid ${verdictColor}40` }}>
+                          <span className="text-sm font-semibold" style={{ color: verdictColor }}>{verdictText}</span>
+                          <span className="text-xs text-text-3 ml-2">{rr.violations?.length || 0} 项违规</span>
+                        </div>
+                        {rr.violations && rr.violations.length > 0 && (
+                          <div className="space-y-1.5 mb-3">
+                            {rr.violations.map((v, i) => (
+                              <div key={i} className="flex items-start gap-2 text-sm">
+                                <span className="shrink-0" style={{ color: v.severity === "fail" ? "var(--color-neg, #dc2626)" : "var(--color-warn, #d97706)" }}>
+                                  {v.severity === "fail" ? "✕" : "⚠"}
+                                </span>
+                                <span className="text-text-2">{v.detail}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {rr.recommendations && rr.recommendations.length > 0 && (
+                          <div className="border-t border-border pt-3">
+                            <div className="text-xs text-text-3 mb-1">调整建议：</div>
+                            <ul className="text-sm text-text-2 m-0 pl-5 list-disc space-y-0.5">
+                              {rr.recommendations.map((r, i) => <li key={i}>{r}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                      </CardBody>
+                    </Card>
+                  );
+                })()}
               </section>
               )}
               {activeTab === "portfolio" && (
