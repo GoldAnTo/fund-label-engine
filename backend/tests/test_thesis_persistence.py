@@ -95,3 +95,54 @@ def test_thesis_persistence_failure_graceful(tmp_path: Path) -> None:
     assert "thesis_id" in thesis
     # 持久化应失败，persisted 不应为 True
     assert thesis.get("persisted") is not True
+
+
+def test_candidate_set_created_after_thesis(tmp_path: Path) -> None:
+    """Thesis 持久化后应自动创建 CandidateSet，绑定 thesis_id + 候选基金。"""
+    db = tmp_path / "fund.sqlite"
+    seed(db)
+
+    app = create_app(db_path=db)
+    client = TestClient(app)
+
+    response = client.post("/v1/cognition", json={
+        "theme_key": "AI",
+        "conviction": "high",
+        "belief_note": "AI是生产力变革",
+    })
+    assert response.status_code == 200
+    result = response.json()
+    thesis = result.get("step0_thesis", {})
+
+    # 验证 candidate_set_id 出现在结果中
+    assert thesis.get("candidate_set_id") is not None
+    cs_id = thesis["candidate_set_id"]
+
+    # 验证 thesis_tracker 和 portfolio 也引用同一 candidate_set_id
+    tracker = result.get("thesis_tracker", {})
+    assert tracker.get("candidate_set_id") == cs_id
+    portfolio = result.get("step5_portfolio", {})
+    assert portfolio.get("candidate_set_id") == cs_id
+    assert portfolio.get("thesis_id") == thesis["thesis_id"]
+
+    # 验证数据库中有 candidate_set_headers 记录
+    conn = sqlite3.connect(str(db))
+    row = conn.execute(
+        "SELECT thesis_id, user_input_id, data_snapshot_id, "
+        "scanned_fund_count, mapped_candidate_count "
+        "FROM candidate_set_headers WHERE candidate_set_id = ?",
+        (cs_id,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == thesis["thesis_id"]
+    assert row[1] == thesis["user_input_id"]
+    assert row[2] == thesis["data_snapshot_id"]
+    assert row[3] > 0  # scanned_fund_count > 0
+
+    # 验证 candidate_sets 表有候选基金记录
+    count = conn.execute(
+        "SELECT COUNT(*) FROM candidate_sets WHERE candidate_set_id = ?",
+        (cs_id,),
+    ).fetchone()[0]
+    conn.close()
+    assert count > 0, "candidate_sets 表应有候选基金记录"

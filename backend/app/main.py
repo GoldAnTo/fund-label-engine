@@ -152,6 +152,8 @@ def _persist_thesis(app, result: dict, request, direction: str | None = None) ->
         result["step0_thesis"]["thesis_id"] = persisted_id
         result["step0_thesis"]["persisted"] = True
         result["step0_thesis"]["status"] = th_result.get("status", "draft")
+        result["step0_thesis"]["data_snapshot_id"] = snapshot_id
+        result["step0_thesis"]["user_input_id"] = ri_result["user_input_id"]
 
         # 同步更新 thesis_tracker 的 thesis_id（下游共同引用正式 ID）
         tracker_data = result.get("thesis_tracker", {})
@@ -162,6 +164,76 @@ def _persist_thesis(app, result: dict, request, direction: str | None = None) ->
 
     except Exception as e:
         logger.warning("Thesis 持久化失败（不影响认知结果）: %s", e)
+
+
+def _create_candidate_set(app, result: dict) -> None:
+    """在 Thesis 持久化后创建 CandidateSet，绑定 thesis_id + 候选基金。
+
+    失败时不阻断主流程。
+    成功时在 result 中写入 candidate_set_id。
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    thesis = result.get("step0_thesis", {})
+    if not thesis or not thesis.get("persisted"):
+        return
+
+    thesis_id = thesis.get("thesis_id")
+    snapshot_id = thesis.get("data_snapshot_id")
+    if not thesis_id or not snapshot_id:
+        return
+
+    try:
+        from app.api.governance import get_cognition_governance_service
+        from starlette.requests import Request
+
+        # 构造一个最小 Request 用于获取 GovernanceService
+        # 直接初始化更简洁
+        from app.persistence.governance import GovernanceRepository
+        from app.persistence.candidate_priority import CandidatePriorityRepository
+        from app.services.cognition_governance_service import CognitionGovernanceService
+
+        gov_db = (
+            getattr(app.state, "output_db_path", None)
+            or getattr(app.state, "db_path", None)
+            or getattr(app.state, "source_db_path", None)
+        )
+        if not gov_db:
+            return
+
+        gov_repo = GovernanceRepository(gov_db)
+        priority_repo = CandidatePriorityRepository(gov_db)
+        svc = CognitionGovernanceService(
+            governance_repo=gov_repo,
+            priority_repo=priority_repo,
+        )
+
+        cs_result = svc.create_candidate_set(
+            thesis_id=thesis_id,
+            data_snapshot_id=snapshot_id,
+            actor_id="cognition_user",
+        )
+
+        candidate_set_id = cs_result.get("candidate_set_id")
+        if candidate_set_id:
+            result["step0_thesis"]["candidate_set_id"] = candidate_set_id
+
+            # 下游对象共同引用正式 ID
+            tracker_data = result.get("thesis_tracker", {})
+            if tracker_data:
+                tracker_data["candidate_set_id"] = candidate_set_id
+
+            portfolio = result.get("step5_portfolio", {})
+            if portfolio:
+                portfolio["thesis_id"] = thesis_id
+                portfolio["candidate_set_id"] = candidate_set_id
+
+            logger.info("CandidateSet 创建成功: candidate_set_id=%s", candidate_set_id)
+
+    except Exception as e:
+        logger.warning("CandidateSet 创建失败（不影响认知结果）: %s", e)
 
 
 class CognitionRequest(BaseModel):
@@ -1890,6 +1962,8 @@ def create_app(
 
         # Thesis 持久化：将运行时 step0_thesis 落库为 investment_theses 记录
         _persist_thesis(app, result, request)
+        # CandidateSet 创建：绑定 thesis_id + 候选基金
+        _create_candidate_set(app, result)
 
         # 兼容前端：fund_matches 也作为 matches / candidates 返回
         result["matches"] = result.get("step4_fund_matches", [])
@@ -1975,6 +2049,7 @@ def create_app(
             reasoning_chain=request.reasoning_chain,
         )
         _persist_thesis(app, result, request, direction=request.concept_name)
+        _create_candidate_set(app, result)
         # 兼容前端：fund_matches 也作为 matches / candidates 返回
         result["matches"] = result.get("step4_fund_matches", [])
         result["candidates"] = result.get("step4_fund_matches", [])
@@ -2016,6 +2091,7 @@ def create_app(
             reasoning_chain=request.reasoning_chain,
         )
         _persist_thesis(app, result, request, direction=request.stock_name or request.stock_code)
+        _create_candidate_set(app, result)
         result["matches"] = result.get("step4_fund_matches", [])
         return result
 
@@ -2053,8 +2129,9 @@ def create_app(
                 max_valuation_percentile=request.max_valuation_percentile,
                 top_n=request.top_n,
             )
-            # 持久化每个认知的 Thesis
+            # 持久化每个认知的 Thesis + CandidateSet
             _persist_thesis(app, result, request, direction=item.direction)
+            _create_candidate_set(app, result)
             cognition_results.append({
                 "direction": item.direction,
                 "weight_pct": item.weight_pct,
