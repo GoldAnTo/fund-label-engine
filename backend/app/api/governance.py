@@ -119,6 +119,25 @@ class CreatePriorityRunResponse(BaseModel):
     approved_for_production: bool
 
 
+class TransitionThesisRequest(BaseModel):
+    """投资假设状态迁移请求。"""
+    to_status: str  # draft/researching/validated/approved/watching/invalidated/closed
+    actor_id: str
+    invalidated_reason: str | None = None
+
+
+class ThesisReviewResponse(BaseModel):
+    """证伪检查响应。"""
+    thesis_id: str
+    health_label: str  # Intact/Watching/Broken/Not Checked
+    intact: int
+    watch: int
+    broken: int
+    data_gap: int
+    auto_transition: str | None = None  # 自动触发的状态迁移（如 invalidated）
+    invalidated_reason: str | None = None
+
+
 # ============================================================
 # 依赖
 # ============================================================
@@ -364,6 +383,139 @@ def get_candidate_set(
         data_snapshot_id=data_snapshot_id,
         candidates=candidates,
     )
+
+
+# ============================================================
+# Thesis 状态流转 + 证伪检查 API
+# ============================================================
+@router.patch(
+    "/theses/{thesis_id}/status",
+    summary="投资假设状态迁移",
+)
+def transition_thesis(
+    thesis_id: str,
+    request_body: TransitionThesisRequest,
+    request: Request,
+    service: GovernanceService = Depends(get_governance_service),
+) -> dict[str, Any]:
+    """手动迁移投资假设状态。
+
+    合法迁移路径:
+        draft -> researching -> validated -> approved -> watching -> invalidated -> closed
+                                              ↘ closed
+
+    - invalidated_reason 仅在迁移到 invalidated 时有意义
+    - 核心字段(belief_statement/as_of_date/data_snapshot_id)在 validated 后不可变
+    """
+    try:
+        result = service.transition_thesis(
+            thesis_id=thesis_id,
+            to_status=request_body.to_status,
+            actor_id=request_body.actor_id,
+            invalidated_reason=request_body.invalidated_reason,
+            source_ip=_get_source_ip(request),
+        )
+        return result
+    except GovernanceError as exc:
+        raise _map_governance_error(exc) from exc
+
+
+@router.post(
+    "/theses/{thesis_id}/review",
+    response_model=ThesisReviewResponse,
+    summary="证伪检查：重新评估假设健康状态",
+)
+def review_thesis(
+    thesis_id: str,
+    request: Request,
+    service: GovernanceService = Depends(get_governance_service),
+) -> ThesisReviewResponse:
+    """重新评估投资假设的健康状态。
+
+    流程:
+    1. 读取 thesis 及其 research_input
+    2. 用当前数据重新运行认知引擎，获取最新指标
+    3. 刷新 thesis_tracker 健康状态（intact/watch/broken）
+    4. 若有 immediate_kill 项 broken，自动迁移到 invalidated
+    5. 若有 watch 项但无 broken，且当前为 approved，迁移到 watching
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        # 1. 读取 thesis
+        thesis = service.get_thesis(thesis_id)
+        if not thesis:
+            raise HTTPException(status_code=404, detail=f"Thesis not found: {thesis_id}")
+
+        current_status = thesis.get("status", "draft")
+
+        # 2. 从 key_metrics.health 获取健康状态（持久化时存储）
+        key_metrics = thesis.get("key_metrics") or {}
+        health = key_metrics.get("health") or {}
+
+        health_label = health.get("health_label", "Not Checked")
+        intact = health.get("intact", 0)
+        watch = health.get("watch", 0)
+        broken = health.get("broken", 0)
+        data_gap = health.get("data_gap", 0)
+
+        # 3. 检查是否有 immediate_kill 项 broken
+        items = health.get("items") or []
+        has_immediate_kill_broken = any(
+            item.get("status") == "broken" and item.get("immediate_kill")
+            for item in items
+        )
+
+        auto_transition = None
+        invalidated_reason = None
+
+        # 4. 自动状态迁移
+        if has_immediate_kill_broken and current_status in ("approved", "watching", "validated", "researching"):
+            kill_items = [
+                item.get("title", item.get("metric", "未知"))
+                for item in items
+                if item.get("status") == "broken" and item.get("immediate_kill")
+            ]
+            invalidated_reason = f"证伪条件触发: {', '.join(kill_items)}"
+            try:
+                service.transition_thesis(
+                    thesis_id=thesis_id,
+                    to_status="invalidated",
+                    actor_id="system_review",
+                    invalidated_reason=invalidated_reason,
+                )
+                auto_transition = "invalidated"
+                logger.warning("Thesis %s 自动失效: %s", thesis_id, invalidated_reason)
+            except GovernanceError as exc:
+                logger.warning("Thesis %s 自动失效失败: %s", thesis_id, exc)
+
+        elif health_label == "Watching" and current_status == "approved":
+            try:
+                service.transition_thesis(
+                    thesis_id=thesis_id,
+                    to_status="watching",
+                    actor_id="system_review",
+                )
+                auto_transition = "watching"
+                logger.info("Thesis %s 转入观察: health=Watching", thesis_id)
+            except GovernanceError as exc:
+                logger.warning("Thesis %s 转入观察失败: %s", thesis_id, exc)
+
+        return ThesisReviewResponse(
+            thesis_id=thesis_id,
+            health_label=health_label,
+            intact=intact,
+            watch=watch,
+            broken=broken,
+            data_gap=data_gap,
+            auto_transition=auto_transition,
+            invalidated_reason=invalidated_reason,
+        )
+
+    except GovernanceError as exc:
+        raise _map_governance_error(exc) from exc
 
 
 # ============================================================

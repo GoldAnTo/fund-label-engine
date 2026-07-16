@@ -142,6 +142,7 @@ def _persist_thesis(app, result: dict, request, direction: str | None = None) ->
                 "risk_tolerance": req_risk,
                 "user_stock_keywords": thesis.get("user_stock_keywords", []),
                 "source": thesis.get("source", "preset"),
+                "health": result.get("thesis_tracker", {}).get("health", {}),
             },
             as_of_date=thesis.get("as_of_date"),
             data_snapshot_id=snapshot_id,
