@@ -1,13 +1,14 @@
 import { NavLink, Route, Routes, Navigate, useLocation } from "react-router-dom";
-import FundReportPage from "./pages/FundReportPage";
-import ReadyPoolPage from "./pages/ReadyPoolPage";
-import SearchPage from "./pages/SearchPage";
-import ComparePage from "./pages/ComparePage";
+import { lazy, Suspense, useEffect } from "react";
 import CognitionPage from "./pages/CognitionPage";
-import MultiCognitionPage from "./pages/MultiCognitionPage";
-import LabelDefinitionsPage from "./pages/LabelDefinitionsPage";
-import PriorityWorkbenchPage from "./pages/PriorityWorkbenchPage";
-import { useEffect } from "react";
+
+const MultiCognitionPage = lazy(() => import("./pages/MultiCognitionPage"));
+const ComparePage = lazy(() => import("./pages/ComparePage"));
+const ReadyPoolPage = lazy(() => import("./pages/ReadyPoolPage"));
+const SearchPage = lazy(() => import("./pages/SearchPage"));
+const FundReportPage = lazy(() => import("./pages/FundReportPage"));
+const LabelDefinitionsPage = lazy(() => import("./pages/LabelDefinitionsPage"));
+const PriorityWorkbenchPage = lazy(() => import("./pages/PriorityWorkbenchPage"));
 
 const NAV_GROUPS = [
   {
@@ -107,6 +108,7 @@ export default function App() {
       <div className="app-main">
         <Topbar />
         <main className="main">
+          <Suspense fallback={<div className="p-8 text-text-2">加载中…</div>}>
           <Routes>
             <Route path="/" element={<Navigate to="/cognition" replace />} />
             <Route path="/cognition" element={<CognitionPage />} />
@@ -123,6 +125,7 @@ export default function App() {
             <Route path="/diff" element={<Navigate to="/cognition" replace />} />
             <Route path="/review-queue" element={<Navigate to="/cognition" replace />} />
           </Routes>
+          </Suspense>
         </main>
       </div>
     </div>

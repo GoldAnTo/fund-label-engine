@@ -558,12 +558,15 @@ export default function CognitionPage() {
               )}
               {activeTab === "evidence" && (
               <section>
-                {(result as { step0_thesis?: { belief?: string; reasoning_chain?: string[]; falsification_conditions?: string[]; source?: string } }).step0_thesis && (
+                {(result as { step0_thesis?: { belief?: string; reasoning_chain?: string[]; falsification_conditions?: string[]; source?: string; thesis_id?: string; persisted?: boolean; status?: string; candidate_set_id?: string; data_snapshot_id?: string; user_input_id?: string; user_stock_keywords?: string[] } }).step0_thesis && (
                   <div className="p-6 bg-surface border border-border rounded-lg mb-4">
                     <div className="flex items-center gap-2 mb-3">
                       <span className="text-xs uppercase tracking-wide text-text-3">投资假设（Thesis）</span>
                       {(result as { step0_thesis?: { source?: string } }).step0_thesis?.source === "user" && (
                         <span className="text-[10px] px-1.5 py-0.5 bg-accent-soft text-accent rounded">用户输入</span>
+                      )}
+                      {(result as { step0_thesis?: { persisted?: boolean } }).step0_thesis?.persisted && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-pos-soft text-pos rounded">已持久化</span>
                       )}
                     </div>
                     <p className="text-sm leading-relaxed m-0 font-medium">{(result as { step0_thesis?: { belief?: string } }).step0_thesis?.belief}</p>
@@ -577,6 +580,14 @@ export default function CognitionPage() {
                         </ol>
                       </div>
                     )}
+                    {(result as { step0_thesis?: { user_stock_keywords?: string[] } }).step0_thesis?.user_stock_keywords && (result as { step0_thesis?: { user_stock_keywords?: string[] } }).step0_thesis!.user_stock_keywords!.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        <span className="text-xs text-text-3">用户点名股票：</span>
+                        {(result as { step0_thesis?: { user_stock_keywords?: string[] } }).step0_thesis!.user_stock_keywords!.map((kw, i) => (
+                          <span key={i} className="text-[10px] px-1.5 py-0.5 bg-bg-2 text-text-2 rounded">{kw}</span>
+                        ))}
+                      </div>
+                    )}
                     {(result as { step0_thesis?: { falsification_conditions?: string[] } }).step0_thesis?.falsification_conditions && (result as { step0_thesis?: { falsification_conditions?: string[] } }).step0_thesis!.falsification_conditions!.length > 0 && (
                       <div className="mt-3">
                         <div className="text-xs text-text-3 mb-1">证伪条件（出现则假设不成立）：</div>
@@ -585,6 +596,23 @@ export default function CognitionPage() {
                             <li key={i}>{c}</li>
                           ))}
                         </ul>
+                      </div>
+                    )}
+                    {(result as { step0_thesis?: { thesis_id?: string; persisted?: boolean; status?: string; candidate_set_id?: string; data_snapshot_id?: string; user_input_id?: string } }).step0_thesis?.persisted && (
+                      <div className="mt-4 pt-3 border-t border-border">
+                        <div className="text-xs uppercase tracking-wide text-text-3 mb-2">治理审计</div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                          <div className="text-text-3">Thesis ID</div>
+                          <div className="text-text-1 font-mono">{(result as { step0_thesis?: { thesis_id?: string } }).step0_thesis?.thesis_id}</div>
+                          <div className="text-text-3">状态</div>
+                          <div className="text-text-1">{(result as { step0_thesis?: { status?: string } }).step0_thesis?.status}</div>
+                          <div className="text-text-3">Research Input</div>
+                          <div className="text-text-1 font-mono">{(result as { step0_thesis?: { user_input_id?: string } }).step0_thesis?.user_input_id}</div>
+                          <div className="text-text-3">CandidateSet</div>
+                          <div className="text-text-1 font-mono">{(result as { step0_thesis?: { candidate_set_id?: string } }).step0_thesis?.candidate_set_id ?? "—"}</div>
+                          <div className="text-text-3">数据快照</div>
+                          <div className="text-text-1 font-mono">{(result as { step0_thesis?: { data_snapshot_id?: string } }).step0_thesis?.data_snapshot_id}</div>
+                        </div>
                       </div>
                     )}
                   </div>

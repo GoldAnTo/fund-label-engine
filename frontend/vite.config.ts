@@ -14,4 +14,16 @@ export default defineConfig({
       "/health": { target, changeOrigin: true },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react": ["react", "react-dom", "react-router-dom"],
+          "vendor-charts": ["recharts"],
+          "vendor-flow": ["@xyflow/react"],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 600,
+  },
 });
