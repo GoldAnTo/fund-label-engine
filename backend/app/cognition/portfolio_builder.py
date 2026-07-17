@@ -75,24 +75,49 @@ def calculate_correlation(
 
 
 def build_portfolio(
-    candidates: list[dict[str, Any]],
-    defense_fund: dict[str, Any] | None,
+    candidates: list[dict[str, Any]] | None = None,
+    defense_fund: dict[str, Any] | None = None,
     corr_threshold: float = 0.85,
     total_cognition_weight: float = 25.0,
     defense_weight_pct: float = 10.0,
     max_funds: int = 3,
+    *,
+    recommended_candidates: list[dict[str, Any]] | None = None,
+    recommendation_run_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """构建认知匹配的组合方案。
 
-    候选基金按匹配度排序，依次选入（跳过相关性过高的），
-    估值/趋势约束决定单只上限，认知仓位合计 total_cognition_weight%，防守仓位 defense_weight_pct%。
+    当传入 recommended_candidates 时，组合只能从推荐池中选基。
+    推荐池为空时返回 insufficient_recommendations，不生成假组合。
 
-    无候选时（candidates 为空或全部 match_pct < 5）：
-    - 不生成防守基金占位（避免展示"默认防守组合"误导用户）
-    - 返回空 selected + 100% cash
-    - 调用方应通过 selected_funds 长度判断是否有可投组合
+    输出格式（推荐池模式）:
+        {
+          'status': 'complete' | 'insufficient_recommendations',
+          'selection_source': 'recommended_universe',
+          'recommendation_run_ids': [...],
+          'holdings': [...],
+          'enforced_actions': [],
+          'metrics': {},
+          'risk_review': {},
+        }
     """
-    # 短路：candidates 为空 → 立即返回空组合，不选防守基金
+    # 推荐池模式
+    if recommended_candidates is not None:
+        run_ids = recommendation_run_ids or []
+        if not recommended_candidates:
+            return {
+                "status": "insufficient_recommendations",
+                "selection_source": "recommended_universe",
+                "recommendation_run_ids": run_ids,
+                "holdings": [],
+                "enforced_actions": [],
+                "metrics": {},
+                "risk_review": {},
+            }
+        # 用推荐池作为候选
+        candidates = recommended_candidates
+
+    # 短路：candidates 为空 -> 立即返回空组合，不选防守基金
     # （设计文档 §4.4：无候选时不形成默认防守组合）
     if not candidates:
         return {
@@ -160,6 +185,17 @@ def build_portfolio(
     # 前端兼容字段
     result["suggested_weight"] = round(sum(s["weight"] for s in selected), 1)
     result["defense_weight"] = round(defense_weight, 1)
+
+    # 推荐池模式：添加 selection_source 和 status
+    if recommended_candidates is not None:
+        result["selection_source"] = "recommended_universe"
+        result["recommendation_run_ids"] = recommendation_run_ids or []
+        result["status"] = "complete"
+        result["holdings"] = selected
+        result["enforced_actions"] = []
+        result["metrics"] = {}
+        result["risk_review"] = {}
+
     return result
 
 
@@ -476,7 +512,7 @@ def portfolio_risk_review(
     selected_funds: list[dict[str, Any]],
     risk_tolerance: str = "moderate",
 ) -> dict[str, Any]:
-    """组合级二次裁决：行业暴露/持仓重叠/回撤/波动率约束。
+    """组合级二次裁决：行业暴露/持仓重叠/回撤/波动率/费率/风格预算/换手成本约束。
 
     阈值由 risk_tolerance 决定（不是 conviction）：越保守越严格。
     返回：
@@ -485,12 +521,27 @@ def portfolio_risk_review(
     - recommendations: 调整建议
     - enforced_actions: 强制执行的动作（权重调整）
     """
-    # 风险限额由风险偏好决定
+    # 风险限额从配置文件读取，回退到内置默认值
     thresholds = {
-        "conservative": {"max_industry": 30, "max_stock": 8, "max_overlap": 30, "max_drawdown": -20, "max_volatility": 25},
-        "moderate": {"max_industry": 40, "max_stock": 10, "max_overlap": 40, "max_drawdown": -30, "max_volatility": 35},
-        "aggressive": {"max_industry": 50, "max_stock": 12, "max_overlap": 50, "max_drawdown": -40, "max_volatility": 45},
+        "conservative": {"max_industry": 30, "max_stock": 8, "max_overlap": 30, "max_drawdown": -20, "max_volatility": 25, "max_total_fee": 1.2, "max_single_style": 40, "max_turnover_cost": 0.5},
+        "moderate": {"max_industry": 40, "max_stock": 10, "max_overlap": 40, "max_drawdown": -30, "max_volatility": 35, "max_total_fee": 1.5, "max_single_style": 50, "max_turnover_cost": 1.0},
+        "aggressive": {"max_industry": 50, "max_stock": 12, "max_overlap": 50, "max_drawdown": -40, "max_volatility": 45, "max_total_fee": 2.0, "max_single_style": 60, "max_turnover_cost": 2.0},
     }
+    # 尝试从配置文件加载
+    try:
+        import json
+        from pathlib import Path
+        config_path = Path(__file__).parent.parent.parent.parent / "config" / "portfolio_constraints.v1.json"
+        if config_path.exists():
+            with open(config_path) as f:
+                cfg = json.load(f)
+            cfg_thresholds = cfg.get("portfolio_risk_thresholds", {})
+            for risk_level, vals in cfg_thresholds.items():
+                if risk_level in thresholds:
+                    thresholds[risk_level].update(vals)
+    except Exception:
+        pass
+
     th = thresholds.get(risk_tolerance, thresholds["moderate"])
 
     violations: list[dict[str, Any]] = []
@@ -547,6 +598,59 @@ def portfolio_risk_review(
             "detail": f"组合年化波动率 {vol:.1f}%，超过上限 {th['max_volatility']}%",
         })
         recommendations.append("波动率偏高，考虑增加低波动资产")
+
+    # 6. 组合加权费率
+    total_weight = 0.0
+    weighted_fee = 0.0
+    for fund in selected_funds:
+        w = fund.get("weight", 0)
+        fee = fund.get("management_fee")
+        if fee is not None and w > 0:
+            weighted_fee += fee * 100 * w  # fee 是小数(0.012)，转百分比
+            total_weight += w
+    if total_weight > 0:
+        avg_fee = weighted_fee / total_weight
+        if avg_fee > th["max_total_fee"]:
+            violations.append({
+                "type": "fee_constraint",
+                "severity": "warn",
+                "detail": f"组合加权管理费率 {avg_fee:.2f}%，超过上限 {th['max_total_fee']}%",
+            })
+            recommendations.append("组合费率偏高，考虑增加低费率 ETF/指数基金占比")
+
+    # 7. 风格预算
+    style_weights: dict[str, float] = {}
+    for fund in selected_funds:
+        w = fund.get("weight", 0)
+        style = fund.get("portfolio_role") or fund.get("style") or "unknown"
+        style_weights[style] = style_weights.get(style, 0) + w
+    for style_name, style_weight in style_weights.items():
+        if style_weight > th["max_single_style"] and style_name != "unknown":
+            violations.append({
+                "type": "style_budget",
+                "severity": "warn",
+                "detail": f"风格「{style_name}」占比 {style_weight:.1f}%，超过预算上限 {th['max_single_style']}%",
+            })
+            recommendations.append(f"风格「{style_name}」过于集中，考虑增加其他风格配置")
+
+    # 8. 换手成本估算
+    turnover_cost = 0.0
+    for fund in selected_funds:
+        w = fund.get("weight", 0)
+        trend = fund.get("trend") or fund.get("holding_trend", {}).get("trend") if isinstance(fund.get("holding_trend"), dict) else fund.get("trend")
+        if trend == "decreasing":
+            turnover_cost += w * 0.5  # 减仓估计 50% 换手
+        elif trend == "increasing":
+            turnover_cost += w * 0.3  # 加仓估计 30% 换手
+        else:
+            turnover_cost += w * 0.1  # 稳定估计 10% 换手
+    if turnover_cost > th["max_turnover_cost"]:
+        violations.append({
+            "type": "turnover_cost",
+            "severity": "warn",
+            "detail": f"估算组合换手成本 {turnover_cost:.1f}%，超过上限 {th['max_turnover_cost']}%",
+        })
+        recommendations.append("换手成本偏高，考虑减少频繁调仓的基金")
 
     # 裁决
     has_fail = any(v["severity"] == "fail" for v in violations)

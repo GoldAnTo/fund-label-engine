@@ -36,17 +36,20 @@ from app.persistence.candidate_priority import CandidatePriorityRepository
 from app.persistence.governance import GovernanceRepository
 from app.persistence.migrations_runner import run_migrations
 from app.services.candidate_priority import FundCandidateEvidence
+from app.services.fund_recommendation import FundRecommendationResult, RecommendationReason
 from app.services.cognition_governance_service import (
     CandidateDataSourceUnavailableError,
     CandidateSetNotFoundError,
     CognitionGovernanceService,
     DuplicateCandidateSetError,
     DuplicatePriorityRunError,
+    DuplicateRecommendationRunError,
     GovernanceError,
     SnapshotNotFoundError,
     StructuredIntentIncompleteError,
     ThesisNotFoundError,
 )
+from app.persistence.fund_recommendation import FundRecommendationRepository
 
 
 # ============================================================
@@ -68,6 +71,7 @@ def _make_evidence(
     policy_conflicts: tuple = (),
     data_snapshot_id: str = "snap1",
     asset_type: str = "fund",
+    product_category: str = "active_fund",
 ) -> FundCandidateEvidence:
     """构造一个 FundCandidateEvidence。"""
     return FundCandidateEvidence(
@@ -96,6 +100,7 @@ def _make_evidence(
         policy_conflicts=policy_conflicts,
         data_snapshot_id=data_snapshot_id,
         asset_type=asset_type,
+        product_category=product_category,
     )
 
 
@@ -174,6 +179,23 @@ _EXCLUDED_UNIVERSE_CONFIG = [
     {"reason": "test", "assets": []},
 ]
 
+# fund_recommendation 配置（写入 fund_recommendation_json 列）
+_FUND_RECOMMENDATION_CONFIG = {
+    "method_version": "fund_recommendation_v1",
+    "source_method_version": "fund_candidate_evidence_v0",
+    "minimum_target_holding_weight": 0.03,
+    "maximum_holding_age_days": 180,
+    "active_fund_limit": 3,
+    "etf_or_index_limit": 3,
+    "alternative_limit": 2,
+    "weights": {
+        "theme_exposure": 0.55,
+        "thesis_alignment": 0.15,
+        "risk_return": 0.15,
+        "fund_quality": 0.15,
+    },
+}
+
 
 def _intent(
     direction: str = "AI",
@@ -221,19 +243,20 @@ def gov_db(tmp_path: Path, source_file: Path, factor_file: Path) -> Path:
     conn = sqlite3.connect(str(db))
     conn.execute("PRAGMA foreign_keys = ON")
 
-    # 插入 strategy_policies (带 candidate_priority_json, valuation_policy_json, allowed_universe_json, excluded_universe_json)
+    # 插入 strategy_policies (带 candidate_priority_json, valuation_policy_json, allowed_universe_json, excluded_universe_json, fund_recommendation_json)
     conn.execute(
         "INSERT INTO strategy_policies "
         "(policy_id, version, business_mode, policy_status, approved_for_production, "
         "strategy_name, strategy_type, "
         "candidate_priority_json, valuation_policy_json, "
-        "allowed_universe_json, excluded_universe_json) "
-        "VALUES ('p1', 1, 'private_strategy', 'active', 0, '测试策略', 'equity_long_only', ?, ?, ?, ?)",
+        "allowed_universe_json, excluded_universe_json, fund_recommendation_json) "
+        "VALUES ('p1', 1, 'private_strategy', 'active', 0, '测试策略', 'equity_long_only', ?, ?, ?, ?, ?)",
         (
             json.dumps(_CANDIDATE_PRIORITY_CONFIG, ensure_ascii=False),
             json.dumps(_VALUATION_POLICY_CONFIG, ensure_ascii=False),
             json.dumps(_ALLOWED_UNIVERSE_CONFIG, ensure_ascii=False),
             json.dumps(_EXCLUDED_UNIVERSE_CONFIG, ensure_ascii=False),
+            json.dumps(_FUND_RECOMMENDATION_CONFIG, ensure_ascii=False),
         ),
     )
 
@@ -1085,3 +1108,346 @@ class TestQueryService:
         detail = svc.get_priority_run(result["priority_run_id"])
         assert detail is not None
         assert detail["approved_for_production"] is False
+
+
+# ============================================================
+# Task 3: RecommendationRun 测试
+# ============================================================
+class TestCreateRecommendationRun:
+    """RecommendationRun 创建测试。"""
+
+    @pytest.fixture()
+    def rec_repo(self, gov_db: Path) -> FundRecommendationRepository:
+        return FundRecommendationRepository(gov_db)
+
+    @pytest.fixture()
+    def ids(self, gov_db: Path) -> dict:
+        """创建 CandidateSet 并返回 ids。"""
+        evs = [
+            _make_evidence(fund_code="001001", matched_holding_weight=0.10, product_category="active_fund"),
+            _make_evidence(fund_code="001002", matched_holding_weight=0.08, product_category="etf_or_index"),
+        ]
+        _insert_candidate_set(gov_db, candidates=evs, candidate_set_id="cs_rec")
+        return {
+            "thesis_id": "th1",
+            "candidate_set_id": "cs_rec",
+            "snapshot_id": "snap1",
+        }
+
+    def test_create_recommendation_run_writes_two_category_results(
+        self, governance_repo, priority_repo, rec_repo, ids
+    ):
+        """创建推荐 run 后，详情包含两个类别的结果。"""
+        svc = CognitionGovernanceService(governance_repo, priority_repo, rec_repo)
+        created = svc.create_recommendation_run(
+            thesis_id=ids["thesis_id"],
+            candidate_set_id=ids["candidate_set_id"],
+            data_snapshot_id=ids["snapshot_id"],
+            recommendation_method_version="fund_recommendation_v1",
+            actor_id="researcher_1",
+        )
+        detail = svc.get_recommendation_run(created["recommendation_run_id"])
+        assert set(detail["candidates_by_category"]) == {"active_fund", "etf_or_index"}
+        assert all(
+            x["recommendation_tier"] in {"candidate_pool", "alternative"}
+            for x in detail["recommended_universe"]
+        )
+
+    def test_portfolio_built_from_recommended_universe(
+        self, governance_repo, priority_repo, rec_repo, ids
+    ):
+        """推荐 run 的组合只能从推荐池中选基，selection_source='recommended_universe'。"""
+        svc = CognitionGovernanceService(governance_repo, priority_repo, rec_repo)
+        created = svc.create_recommendation_run(
+            thesis_id=ids["thesis_id"],
+            candidate_set_id=ids["candidate_set_id"],
+            data_snapshot_id=ids["snapshot_id"],
+            recommendation_method_version="fund_recommendation_v1",
+            actor_id="researcher_1",
+        )
+        # 返回值包含 portfolio
+        portfolio = created.get("portfolio")
+        assert portfolio is not None
+        assert portfolio["selection_source"] == "recommended_universe"
+        assert portfolio["status"] == "complete"
+        assert created["recommendation_run_id"] in portfolio["recommendation_run_ids"]
+
+        # 持久化后查询也包含 portfolio
+        detail = svc.get_recommendation_run(created["recommendation_run_id"])
+        assert detail["portfolio"] is not None
+        assert detail["portfolio"]["selection_source"] == "recommended_universe"
+
+        # 持仓只能来自推荐池
+        recommended_codes = {
+            r["fund_code"] for r in detail["recommended_universe"]
+        }
+        holding_codes = {
+            h["fund_code"] for h in portfolio.get("holdings", [])
+        }
+        assert holding_codes <= recommended_codes
+
+        # 无 source_db_path 时风险裁决字段仍存在（默认空值）
+        assert "enforced_actions" in portfolio
+        assert "metrics" in portfolio
+        assert "risk_review" in portfolio
+
+    def test_duplicate_recommendation_run_returns_existing_id(
+        self, governance_repo, priority_repo, rec_repo, ids
+    ):
+        """重复创建推荐 run 抛 DuplicateRecommendationRunError 并携带已有 ID。"""
+        svc = CognitionGovernanceService(governance_repo, priority_repo, rec_repo)
+        kwargs = {
+            "thesis_id": ids["thesis_id"],
+            "candidate_set_id": ids["candidate_set_id"],
+            "data_snapshot_id": ids["snapshot_id"],
+            "recommendation_method_version": "fund_recommendation_v1",
+            "actor_id": "researcher_1",
+        }
+        svc.create_recommendation_run(**kwargs)
+        with pytest.raises(DuplicateRecommendationRunError) as exc:
+            svc.create_recommendation_run(**kwargs)
+        assert exc.value.recommendation_run_id.startswith("frr_")
+
+    def test_reference_mismatch_rejected(self, governance_repo, priority_repo, rec_repo, gov_db):
+        """引用不一致拒绝：thesis_id 与 candidate_set 的 thesis_id 不匹配。"""
+        ev = _make_evidence(fund_code="001001")
+        _insert_candidate_set(gov_db, candidates=[ev], candidate_set_id="cs_other", thesis_id="th3")
+        svc = CognitionGovernanceService(governance_repo, priority_repo, rec_repo)
+        with pytest.raises(GovernanceError, match="不一致"):
+            svc.create_recommendation_run(
+                thesis_id="th1",
+                candidate_set_id="cs_other",
+                data_snapshot_id="snap1",
+                recommendation_method_version="fund_recommendation_v1",
+                actor_id="researcher_1",
+            )
+
+    def test_get_recommendation_run_not_found(self, governance_repo, priority_repo, rec_repo):
+        """查询不存在的推荐 run 返回 None。"""
+        svc = CognitionGovernanceService(governance_repo, priority_repo, rec_repo)
+        assert svc.get_recommendation_run("nonexistent") is None
+
+    def test_list_recommendation_runs_by_thesis(
+        self, governance_repo, priority_repo, rec_repo, ids
+    ):
+        """list_recommendation_runs 按 Thesis 查询历史。"""
+        svc = CognitionGovernanceService(governance_repo, priority_repo, rec_repo)
+        svc.create_recommendation_run(
+            thesis_id=ids["thesis_id"],
+            candidate_set_id=ids["candidate_set_id"],
+            data_snapshot_id=ids["snapshot_id"],
+            recommendation_method_version="fund_recommendation_v1",
+            actor_id="researcher_1",
+        )
+        runs = svc.list_recommendation_runs(ids["thesis_id"])
+        assert len(runs) >= 1
+        assert all(r["thesis_id"] == ids["thesis_id"] for r in runs)
+        assert all(r["recommendation_run_id"].startswith("frr_") for r in runs)
+
+
+# ============================================================
+# 推荐池风险裁决回归测试
+# ============================================================
+def _make_rec_result(
+    fund_code: str,
+    fund_name: str = "测试基金",
+    product_category: str = "active_fund",
+    recommendation_tier: str = "candidate_pool",
+    normalized_match_pct: float = 0.50,
+) -> FundRecommendationResult:
+    """构造一个 FundRecommendationResult。"""
+    ev = _make_evidence(
+        fund_code=fund_code,
+        fund_name=fund_name,
+        normalized_match_pct=normalized_match_pct,
+        matched_holding_weight=normalized_match_pct,
+        product_category=product_category,
+    )
+    return FundRecommendationResult(
+        fund_code=fund_code,
+        fund_name=fund_name,
+        product_category=product_category,
+        recommendation_tier=recommendation_tier,
+        category_rank=1,
+        theme_exposure_score=0.8,
+        thesis_alignment_score=0.7,
+        risk_return_score=0.6,
+        fund_quality_score=0.7,
+        total_score=0.72,
+        reasons=(RecommendationReason(code="high_theme_exposure", message="达标"),),
+        exclusion_reasons=(),
+        evidence=ev,
+    )
+
+
+def _create_source_db(
+    db_path: Path,
+    *,
+    holdings: list[dict] | None = None,
+    industry_map: list[dict] | None = None,
+    nav_history: list[dict] | None = None,
+) -> None:
+    """创建一个带持仓和净值数据的 source DB。"""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "CREATE TABLE stock_holdings ("
+            "  fund_code TEXT, report_period TEXT, "
+            "  stock_code TEXT, stock_name TEXT, net_value_ratio REAL)"
+        )
+        conn.execute(
+            "CREATE TABLE stock_industry_map ("
+            "  stock_code TEXT, sector_group TEXT, industry_name TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE nav_history ("
+            "  fund_code TEXT, nav_date TEXT, daily_growth_rate REAL)"
+        )
+        for h in holdings or []:
+            conn.execute(
+                "INSERT INTO stock_holdings VALUES (?, ?, ?, ?, ?)",
+                (h["fund_code"], h.get("report_period", "2025-12-31"),
+                 h["stock_code"], h.get("stock_name", ""), h["weight"]),
+            )
+        for m in industry_map or []:
+            conn.execute(
+                "INSERT INTO stock_industry_map VALUES (?, ?, ?)",
+                (m["stock_code"], m.get("sector_group", "other"), m["industry_name"]),
+            )
+        for n in nav_history or []:
+            conn.execute(
+                "INSERT INTO nav_history VALUES (?, ?, ?)",
+                (n["fund_code"], n["nav_date"], n["daily_growth_rate"]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class TestRecommendationRiskReview:
+    """推荐池风险二次裁决回归测试。"""
+
+    def test_industry_concentration_warn_reduces_violating_funds(self, tmp_path: Path):
+        """行业集中 warn -> 对行业暴露基金降权 0.75，并验证重算指标。
+
+        用 3 只基金（无持仓重叠）全部重仓消费行业，
+        在 conservative 风险偏好下（max_industry=30%）触发行业集中度 warn。
+        注意：降权后重算的 risk_review 可能不再有该违规（因暴露已降低），
+        但 enforced_actions 记录了实际执行的动作。
+        """
+        source_db = tmp_path / "source.sqlite"
+        # 3 只基金，各持不同股票（无重叠），但全部属于"消费"行业
+        _create_source_db(
+            source_db,
+            holdings=[
+                {"fund_code": "F001", "stock_code": "S001", "weight": 1.0, "stock_name": "消费A"},
+                {"fund_code": "F002", "stock_code": "S002", "weight": 1.0, "stock_name": "消费B"},
+                {"fund_code": "F003", "stock_code": "S003", "weight": 1.0, "stock_name": "消费C"},
+            ],
+            industry_map=[
+                {"stock_code": "S001", "industry_name": "消费"},
+                {"stock_code": "S002", "industry_name": "消费"},
+                {"stock_code": "S003", "industry_name": "消费"},
+            ],
+            nav_history=[
+                {"fund_code": fc, "nav_date": f"2025-01-{d:02d}", "daily_growth_rate": 0.1}
+                for fc in ("F001", "F002", "F003")
+                for d in range(1, 31)
+            ],
+        )
+
+        results = [
+            _make_rec_result("F001", "基金A", normalized_match_pct=0.60),
+            _make_rec_result("F002", "基金B", normalized_match_pct=0.50),
+            _make_rec_result("F003", "基金C", normalized_match_pct=0.55),
+        ]
+        portfolio = CognitionGovernanceService._build_portfolio_from_recommendations(
+            results, "frr_test", source_db_path=str(source_db),
+            risk_tolerance="conservative",  # max_industry=30, max_stock=8
+            total_cognition_weight=100.0,
+        )
+
+        # enforced_actions 应记录了降权动作（warn -> violating, factor=0.75）
+        actions = portfolio.get("enforced_actions", [])
+        assert actions, "应有强制降权动作"
+        violating_actions = [a for a in actions if a.get("scope") == "violating"]
+        assert violating_actions, "warn 应触发 violating 降权"
+        assert violating_actions[0]["factor"] == 0.75, "warn 降权比例应为 0.75"
+
+        # 降权后权重应为原始的 75%（原始 12 * 0.75 = 9）
+        selected = portfolio.get("selected_funds", [])
+        assert selected, "应有选中的基金"
+        for f in selected:
+            assert f["weight"] <= 9.0, f"基金 {f['fund_code']} 权重应已降权，实际 {f['weight']}"
+
+        # metrics 应已重算（非空）
+        assert portfolio.get("metrics"), "调权后应重算 metrics"
+        # 行业暴露应低于原始值（因降权后重算）
+        ind_exp = portfolio["metrics"].get("industry_exposure", [])
+        assert ind_exp, "metrics 应包含行业暴露"
+        # 原始 36%，降权 75% 后约 27%
+        assert ind_exp[0]["weight"] < 36.0, "降权后行业暴露应低于原始值"
+
+    def test_extreme_drawdown_fail_reduces_all_funds(self, tmp_path: Path):
+        """极端回撤 fail -> 全部基金降权 0.50，并验证持久化组合中的权重。
+
+        用 3 只基金构造极端下跌（daily_growth_rate=-5.0%），
+        组合最大回撤 < -30% 触发 fail。
+        注意：降权后重算的 risk_review 可能不再 fail（因仓位已降低），
+        但 enforced_actions 记录了实际执行的 fail 动作。
+        """
+        source_db = tmp_path / "source.sqlite"
+        # 构造极端下跌的 nav_history -> 最大回撤 < -30% 触发 fail
+        nav = []
+        for d in range(1, 61):
+            # 前 30 天小涨，后 30 天大跌（daily_growth_rate 为百分比形式）
+            ret = 0.1 if d <= 30 else -5.0
+            for fc in ("F001", "F002", "F003"):
+                nav.append({"fund_code": fc, "nav_date": f"2025-01-{d:02d}", "daily_growth_rate": ret})
+
+        _create_source_db(
+            source_db,
+            holdings=[
+                {"fund_code": "F001", "stock_code": "S001", "weight": 1.0, "stock_name": "股票A"},
+                {"fund_code": "F002", "stock_code": "S002", "weight": 1.0, "stock_name": "股票B"},
+                {"fund_code": "F003", "stock_code": "S003", "weight": 1.0, "stock_name": "股票C"},
+            ],
+            industry_map=[
+                {"stock_code": "S001", "industry_name": "科技"},
+                {"stock_code": "S002", "industry_name": "医药"},
+                {"stock_code": "S003", "industry_name": "金融"},
+            ],
+            nav_history=nav,
+        )
+
+        results = [
+            _make_rec_result("F001", "基金A", normalized_match_pct=0.60),
+            _make_rec_result("F002", "基金B", normalized_match_pct=0.50),
+            _make_rec_result("F003", "基金C", normalized_match_pct=0.55),
+        ]
+        portfolio = CognitionGovernanceService._build_portfolio_from_recommendations(
+            results, "frr_test", source_db_path=str(source_db), risk_tolerance="moderate",
+            total_cognition_weight=100.0,
+        )
+
+        # enforced_actions 应记录了 fail 级别降权（scope=all, factor=0.5）
+        actions = portfolio.get("enforced_actions", [])
+        assert actions, "应有强制降权动作"
+        all_scope = [a for a in actions if a.get("scope") == "all"]
+        assert all_scope, "fail 应触发全量降权"
+        assert all_scope[0]["factor"] == 0.5, "fail 降权比例应为 0.50"
+
+        # 降权后权重应为原始的 50%（原始 12 * 0.5 = 6）
+        selected = portfolio.get("selected_funds", [])
+        assert selected
+        for f in selected:
+            assert f["weight"] <= 6.0, f"基金 {f['fund_code']} 权重应已降权，实际 {f['weight']}"
+
+        # 降权后总仓位应减少（原约 36，降权 50% 后约 18）
+        total_invested = portfolio.get("total_invested", 0)
+        assert total_invested < 25, f"降权后总仓位应明显降低，实际 {total_invested}"
+
+        # metrics 应已重算（回撤应比原始值更小）
+        assert portfolio.get("metrics"), "调权后应重算 metrics"
+        m = portfolio["metrics"]
+        assert m.get("portfolio_max_drawdown") is not None, "metrics 应包含最大回撤"

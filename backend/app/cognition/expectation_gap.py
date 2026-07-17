@@ -113,14 +113,22 @@ def calculate_link_expectation_gap(
             gap = "positive"
             reason = f"PEG {peg:.1f}（增速支撑估值），估值分位 {val_pct * 100:.0f}%（中等）"
             score = 70
+        elif peg < 1.0 and val_pct >= 0.9:
+            gap = "neutral"
+            reason = f"PEG {peg:.1f}（增速支撑估值），估值分位 {val_pct * 100:.0f}%（历史高位但增速匹配）"
+            score = 50
         elif peg < 1.5 and val_pct < 0.8:
             gap = "neutral"
             reason = f"PEG {peg:.1f}（估值与增速匹配），估值分位 {val_pct * 100:.0f}%"
             score = 55
-        elif peg > 2.0 or val_pct > 0.9:
+        elif peg > 2.0 and val_pct > 0.9:
             gap = "negative"
             reason = f"PEG {peg:.1f}（估值远超增速），估值分位 {val_pct * 100:.0f}%（历史高位）"
             score = 20
+        elif peg > 2.0:
+            gap = "negative"
+            reason = f"PEG {peg:.1f}（估值远超增速），估值分位 {val_pct * 100:.0f}%"
+            score = 25
         else:
             gap = "neutral"
             reason = f"PEG {peg:.1f}，估值分位 {val_pct * 100:.0f}%"

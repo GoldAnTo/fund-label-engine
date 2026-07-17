@@ -81,6 +81,11 @@ class FundCandidateEvidence:
     policy_conflicts: tuple[str, ...]
     data_snapshot_id: str
     asset_type: str = "fund"
+    product_category: str | None = None
+    nav_metrics: dict[str, Any] | None = None
+    fund_size: float | None = None
+    management_fee: float | None = None
+    custody_fee: float | None = None
 
 
 @dataclass(frozen=True)

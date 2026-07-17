@@ -689,11 +689,76 @@ GET  /v1/cognition/{id}/validate  # 获取验证结果
 GET  /v1/cognition/{id}/matches   # 获取匹配基金
 GET  /v1/cognition/{id}/portfolio # 获取配置方案
 GET  /v1/themes                    # 获取可用主题列表
+POST /v1/governance/theses/{thesis_id}/fund-recommendation-runs   # 创建推荐评价
+GET  /v1/governance/fund-recommendation-runs/{run_id}             # 查询推荐结果
+GET  /v1/governance/theses/{thesis_id}/fund-recommendation-runs   # 查询历史推荐
 ```
 
 ---
 
-## 九、核心设计原则
+## 九、双轨基金推荐系统
+
+### 9.1 四阶段定位
+
+认知引擎从"投资者认知"到"可执行组合"经过四个阶段，每个阶段有独立的运行记录和职责边界：
+
+| 阶段 | 对象 | 职责 | 回答的问题 |
+|---|---|---|---|
+| CandidateSet | 候选集合 | 扫描全量基金，冻结证据快照 | "跟这个主题相关的基金有哪些？" |
+| CandidatePriorityRun | 优先级评价 | 按数据完备度排序 | "应该先研究哪些基金？" |
+| **RecommendationRun** | **推荐评价** | **主题优先、主动/ETF 分开排序** | **"推荐买哪些基金？"** |
+| PortfolioProposal | 组合提案 | 只消费推荐池，执行风险裁决 | "组合权重怎么分配？" |
+
+CandidateSet 是候选池，PriorityRun 只回答研究顺序（不是买入建议），RecommendationRun 才是选基推荐，PortfolioProposal 只能消费推荐和备选结果。
+
+### 9.2 双轨排序机制
+
+RecommendationRun 对主动基金和 ETF/指数基金分别排序，两条赛道独立产出榜单：
+
+```
+CandidateSet（全量候选，含冻结证据）
+    │
+    ├─ 主动基金赛道 ──→ 类内排序 ──→ recommended / alternative / watch
+    │
+    └─ ETF·指数赛道 ──→ 类内排序 ──→ recommended / alternative / watch
+```
+
+产品分类依据 `fund_profiles.fund_type` 元数据（不靠基金名称猜测）。四维评分权重：
+
+| 维度 | 权重 | 含义 |
+|---|---|---|
+| theme_exposure | 0.55 | 主题暴露纯度（持仓匹配度） |
+| thesis_alignment | 0.15 | 投资假设匹配度 |
+| risk_return | 0.15 | 风险收益特征 |
+| fund_quality | 0.15 | 基金质量（主动看经理/因子/趋势，ETF 看纯度/因子/经理/估值） |
+
+档位定义：`recommended`（推荐）、`alternative`（备选）、`watch`（观察）、`excluded`（排除）、`data_insufficient`（数据不足）。每条赛道按 `active_fund_limit` / `etf_or_index_limit` 截取推荐数量。
+
+### 9.3 组合只消费推荐池
+
+PortfolioProposal 的输入域被严格限定为推荐池（`recommended` + `alternative`），不再回退全量 CandidateSet：
+
+```
+RecommendationRun
+    │
+    └─ recommended_universe（推荐 + 备选）
+            │
+            └─ PortfolioProposal
+                    ├─ 去重 / 重叠度裁决
+                    ├─ 行业集中度裁决
+                    ├─ 波动率 / 回撤裁决
+                    └─ 调权后重算指标
+```
+
+当推荐池为空时，组合状态为 `insufficient_recommendations`（不生成假组合）。组合输出固定包含 `selection_source='recommended_universe'` 和 `recommendation_run_ids`，确保可审计。
+
+### 9.4 不可变记录与幂等
+
+RecommendationRun 和 Result 表设有 `UPDATE`/`DELETE` 触发器（报错含 `immutable`），保证推荐结果一经写入不可篡改。幂等键为 `(candidate_set_id, strategy_policy_id, strategy_policy_version, data_snapshot_id, recommendation_method_version)`，重复请求返回已存在的 run_id（409 Conflict）。
+
+---
+
+## 十、核心设计原则
 
 1. **认知优先，数据服务于认知**：不是"给你数据你自己看"，而是"给我认知我帮你找匹配"。
 2. **穿透壳子，看到底层资产**：基金是壳子，核心是它装了什么股票。
@@ -703,7 +768,7 @@ GET  /v1/themes                    # 获取可用主题列表
 
 ---
 
-## 十、总结
+## 十一、总结
 
 这个方案的核心转变是：
 

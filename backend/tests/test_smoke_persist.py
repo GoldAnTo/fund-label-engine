@@ -185,3 +185,67 @@ class TestSmokeApiReverseLookup:
             assert data["strategy_policy_version"] == 1
             assert data["data_snapshot_id"] == "snap_smoke"
             assert len(data["candidates"]) >= 1
+
+
+class TestSmokeRecommendationChain:
+    """推荐运行全链路验证：认知 API -> 推荐运行 -> 组合来源。"""
+
+    def test_recommendation_tables_exist_after_smoke(self, gov_db: Path, source_db_cleanup):
+        """smoke 运行后 fund_recommendation_runs / results 表应存在。"""
+        _run_smoke(gov_db, "test_rec_table")
+        conn = sqlite3.connect(str(gov_db))
+        try:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )}
+            assert "fund_recommendation_runs" in tables
+            assert "fund_recommendation_results" in tables
+        finally:
+            conn.close()
+
+    def test_cognition_api_creates_recommendation_run(self, gov_db: Path, source_db_cleanup):
+        """认知 API 应创建推荐运行，并在结果中写入 recommendation_run_id。"""
+        from fastapi.testclient import TestClient
+        from app.main import create_app
+
+        _run_smoke(gov_db, "test_rec_api")
+
+        source_db = Path("/tmp/fle-p0/source.sqlite")
+        app = create_app(source_db_path=str(source_db), output_db_path=str(gov_db))
+        if hasattr(app.state, "governance_service"):
+            del app.state.governance_service
+        client = TestClient(app)
+
+        resp = client.post("/v1/cognition", json={
+            "theme_key": "consumer",
+            "belief_link": "消费升级",
+            "conviction": "medium",
+            "time_horizon": "long",
+            "risk_tolerance": "moderate",
+        })
+        assert resp.status_code == 200
+        result = resp.json()
+
+        # 推荐运行 ID 应以 frr_ 开头
+        rec_run_id = result.get("step0_thesis", {}).get("recommendation_run_id")
+        assert rec_run_id is not None, "recommendation_run_id 缺失（推荐运行创建可能失败）"
+        assert rec_run_id.startswith("frr_")
+
+        # 组合应由推荐池重建（selection_source='recommended_universe'）
+        portfolio = result.get("step5_portfolio", {})
+        assert portfolio.get("selection_source") == "recommended_universe"
+        assert rec_run_id in (portfolio.get("recommendation_run_ids") or [])
+
+        # 风险二次裁决应已执行（metrics/risk_review/enforced_actions 非空）
+        assert portfolio.get("metrics"), "组合 metrics 不应为空"
+        assert portfolio.get("risk_review"), "组合 risk_review 不应为空"
+        assert "enforced_actions" in portfolio, "组合应包含 enforced_actions 字段"
+        # risk_review 应包含裁决结论
+        rr = portfolio["risk_review"]
+        assert rr.get("verdict") in ("pass", "warn", "fail"), "risk_review 应有 verdict"
+
+        # 查询推荐运行详情，portfolio 也应包含风险裁决结果
+        resp2 = client.get(f"/v1/governance/fund-recommendation-runs/{rec_run_id}")
+        assert resp2.status_code == 200
+        detail = resp2.json()
+        assert detail.get("portfolio", {}).get("risk_review"), "推荐运行详情的 portfolio 应包含 risk_review"

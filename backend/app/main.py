@@ -74,14 +74,31 @@ def _persist_thesis(app, result: dict, request, direction: str | None = None) ->
         repo = GovernanceRepository(gov_db)
         service = GovernanceService(repo)
 
-        # 确保默认策略存在
+        # 确保默认策略存在（含 fund_recommendation 默认配置）
         import sqlite3
+        _default_fund_rec_json = json.dumps({
+            "method_version": "fund_recommendation_v1",
+            "source_method_version": "fund_candidate_evidence_v0",
+            "minimum_target_holding_weight": 0.10,
+            "maximum_holding_age_days": 180,
+            "active_fund_limit": 3,
+            "etf_or_index_limit": 3,
+            "alternative_limit": 2,
+            "weights": {
+                "theme_exposure": 0.55,
+                "thesis_alignment": 0.15,
+                "risk_return": 0.15,
+                "fund_quality": 0.15,
+            },
+        }, ensure_ascii=False)
         conn = sqlite3.connect(gov_db)
         conn.execute(
             "INSERT OR IGNORE INTO strategy_policies "
-            "(policy_id, version, business_mode, policy_status, strategy_name, strategy_type) "
-            "VALUES (?, ?, 'private_strategy', 'active', '认知驱动选基默认策略', 'equity_long_only')",
-            (_DEFAULT_POLICY_ID, _DEFAULT_POLICY_VERSION),
+            "(policy_id, version, business_mode, policy_status, strategy_name, strategy_type, "
+            " candidate_priority_json, fund_recommendation_json) "
+            "VALUES (?, ?, 'private_strategy', 'active', '认知驱动选基默认策略', 'equity_long_only', "
+            "  NULL, ?)",
+            (_DEFAULT_POLICY_ID, _DEFAULT_POLICY_VERSION, _default_fund_rec_json),
         )
         # 确保数据快照存在（用 source_db mtime 生成唯一 ID，支持同日多次更新）
         source_db = getattr(app.state, "source_db_path", None) or gov_db
@@ -233,8 +250,90 @@ def _create_candidate_set(app, result: dict) -> None:
 
             logger.info("CandidateSet 创建成功: candidate_set_id=%s", candidate_set_id)
 
+            # 创建 FundRecommendationRun
+            _create_recommendation_run(app, result)
+
     except Exception as e:
         logger.warning("CandidateSet 创建失败（不影响认知结果）: %s", e)
+
+
+def _create_recommendation_run(app, result: dict) -> None:
+    """在 CandidateSet 创建后创建 FundRecommendationRun。
+
+    失败时不阻断主流程，仅标记 recommendation_persistence_status='degraded'。
+    成功时在 result 中写入 recommendation_run_id。
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    thesis = result.get("step0_thesis", {})
+    candidate_set_id = thesis.get("candidate_set_id")
+    thesis_id = thesis.get("thesis_id")
+    snapshot_id = thesis.get("data_snapshot_id")
+    if not candidate_set_id or not thesis_id or not snapshot_id:
+        return
+
+    try:
+        from app.persistence.fund_recommendation import FundRecommendationRepository
+        from app.persistence.governance import GovernanceRepository
+        from app.persistence.candidate_priority import CandidatePriorityRepository
+        from app.services.cognition_governance_service import CognitionGovernanceService
+
+        gov_db = (
+            getattr(app.state, "output_db_path", None)
+            or getattr(app.state, "db_path", None)
+            or getattr(app.state, "source_db_path", None)
+        )
+        if not gov_db:
+            return
+
+        source_db_path = getattr(app.state, "source_db_path", None)
+        risk_tolerance = result.get("risk_tolerance", "moderate")
+
+        gov_repo = GovernanceRepository(gov_db)
+        priority_repo = CandidatePriorityRepository(gov_db)
+        rec_repo = FundRecommendationRepository(gov_db)
+        svc = CognitionGovernanceService(
+            governance_repo=gov_repo,
+            priority_repo=priority_repo,
+            recommendation_repo=rec_repo,
+        )
+
+        rec_result = svc.create_recommendation_run(
+            thesis_id=thesis_id,
+            candidate_set_id=candidate_set_id,
+            data_snapshot_id=snapshot_id,
+            recommendation_method_version="fund_recommendation_v1",
+            actor_id="cognition_user",
+            source_db_path=source_db_path,
+            risk_tolerance=risk_tolerance,
+        )
+
+        recommendation_run_id = rec_result.get("recommendation_run_id")
+        if recommendation_run_id:
+            result["step0_thesis"]["recommendation_run_id"] = recommendation_run_id
+
+            # 同步更新 thesis_tracker
+            tracker_data = result.get("thesis_tracker", {})
+            if tracker_data:
+                tracker_data["recommendation_run_id"] = recommendation_run_id
+
+            # 用推荐池重建的组合替换原始组合，保留原始组合的元数据
+            rebuilt_portfolio = rec_result.get("portfolio")
+            if rebuilt_portfolio:
+                original = result.get("step5_portfolio", {})
+                for k in ("thesis_id", "candidate_set_id", "rationale", "gated_out"):
+                    if k in original:
+                        rebuilt_portfolio[k] = original[k]
+                result["step5_portfolio"] = rebuilt_portfolio
+
+            logger.info("RecommendationRun 创建成功: recommendation_run_id=%s", recommendation_run_id)
+
+    except Exception as e:
+        logger.warning("RecommendationRun 创建失败（不影响认知结果）: %s", e)
+        result["step0_thesis"]["recommendation_persistence_status"] = "degraded"
+        result["step0_thesis"]["recommendation_persistence_error"] = str(e)
 
 
 class CognitionRequest(BaseModel):
@@ -1962,6 +2061,7 @@ def create_app(
         )
 
         # Thesis 持久化：将运行时 step0_thesis 落库为 investment_theses 记录
+        result["risk_tolerance"] = request.risk_tolerance
         _persist_thesis(app, result, request)
         # CandidateSet 创建：绑定 thesis_id + 候选基金
         _create_candidate_set(app, result)

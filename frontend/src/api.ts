@@ -267,6 +267,125 @@ export async function fetchPriorityRunsByThesis(thesisId: string, signal?: Abort
   return res.json();
 }
 
+// ===================================================================
+// 基金推荐（双轨：主动基金 / ETF·指数基金）
+// ===================================================================
+
+export interface RecommendationResult {
+  recommendation_result_id: string;
+  recommendation_run_id: string;
+  candidate_id: string;
+  fund_code: string;
+  fund_name: string | null;
+  product_category: string;
+  recommendation_tier: string;
+  category_rank: number | null;
+  theme_exposure_score: number | null;
+  thesis_alignment_score: number | null;
+  risk_return_score: number | null;
+  fund_quality_score: number | null;
+  total_score: number | null;
+  recommendation_reasons: { code: string; message: string }[];
+  exclusion_reasons: { code: string; message: string }[];
+  frozen_evidence: Record<string, unknown>;
+}
+
+export interface RecommendationPortfolio {
+  selection_source?: string;
+  recommendation_run_ids?: string[];
+  status?: string;
+  holdings?: Array<{ fund_code: string; fund_name?: string; weight: number }>;
+  enforced_actions?: Array<{ type: string; fund_code: string; detail: string }>;
+  metrics?: Record<string, number>;
+  risk_review?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface RecommendationRunDetail {
+  recommendation_run_id: string;
+  thesis_id: string;
+  candidate_set_id: string;
+  strategy_policy_id: string;
+  strategy_policy_version: number;
+  data_snapshot_id: string | null;
+  recommendation_method_version: string;
+  result_type: string;
+  result_status: string;
+  evaluated_candidate_count: number;
+  recommended_count: number;
+  tier_counts: Record<string, number>;
+  created_by: string;
+  created_at: string;
+  candidates_by_category: Record<string, RecommendationResult[]>;
+  recommended_universe: RecommendationResult[];
+  thesis: {
+    thesis_id: string;
+    title: string | null;
+    belief_statement: string | null;
+    as_of_date: string | null;
+    status: string | null;
+  } | null;
+  candidate_set_header: {
+    candidate_set_id: string;
+    scanned_fund_count: number;
+    mapped_candidate_count: number;
+  } | null;
+  portfolio?: RecommendationPortfolio | null;
+}
+
+export interface RecommendationRunSummary {
+  recommendation_run_id: string;
+  thesis_id: string;
+  candidate_set_id: string;
+  strategy_policy_id: string;
+  strategy_policy_version: number;
+  data_snapshot_id: string | null;
+  recommendation_method_version: string;
+  result_type: string;
+  result_status: string;
+  evaluated_candidate_count: number;
+  recommended_count: number;
+  tier_counts: Record<string, number>;
+  created_by: string;
+  created_at: string;
+}
+
+export async function fetchRecommendationRun(
+  recommendationRunId: string,
+  signal?: AbortSignal,
+): Promise<RecommendationRunDetail> {
+  const res = await fetch(`${BASE}/v1/governance/fund-recommendation-runs/${recommendationRunId}`, { signal });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchRecommendationRunsByThesis(
+  thesisId: string,
+  signal?: AbortSignal,
+): Promise<RecommendationRunSummary[]> {
+  const res = await fetch(`${BASE}/v1/governance/theses/${thesisId}/fund-recommendation-runs`, { signal });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function createRecommendationRun(
+  thesisId: string,
+  body: {
+    candidate_set_id: string;
+    data_snapshot_id: string;
+    recommendation_method_version: string;
+    actor_id: string;
+  },
+): Promise<{
+  recommendation_run_id: string;
+  result_type: string;
+  evaluated_candidate_count: number;
+  recommended_count: number;
+  tier_counts: Record<string, number>;
+}> {
+  return postJSON(`/v1/governance/theses/${thesisId}/fund-recommendation-runs`, body);
+}
+
 async function postJSON(url: string, body: unknown) {
   const res = await fetch(`${BASE}${url}`, {
     method: "POST",
@@ -1423,7 +1542,7 @@ export interface Evidence {
 export interface ReasoningChainNode {
   step: string;
   description: string;
-  evidence_ref: string;
+  evidence_ref?: string;
 }
 
 export interface CognitionValidation {
@@ -1433,7 +1552,7 @@ export interface CognitionValidation {
   verdict: string;
   verdict_detail: string;
   evidence_counts: { supporting: number; opposing: number };
-  reasoning_chain: ReasoningChainNode[];
+  reasoning_chain?: ReasoningChainNode[];
   debate?: DebateRound[];
   cognition_feedback?: CognitionFeedback;
 }
@@ -1533,10 +1652,10 @@ export interface DebateRound {
 }
 
 export interface CognitionFeedback {
-  original_belief: string;
-  validation_verdict: string;
-  correction_suggestions: string[];
-  adjusted_belief: string;
+  original_belief?: string;
+  validation_verdict?: string;
+  correction_suggestions?: string[];
+  adjusted_belief?: string;
 }
 
 export interface GateResult {
@@ -1724,6 +1843,20 @@ export interface CognitionResponse {
   available_links: string[];
   belief_link: string | null;
   conviction: string;
+  step0_thesis?: {
+    belief?: string;
+    reasoning_chain?: string[];
+    falsification_conditions?: string[];
+    user_stock_keywords?: string[];
+    thesis_id?: string;
+    status?: string;
+    as_of_date?: string;
+    source?: string;
+    persisted?: boolean;
+    candidate_set_id?: string;
+    data_snapshot_id?: string;
+    user_input_id?: string;
+  };
   step1_judgment: {
     direction: string;
     belief: string;

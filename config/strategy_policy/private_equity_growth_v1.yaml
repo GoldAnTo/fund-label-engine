@@ -84,27 +84,57 @@ candidate_priority:
   excluded_asset_codes: []
   approved_for_production: false
 
+fund_recommendation:
+  method_version: fund_recommendation_v1
+  source_method_version: fund_candidate_evidence_v0
+  minimum_target_holding_weight: 0.10
+  maximum_holding_age_days: 180
+  active_fund_limit: 3
+  etf_or_index_limit: 3
+  alternative_limit: 2
+  weights:
+    theme_exposure: 0.55
+    thesis_alignment: 0.15
+    risk_return: 0.15
+    fund_quality: 0.15
+
 monitoring_policy:
   holding_change:
     enabled: true
-    threshold: null
+    threshold: 0.05          # 单持仓漂移 > 5pp 触发 warning
+    owner: "基金经理"
+    review_sla_hours: 48
   industry_drift:
     enabled: true
-    threshold: null
+    threshold: 0.10          # 行业偏离基准 > 10pp 触发 warning
+    owner: "研究员"
+    review_sla_hours: 72
   style_drift:
     enabled: true
-    threshold: null
+    threshold: 0.15          # 风格偏离政策 > 15pp 触发 warning
+    owner: "风控"
+    review_sla_hours: 48
   manager_change:
     enabled: true
+    trigger: "any"           # 任何基金经理变更触发 critical
+    owner: "投决会"
+    review_sla_hours: 24
   data_stale:
     enabled: true
-    days_threshold: null
+    days_threshold: 60       # 数据 60 天未更新触发 warning
+    owner: "数据团队"
+    review_sla_hours: 24
   thesis_invalidation:
     enabled: true
-    review_days: null
+    review_days: 180         # 假设 180 天未复核触发 watching
+    owner: "投研负责人"
+    review_sla_hours: 168
   risk_breach:
     enabled: true
-    threshold: null
+    drawdown: 0.15           # 回撤 > 15% 触发 critical
+    volatility: 0.35         # 波动率 > 35% 触发 warning
+    owner: "风控"
+    review_sla_hours: 4
 
 effective_from: 2026-07-10
 effective_to: null

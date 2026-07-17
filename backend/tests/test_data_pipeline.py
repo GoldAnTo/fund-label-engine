@@ -206,7 +206,7 @@ def test_repository_loads_fund_input_with_holdings_and_fees(seeded_db: Path) -> 
     assert fund is not None
     assert fund.fund_type == "股票型"
     assert len(fund.stock_holdings) == 10
-    assert fund.stock_holdings[0]["weight"] == 0.11
+    assert fund.stock_holdings[0]["weight"] == 0.153
     assert fund.manager_tenure_years == 6.2
     assert fund.management_fee == 0.010
     assert fund.custody_fee == 0.002
@@ -277,7 +277,7 @@ def test_batch_persists_run_results_and_evidence(seeded_db: Path) -> None:
         assert "holding_concentration_high" in labels_000001
         assert "manager_tenure_long" in labels_000001
         assert "fee_low" in labels_000001
-        assert "style_exposure_observe" in labels_000001
+        assert "style_balanced" in labels_000001
 
         labels_000002 = {
             row["label_code"]

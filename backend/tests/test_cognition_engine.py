@@ -1960,3 +1960,37 @@ def test_build_fund_candidate_evidence_has_valuation_gated(tmp_path: Path) -> No
         assert isinstance(evidence.valuation_gated_candidates, tuple)
     finally:
         engine.close()
+
+
+# ============================================================
+# 推荐池组合构建测试
+# ============================================================
+def test_portfolio_never_allocates_outside_recommended_universe() -> None:
+    """组合只能从推荐池中选基。"""
+    from app.cognition.portfolio_builder import build_portfolio
+
+    rec_a = {"fund_code": "A", "match_pct": 80, "valuation": {}, "trend": {}, "holdings": []}
+    rec_b = {"fund_code": "B", "match_pct": 60, "valuation": {}, "trend": {}, "holdings": []}
+    proposal = build_portfolio(
+        recommended_candidates=[rec_a, rec_b],
+        defense_fund=None,
+        recommendation_run_ids=["frr_1"],
+    )
+    assert {p["fund_code"] for p in proposal["holdings"]} <= {"A", "B"}
+    assert proposal["selection_source"] == "recommended_universe"
+    assert proposal["status"] == "complete"
+    assert proposal["recommendation_run_ids"] == ["frr_1"]
+
+
+def test_empty_recommendation_universe_is_not_fake_portfolio() -> None:
+    """推荐池为空时返回 insufficient_recommendations，不生成假组合。"""
+    from app.cognition.portfolio_builder import build_portfolio
+
+    proposal = build_portfolio(
+        recommended_candidates=[],
+        defense_fund=None,
+        recommendation_run_ids=["frr_1"],
+    )
+    assert proposal["status"] == "insufficient_recommendations"
+    assert proposal["holdings"] == []
+    assert proposal["selection_source"] == "recommended_universe"

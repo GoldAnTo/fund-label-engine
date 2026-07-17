@@ -21,7 +21,14 @@ from pathlib import Path
 from typing import Any
 
 from app.cognition.engine import CognitionEngine, FundCandidateEvidenceBatch
+from app.cognition.portfolio_builder import (
+    build_portfolio,
+    calculate_overlap,
+    calculate_portfolio_metrics,
+    portfolio_risk_review,
+)
 from app.persistence.candidate_priority import CandidatePriorityRepository
+from app.persistence.fund_recommendation import FundRecommendationRepository
 from app.persistence.governance import GovernanceRepository
 from app.services.candidate_priority import (
     PRIORITY_TIERS,
@@ -29,6 +36,12 @@ from app.services.candidate_priority import (
     CandidatePriorityResult,
     FundCandidateEvidence,
     parse_candidate_priority_policy,
+)
+from app.services.fund_recommendation import (
+    FundRecommendationEngine,
+    FundRecommendationResult,
+    RECOMMENDATION_TIERS,
+    parse_fund_recommendation_policy,
 )
 
 
@@ -79,6 +92,14 @@ class DuplicatePriorityRunError(GovernanceError):
         super().__init__(f"PriorityRun already exists: {priority_run_id}")
 
 
+class DuplicateRecommendationRunError(GovernanceError):
+    """重复推荐运行(幂等键冲突)。"""
+
+    def __init__(self, recommendation_run_id: str) -> None:
+        self.recommendation_run_id = recommendation_run_id
+        super().__init__(f"RecommendationRun already exists: {recommendation_run_id}")
+
+
 # ============================================================
 # 辅助函数
 # ============================================================
@@ -107,6 +128,11 @@ def _evidence_to_dict(ev: FundCandidateEvidence) -> dict[str, Any]:
         "policy_conflicts": list(ev.policy_conflicts),
         "data_snapshot_id": ev.data_snapshot_id,
         "asset_type": ev.asset_type,
+        "product_category": ev.product_category,
+        "nav_metrics": ev.nav_metrics,
+        "fund_size": ev.fund_size,
+        "management_fee": ev.management_fee,
+        "custody_fee": ev.custody_fee,
     }
 
 
@@ -128,6 +154,7 @@ def _dict_to_evidence(d: dict[str, Any]) -> FundCandidateEvidence:
         policy_conflicts=tuple(d.get("policy_conflicts", ())),
         data_snapshot_id=d["data_snapshot_id"],
         asset_type=d.get("asset_type", "fund"),
+        product_category=d.get("product_category"),
     )
 
 
@@ -152,12 +179,17 @@ class CognitionGovernanceService:
         self,
         governance_repo: GovernanceRepository,
         priority_repo: CandidatePriorityRepository,
+        recommendation_repo: FundRecommendationRepository | None = None,
         engine_factory: Callable[[str, str | None], CognitionEngine] | None = None,
     ) -> None:
         self._governance_repo = governance_repo
         self._priority_repo = priority_repo
+        self._recommendation_repo = recommendation_repo or FundRecommendationRepository(
+            governance_repo._db_path
+        )
         self._engine_factory = engine_factory or _default_engine_factory
         self._priority_engine = CandidatePriorityEngine()
+        self._recommendation_engine = FundRecommendationEngine()
 
     # ----------------------------------------------------------
     # Task 7: CandidateSet 创建
@@ -732,6 +764,527 @@ class CognitionGovernanceService:
                 "result_status": run.get("result_status"),
                 "evaluated_candidate_count": run["evaluated_candidate_count"],
                 "eligible_candidate_count": run["eligible_candidate_count"],
+                "tier_counts": run.get("tier_counts") or {},
+                "created_by": run["created_by"],
+                "created_at": run["created_at"],
+            }
+            for run in runs
+        ]
+
+    # ----------------------------------------------------------
+    # RecommendationRun 编排
+    # ----------------------------------------------------------
+    def create_recommendation_run(
+        self,
+        *,
+        thesis_id: str,
+        candidate_set_id: str,
+        data_snapshot_id: str,
+        recommendation_method_version: str,
+        actor_id: str,
+        source_ip: str | None = None,
+        source_db_path: str | None = None,
+        risk_tolerance: str = "moderate",
+    ) -> dict[str, Any]:
+        """创建推荐评价运行。
+
+        流程:
+        1. 校验 thesis / candidate_set / snapshot / policy 对齐
+        2. 读取候选证据（复用 CandidateSet 的 candidate_evidence_json，不重新扫描）
+        3. 解析推荐策略配置
+        4. 在内存完成所有评价和类内排序
+        5. 开启写事务，原子写入 run + results + audit
+        """
+        # 1. 读 Thesis
+        thesis = self._governance_repo.get_thesis(thesis_id)
+        if thesis is None:
+            raise ThesisNotFoundError(f"投资假设不存在: {thesis_id}")
+
+        # 2. 读 CandidateSet header
+        header = self._governance_repo.get_candidate_set_header(candidate_set_id)
+        if header is None:
+            raise CandidateSetNotFoundError(f"候选集合不存在: {candidate_set_id}")
+
+        # 3. 校验 header.thesis_id == thesis_id
+        if header["thesis_id"] != thesis_id:
+            raise GovernanceError(
+                f"候选集合 {candidate_set_id} 属于 thesis {header['thesis_id']!r},"
+                f"与请求的 {thesis_id!r} 不一致"
+            )
+
+        # 4. 校验 header.data_snapshot_id == data_snapshot_id
+        header_snapshot_id = header.get("data_snapshot_id")
+        if header_snapshot_id != data_snapshot_id:
+            raise GovernanceError(
+                f"候选集合 {candidate_set_id} 的 data_snapshot_id="
+                f"{header_snapshot_id!r} 与请求的 {data_snapshot_id!r} 不一致"
+            )
+
+        # 5. 读候选列表
+        candidates = self._governance_repo.get_candidates_by_set(candidate_set_id)
+
+        # 6. 检查 candidate_evidence 非空
+        for c in candidates:
+            if not c.get("candidate_evidence"):
+                raise GovernanceError(
+                    f"候选 {c.get('candidate_id')} 的 candidate_evidence 缺失"
+                )
+
+        # 7. 从 Thesis 获取 strategy_policy_id 和 version
+        policy_id = thesis["strategy_policy_id"]
+        policy_version = thesis["strategy_policy_version"]
+
+        # 8. 读策略
+        policy_row = self._governance_repo.get_strategy_policy(policy_id, policy_version)
+        if policy_row is None:
+            raise PolicyNotFoundError(
+                f"策略不存在: {policy_id} v{policy_version}"
+            )
+
+        # 9. 解析 fund_recommendation 配置
+        policy = parse_fund_recommendation_policy(policy_row)
+
+        # 10. 校验 recommendation_method_version == policy.method_version
+        if recommendation_method_version != policy.method_version:
+            raise GovernanceError(
+                f"recommendation_method_version {recommendation_method_version!r} 与策略 "
+                f"method_version {policy.method_version!r} 不一致"
+            )
+
+        # 10b. 校验策略 source_method_version 与 CandidateSet header 的 source_method_version 一致
+        if (
+            policy.source_method_version
+            and header.get("source_method_version")
+            and policy.source_method_version != header.get("source_method_version")
+        ):
+            raise GovernanceError(
+                f"策略 source_method_version {policy.source_method_version!r} "
+                f"与 CandidateSet source_method_version "
+                f"{header.get('source_method_version')!r} 不一致"
+            )
+
+        # 11. 检查幂等键
+        existing_run_id = self._recommendation_repo.get_existing_run_id(
+            candidate_set_id=candidate_set_id,
+            strategy_policy_id=policy_id,
+            strategy_policy_version=policy_version,
+            data_snapshot_id=data_snapshot_id,
+            recommendation_method_version=recommendation_method_version,
+        )
+        if existing_run_id:
+            raise DuplicateRecommendationRunError(existing_run_id)
+
+        # 12. 在内存中评价
+        try:
+            evidences = [
+                _dict_to_evidence(c["candidate_evidence"]) for c in candidates
+            ]
+            results: list[FundRecommendationResult] = (
+                self._recommendation_engine.evaluate_all(evidences, policy)
+            )
+
+            recommended_count = sum(
+                1 for r in results if r.recommendation_tier == "candidate_pool"
+            )
+            result_type = (
+                "ranked_recommendations" if recommended_count > 0 else "no_recommended_fund"
+            )
+
+            tier_counts: dict[str, int] = dict.fromkeys(RECOMMENDATION_TIERS, 0)
+            for r in results:
+                if r.recommendation_tier in tier_counts:
+                    tier_counts[r.recommendation_tier] += 1
+        except Exception as exc:
+            self._write_recommendation_failure_audit(
+                thesis_id=thesis_id,
+                candidate_set_id=candidate_set_id,
+                policy_id=policy_id,
+                policy_version=policy_version,
+                data_snapshot_id=data_snapshot_id,
+                recommendation_method_version=recommendation_method_version,
+                actor_id=actor_id,
+                source_ip=source_ip,
+                error=exc,
+            )
+            raise
+
+        # 13. 开启写事务
+        run_id = _short_id("frr")
+        candidate_map = {c["asset_code"]: c["candidate_id"] for c in candidates}
+
+        result_dicts: list[dict[str, Any]] = []
+        for r in results:
+            result_dicts.append(self._recommendation_result_to_dict(r, run_id, candidate_map))
+
+        # 13b. 用 recommended_universe 重建组合（先选基金、再配组合）
+        portfolio = self._build_portfolio_from_recommendations(
+            results, run_id,
+            source_db_path=source_db_path,
+            risk_tolerance=risk_tolerance,
+        )
+
+        with self._recommendation_repo.transaction() as tx:
+            tx.insert_run(
+                {
+                    "recommendation_run_id": run_id,
+                    "candidate_set_id": candidate_set_id,
+                    "thesis_id": thesis_id,
+                    "user_input_id": thesis["user_input_id"],
+                    "strategy_policy_id": policy_id,
+                    "strategy_policy_version": policy_version,
+                    "data_snapshot_id": data_snapshot_id,
+                    "recommendation_method_version": recommendation_method_version,
+                    "result_type": result_type,
+                    "evaluated_candidate_count": len(results),
+                    "recommended_count": recommended_count,
+                    "tier_counts": tier_counts,
+                    "portfolio": portfolio,
+                    "created_by": actor_id,
+                }
+            )
+
+            if result_dicts:
+                tx.insert_results(result_dicts)
+
+            tx.insert_audit_log(
+                action="create_recommendation_run",
+                target_type="recommendation_run",
+                target_id=run_id,
+                payload={
+                    "thesis_id": thesis_id,
+                    "candidate_set_id": candidate_set_id,
+                    "result_type": result_type,
+                    "evaluated_candidate_count": len(results),
+                    "recommended_count": recommended_count,
+                    "tier_counts": tier_counts,
+                },
+                actor=actor_id,
+                run_id=run_id,
+                source_ip=source_ip,
+            )
+
+        # 14. 返回
+        return {
+            "recommendation_run_id": run_id,
+            "result_type": result_type,
+            "evaluated_candidate_count": len(results),
+            "recommended_count": recommended_count,
+            "tier_counts": tier_counts,
+            "portfolio": portfolio,
+        }
+
+    @staticmethod
+    def _build_portfolio_from_recommendations(
+        results: list[FundRecommendationResult],
+        run_id: str,
+        source_db_path: str | None = None,
+        risk_tolerance: str = "moderate",
+        total_cognition_weight: float = 25.0,
+    ) -> dict[str, Any]:
+        """用 recommended_universe 重建组合（先选基金、再配组合）。
+
+        只从 recommended + alternative 档位中选基，
+        调用 build_portfolio 执行去重、估值门禁和权重分配。
+        若提供 source_db_path，则进一步执行持仓重叠分析、组合指标计算和风险二次裁决。
+        """
+        import sqlite3
+
+        from app.cognition.asset_mapper import get_holdings
+
+        recommended = [
+            r for r in results
+            if r.recommendation_tier in ("candidate_pool", "alternative")
+        ]
+        # 转换为 build_portfolio 需要的候选格式
+        candidates: list[dict[str, Any]] = []
+        for r in recommended:
+            ev = r.evidence
+            candidates.append({
+                "fund_code": r.fund_code,
+                "fund_name": r.fund_name,
+                "match_pct": round(ev.normalized_match_pct * 100, 1),
+                "valuation": ev.valuation or {},
+                "trend": ev.holding_trend or {},
+            })
+        portfolio = build_portfolio(
+            recommended_candidates=candidates,
+            recommendation_run_ids=[run_id],
+            total_cognition_weight=total_cognition_weight,
+        )
+
+        # 风险二次裁决（需要 source DB）
+        if source_db_path and portfolio.get("selected_funds"):
+            selected = portfolio["selected_funds"]
+            try:
+                conn = sqlite3.connect(source_db_path)
+            except Exception:
+                return portfolio
+
+            try:
+                # 加载持仓数据
+                all_holdings: dict[str, list[dict[str, Any]]] = {}
+                for f in selected:
+                    all_holdings[f["fund_code"]] = get_holdings(conn, f["fund_code"])
+                    f["holdings"] = all_holdings[f["fund_code"]]
+
+                # 持仓重叠度分析
+                overlap_pairs: list[dict[str, Any]] = []
+                for i, fa in enumerate(selected):
+                    for fb in selected[i + 1:]:
+                        ha = all_holdings.get(fa["fund_code"], [])
+                        hb = all_holdings.get(fb["fund_code"], [])
+                        if ha and hb:
+                            overlap = calculate_overlap(ha, hb)
+                            overlap_pairs.append({
+                                "fund_a": fa["fund_code"],
+                                "fund_b": fb["fund_code"],
+                                **overlap,
+                            })
+                max_overlap = max((p["overlap_a_pct"] for p in overlap_pairs), default=0)
+                overlap_summary = {
+                    "max_overlap_pct": round(max_overlap, 1),
+                    "high_overlap_pairs": [
+                        [p["fund_a"], p["fund_b"]]
+                        for p in overlap_pairs
+                        if p["overlap_a_pct"] > 40
+                    ],
+                    "pairs": overlap_pairs,
+                }
+
+                # 组合级风险指标
+                portfolio_metrics = calculate_portfolio_metrics(
+                    conn, selected, None, all_holdings,
+                )
+
+                # 风险二次裁决
+                risk_review = portfolio_risk_review(
+                    portfolio_metrics, overlap_summary, selected, risk_tolerance,
+                )
+
+                # 强制执行：fail 全降 50%，warn 违规方向降 75%
+                enforced_actions: list[dict[str, Any]] = []
+                if risk_review.get("enforced_actions"):
+                    for action in risk_review["enforced_actions"]:
+                        if action.get("action") == "weight_reduction":
+                            factor = action.get("factor", 1.0)
+                            scope = action.get("scope", "all")
+                            enforced_actions.append({
+                                "type": "weight_reduction",
+                                "scope": scope,
+                                "factor": factor,
+                                "fund_code": scope,
+                                "detail": action.get("reason", ""),
+                            })
+                            if scope == "all":
+                                for f in selected:
+                                    f["weight"] = round(f["weight"] * factor, 1)
+                            elif scope == "violating":
+                                violating_codes: set[str] = set()
+                                for v in risk_review.get("violations", []):
+                                    vtype = v.get("type", "")
+                                    if vtype == "holdings_overlap":
+                                        for pair in overlap_summary.get("high_overlap_pairs", []):
+                                            violating_codes.update(pair)
+                                    elif vtype == "stock_concentration":
+                                        stock_name = v.get("detail", "")
+                                        for f in selected:
+                                            for h in f.get("holdings") or []:
+                                                if h.get("stock_name", "") in stock_name:
+                                                    violating_codes.add(f["fund_code"])
+                                                    break
+                                    elif vtype == "industry_concentration":
+                                        # 从 detail 提取行业名（格式："行业「消费」占比..."）
+                                        detail = v.get("detail", "")
+                                        parts = detail.split("「")
+                                        ind_kws = [
+                                            p.split("」")[0] for p in parts[1:]
+                                            if "」" in p
+                                        ] if "「" in detail else []
+                                        for f in selected:
+                                            for h in f.get("holdings") or []:
+                                                h_ind = h.get("industry_name", "")
+                                                if h_ind and any(kw in h_ind for kw in ind_kws):
+                                                    violating_codes.add(f["fund_code"])
+                                                    break
+                                    elif vtype in ("max_drawdown", "volatility"):
+                                        violating_codes.update(f["fund_code"] for f in selected)
+                                for f in selected:
+                                    if f["fund_code"] in violating_codes:
+                                        f["weight"] = round(f["weight"] * factor, 1)
+
+                    # 调权后重算组合指标和风险裁决
+                    portfolio["total_invested"] = round(sum(f["weight"] for f in selected), 1)
+                    portfolio["cash_pct"] = round(max(0, 100 - portfolio["total_invested"]), 1)
+                    portfolio_metrics = calculate_portfolio_metrics(
+                        conn, selected, None, all_holdings,
+                    )
+                    risk_review = portfolio_risk_review(
+                        portfolio_metrics, overlap_summary, selected, risk_tolerance,
+                    )
+
+                portfolio["metrics"] = portfolio_metrics
+                portfolio["risk_review"] = risk_review
+                portfolio["enforced_actions"] = enforced_actions
+                portfolio["overlap_analysis"] = overlap_summary
+                portfolio["holdings"] = selected
+            finally:
+                conn.close()
+
+        return portfolio
+
+    @staticmethod
+    def _recommendation_result_to_dict(
+        result: FundRecommendationResult,
+        run_id: str,
+        candidate_map: dict[str, str],
+    ) -> dict[str, Any]:
+        """把 FundRecommendationResult 转换为可写入的 result dict。"""
+        candidate_id = candidate_map.get(result.fund_code, "")
+        return {
+            "recommendation_result_id": _short_id("frrr"),
+            "recommendation_run_id": run_id,
+            "candidate_id": candidate_id,
+            "fund_code": result.fund_code,
+            "fund_name": result.fund_name,
+            "product_category": result.product_category,
+            "recommendation_tier": result.recommendation_tier,
+            "category_rank": result.category_rank,
+            "theme_exposure_score": result.theme_exposure_score,
+            "thesis_alignment_score": result.thesis_alignment_score,
+            "risk_return_score": result.risk_return_score,
+            "fund_quality_score": result.fund_quality_score,
+            "total_score": result.total_score,
+            "recommendation_reasons": [
+                {"code": r.code, "message": r.message} for r in result.reasons
+            ],
+            "exclusion_reasons": [
+                {"code": r.code, "message": r.message} for r in result.exclusion_reasons
+            ],
+            "frozen_evidence": _evidence_to_dict(result.evidence),
+        }
+
+    def _write_recommendation_failure_audit(
+        self,
+        *,
+        thesis_id: str,
+        candidate_set_id: str,
+        policy_id: str,
+        policy_version: int,
+        data_snapshot_id: str,
+        recommendation_method_version: str,
+        actor_id: str,
+        source_ip: str | None,
+        error: BaseException,
+    ) -> None:
+        """写失败审计(独立短事务，不写敏感数据)。"""
+        with self._recommendation_repo.transaction() as tx:
+            tx.insert_audit_log(
+                action="create_recommendation_run_failed",
+                target_type="recommendation_run",
+                target_id=candidate_set_id,
+                payload={
+                    "thesis_id": thesis_id,
+                    "candidate_set_id": candidate_set_id,
+                    "strategy_policy_id": policy_id,
+                    "strategy_policy_version": policy_version,
+                    "data_snapshot_id": data_snapshot_id,
+                    "recommendation_method_version": recommendation_method_version,
+                    "error_type": type(error).__name__,
+                    "error_code": "evaluation_failed",
+                },
+                actor=actor_id,
+                source_ip=source_ip,
+            )
+
+    # ----------------------------------------------------------
+    # 推荐查询服务
+    # ----------------------------------------------------------
+    def get_recommendation_run(self, recommendation_run_id: str) -> dict[str, Any] | None:
+        """查询 RecommendationRun 详情，按类别和档位分组返回。"""
+        run = self._recommendation_repo.get_run(recommendation_run_id)
+        if run is None:
+            return None
+
+        results = self._recommendation_repo.get_results(recommendation_run_id)
+
+        # 按类别分组
+        by_category: dict[str, list[dict[str, Any]]] = {
+            "active_fund": [],
+            "etf_or_index": [],
+        }
+        for r in results:
+            cat = r.get("product_category", "")
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(r)
+
+        # recommended_universe 只含 recommended 和 alternative
+        recommended_universe = [
+            r for r in results
+            if r.get("recommendation_tier") in ("candidate_pool", "alternative")
+        ]
+
+        # 查询 Thesis 详情
+        thesis = self._governance_repo.get_thesis(run["thesis_id"])
+
+        thesis_detail: dict[str, Any] | None = None
+        if thesis:
+            thesis_detail = {
+                "thesis_id": thesis.get("thesis_id"),
+                "title": thesis.get("title"),
+                "belief_statement": thesis.get("belief_statement"),
+                "as_of_date": thesis.get("as_of_date"),
+                "status": thesis.get("status"),
+            }
+
+        # 查询 CandidateSet header
+        header = self._governance_repo.get_candidate_set_header(run["candidate_set_id"])
+        header_stats: dict[str, Any] | None = None
+        if header:
+            header_stats = {
+                "candidate_set_id": header.get("candidate_set_id"),
+                "scanned_fund_count": header.get("scanned_fund_count"),
+                "mapped_candidate_count": header.get("mapped_candidate_count"),
+            }
+
+        return {
+            "recommendation_run_id": run["recommendation_run_id"],
+            "thesis_id": run["thesis_id"],
+            "candidate_set_id": run["candidate_set_id"],
+            "strategy_policy_id": run["strategy_policy_id"],
+            "strategy_policy_version": run["strategy_policy_version"],
+            "data_snapshot_id": run.get("data_snapshot_id"),
+            "recommendation_method_version": run["recommendation_method_version"],
+            "result_type": run["result_type"],
+            "result_status": run.get("result_status"),
+            "evaluated_candidate_count": run["evaluated_candidate_count"],
+            "recommended_count": run.get("recommended_count", 0),
+            "tier_counts": run.get("tier_counts") or {},
+            "created_by": run["created_by"],
+            "created_at": run["created_at"],
+            "candidates_by_category": by_category,
+            "recommended_universe": recommended_universe,
+            "portfolio": run.get("portfolio"),
+            "thesis": thesis_detail,
+            "candidate_set_header": header_stats,
+        }
+
+    def list_recommendation_runs(self, thesis_id: str) -> list[dict[str, Any]]:
+        """按 Thesis 查询历史 RecommendationRun。"""
+        runs = self._recommendation_repo.list_runs_by_thesis(thesis_id)
+        return [
+            {
+                "recommendation_run_id": run["recommendation_run_id"],
+                "thesis_id": run["thesis_id"],
+                "candidate_set_id": run["candidate_set_id"],
+                "strategy_policy_id": run["strategy_policy_id"],
+                "strategy_policy_version": run["strategy_policy_version"],
+                "data_snapshot_id": run.get("data_snapshot_id"),
+                "recommendation_method_version": run["recommendation_method_version"],
+                "result_type": run["result_type"],
+                "result_status": run.get("result_status"),
+                "evaluated_candidate_count": run["evaluated_candidate_count"],
+                "recommended_count": run.get("recommended_count", 0),
                 "tier_counts": run.get("tier_counts") or {},
                 "created_by": run["created_by"],
                 "created_at": run["created_at"],

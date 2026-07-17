@@ -169,21 +169,21 @@ dividend_defense:
 
   chain:
     - name: "银行保险"
-      stocks: ["招商银行", "工商银行", "中国平安", "中国太保"]
+      stocks: ["招商银行", "工商银行", "中国平安", "建设银行", "农业银行", "中国人寿"]
       certainty: "high"
       elasticity: "low"
       benefit_logic: "低估值+高股息+稳定盈利"
       industry_keywords: ["银行", "保险"]
 
     - name: "能源公用"
-      stocks: ["中国神华", "中国石油", "长江电力", "大秦铁路"]
+      stocks: ["中国神华", "长江电力", "中国海洋石油", "中国石化"]
       certainty: "high"
       elasticity: "low"
       benefit_logic: "资源品垄断+高分红+低估值"
-      industry_keywords: ["石油", "煤炭", "电力", "公用"]
+      industry_keywords: ["石油", "煤炭", "电力", "公用", "油气开采"]
 
     - name: "基建交运"
-      stocks: ["中国建筑", "中国交建", "大秦铁路"]
+      stocks: ["中国建筑", "大秦铁路"]
       certainty: "high"
       elasticity: "low"
       benefit_logic: "基建龙头低估值+稳定现金流"
@@ -208,18 +208,11 @@ value_investing:
 
   chain:
     - name: "低估值蓝筹"
-      stocks: ["招商银行", "中国平安", "格力电器", "伊利股份"]
+      stocks: ["招商银行", "中国平安", "格力电器", "万科", "保利发展", "兴业银行", "工商银行", "浦发银行", "海螺水泥", "中国建筑"]
       certainty: "high"
       elasticity: "low"
       benefit_logic: "低PE+高ROE+稳定分红=安全边际"
-      industry_keywords: ["银行", "保险", "家电", "食品饮料"]
-
-    - name: "红利低波"
-      stocks: ["中国神华", "长江电力", "大秦铁路", "中国建筑"]
-      certainty: "high"
-      elasticity: "low"
-      benefit_logic: "高分红+低波动+低估值=防御价值"
-      industry_keywords: ["煤炭", "电力", "交通", "建筑"]
+      industry_keywords: ["银行", "保险", "家电", "房地产", "房地产开发", "水泥", "建筑材料"]
 
   defense: "dividend_defense"
 
@@ -239,18 +232,11 @@ growth_investing:
 
   chain:
     - name: "科技成长"
-      stocks: ["宁德时代", "比亚迪", "中际旭创", "寒武纪"]
+      stocks: ["宁德时代", "比亚迪", "中际旭创", "寒武纪", "隆基绿能", "阳光电源", "特变电工", "中环股份", "赣锋锂业", "通威股份", "晶盛机电"]
       certainty: "medium"
       elasticity: "high"
       benefit_logic: "技术驱动+市场空间大+增速高"
-      industry_keywords: ["新能源", "半导体", "通信", "芯片"]
-
-    - name: "医药成长"
-      stocks: ["恒瑞医药", "药明康德", "百济神州", "信达生物"]
-      certainty: "medium"
-      elasticity: "high"
-      benefit_logic: "创新药管线兑现+出海放量+高毛利"
-      industry_keywords: ["医药", "生物", "创新药"]
+      industry_keywords: ["新能源", "半导体", "通信", "芯片", "光伏", "光伏设备", "电网设备", "能源金属", "锂"]
 
   defense: "dividend_defense"
 
@@ -268,18 +254,18 @@ contrarian_investing:
     role_weight_range: [5, 15]
 
   chain:
-    - name: "被错杀的消费"
-      stocks: ["贵州茅台", "五粮液", "海天味业", "美的集团"]
+    - name: "被错杀的地产金融"
+      stocks: ["万科", "保利发展", "招商银行", "兴业银行", "中国平安", "工商银行", "浦发银行"]
       certainty: "medium"
       elasticity: "medium"
-      benefit_logic: "消费龙头被情绪错杀，估值底部+基本面仍在"
-      industry_keywords: ["白酒", "食品饮料", "家电"]
+      benefit_logic: "地产金融被政策恐慌错杀，估值底部+基本面仍在"
+      industry_keywords: ["房地产", "银行", "保险"]
 
-    - name: "被错杀的医药"
-      stocks: ["恒瑞医药", "药明康德", "爱尔眼科", "长春高新"]
+    - name: "被错杀的基建建材"
+      stocks: ["中国建筑", "海螺水泥"]
       certainty: "medium"
       elasticity: "medium"
-      benefit_logic: "医药被集采恐慌错杀，创新药价值仍在"
-      industry_keywords: ["医药", "医疗", "生物"]
+      benefit_logic: "基建建材被需求悲观错杀，低估值+现金流稳定"
+      industry_keywords: ["建筑", "建材", "水泥"]
 
   defense: "dividend_defense"

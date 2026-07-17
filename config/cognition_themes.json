@@ -86,11 +86,15 @@
     "chain_links": {
       "银行保险": {
         "industry_keywords": ["银行", "保险"],
-        "stock_keywords": ["招商银行", "工商银行", "中国平安", "中国太保", "宁波银行"]
+        "stock_keywords": ["招商银行", "工商银行", "中国平安", "建设银行", "农业银行", "中国人寿"]
       },
       "能源公用": {
-        "industry_keywords": ["石油", "煤炭", "电力", "公用"],
-        "stock_keywords": ["中国神华", "中国石油", "长江电力", "大秦铁路"]
+        "industry_keywords": ["石油", "煤炭", "电力", "公用", "油气开采"],
+        "stock_keywords": ["中国神华", "长江电力", "中国海洋石油", "中国石化"]
+      },
+      "基建交运": {
+        "industry_keywords": ["建筑", "交通"],
+        "stock_keywords": ["中国建筑", "大秦铁路"]
       }
     },
     "defense_theme": null
@@ -105,12 +109,8 @@
     ],
     "chain_links": {
       "低估值蓝筹": {
-        "industry_keywords": ["银行", "保险", "家电", "食品饮料"],
-        "stock_keywords": ["招商银行", "中国平安", "格力电器", "伊利股份"]
-      },
-      "红利低波": {
-        "industry_keywords": ["煤炭", "电力", "交通", "建筑"],
-        "stock_keywords": ["中国神华", "长江电力", "大秦铁路", "中国建筑"]
+        "industry_keywords": ["银行", "保险", "家电", "房地产", "房地产开发", "水泥", "建筑材料"],
+        "stock_keywords": ["招商银行", "中国平安", "格力电器", "万科", "保利发展", "兴业银行", "工商银行", "浦发银行", "海螺水泥", "中国建筑"]
       }
     },
     "defense_theme": "dividend_defense"
@@ -125,12 +125,8 @@
     ],
     "chain_links": {
       "科技成长": {
-        "industry_keywords": ["新能源", "半导体", "通信", "芯片"],
-        "stock_keywords": ["宁德时代", "比亚迪", "中际旭创", "寒武纪"]
-      },
-      "医药成长": {
-        "industry_keywords": ["医药", "生物", "创新药"],
-        "stock_keywords": ["恒瑞医药", "药明康德", "百济神州", "信达生物"]
+        "industry_keywords": ["新能源", "半导体", "通信", "芯片", "光伏", "光伏设备", "电网设备", "能源金属", "锂"],
+        "stock_keywords": ["宁德时代", "比亚迪", "中际旭创", "寒武纪", "隆基绿能", "阳光电源", "特变电工", "中环股份", "赣锋锂业", "通威股份", "晶盛机电"]
       }
     },
     "defense_theme": "dividend_defense"
@@ -144,13 +140,13 @@
       "逆向投资需要耐心，但赔率最好"
     ],
     "chain_links": {
-      "被错杀的消费": {
-        "industry_keywords": ["白酒", "食品饮料", "家电"],
-        "stock_keywords": ["贵州茅台", "五粮液", "海天味业", "美的集团"]
+      "被错杀的地产金融": {
+        "industry_keywords": ["房地产", "银行", "保险"],
+        "stock_keywords": ["万科", "保利发展", "招商银行", "兴业银行", "中国平安", "工商银行", "浦发银行"]
       },
-      "被错杀的医药": {
-        "industry_keywords": ["医药", "医疗", "生物"],
-        "stock_keywords": ["恒瑞医药", "药明康德", "爱尔眼科", "长春高新"]
+      "被错杀的基建建材": {
+        "industry_keywords": ["建筑", "建材", "水泥"],
+        "stock_keywords": ["中国建筑", "海螺水泥"]
       }
     },
     "defense_theme": "dividend_defense"

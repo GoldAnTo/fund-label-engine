@@ -32,6 +32,33 @@
     "industry_concentration_high": 6,
     "tracking_error_high": 8
   },
+  "portfolio_risk_thresholds": {
+    "conservative": {"max_industry": 30, "max_stock": 8, "max_overlap": 30, "max_drawdown": -20, "max_volatility": 25, "max_total_fee": 1.2, "max_single_style": 40, "max_turnover_cost": 0.5},
+    "moderate": {"max_industry": 40, "max_stock": 10, "max_overlap": 40, "max_drawdown": -30, "max_volatility": 35, "max_total_fee": 1.5, "max_single_style": 50, "max_turnover_cost": 1.0},
+    "aggressive": {"max_industry": 50, "max_stock": 12, "max_overlap": 50, "max_drawdown": -40, "max_volatility": 45, "max_total_fee": 2.0, "max_single_style": 60, "max_turnover_cost": 2.0}
+  },
+  "liquidity_constraints": {
+    "min_fund_size_bn": 2.0,
+    "max_small_fund_weight_pct": 5,
+    "small_fund_threshold_bn": 5.0
+  },
+  "fee_constraints": {
+    "max_active_mgmt_fee_pct": 1.5,
+    "max_etf_mgmt_fee_pct": 0.5,
+    "max_portfolio_weighted_fee_pct": 1.2
+  },
+  "style_budget": {
+    "max_single_style_pct": 50,
+    "min_style_diversification": 2
+  },
+  "benchmark_deviation": {
+    "max_tracking_error_pct": 8,
+    "max_beta_deviation": 0.3
+  },
+  "turnover_cost": {
+    "estimated_cost_per_turn_pct": 0.3,
+    "max_annual_turnover_pct": 200
+  },
   "hard_blockers": [
     "benchmark_data_missing",
     "data_insufficient",

@@ -755,4 +755,5 @@ def _row_to_strategy_policy(row: sqlite3.Row) -> dict[str, Any]:
     d["monitoring_policy"] = _loads(d.pop("monitoring_policy_json", None))
     d["investment_policy"] = _loads(d.pop("investment_policy_json", None))
     d["candidate_priority"] = _loads(d.pop("candidate_priority_json", None))
+    d["fund_recommendation"] = _loads(d.pop("fund_recommendation_json", None))
     return d

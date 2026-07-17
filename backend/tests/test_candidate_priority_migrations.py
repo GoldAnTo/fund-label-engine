@@ -510,3 +510,137 @@ class Test0017Upgrade:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(candidate_set_headers)").fetchall()]
         assert "unrelated_fund_count" in cols
         conn.close()
+
+
+# ============================================================
+# 0018 fund_recommendation 测试
+# ============================================================
+def _insert_recommendation_run_and_result(conn: sqlite3.Connection) -> None:
+    """插入一条 fund_recommendation_runs 和 fund_recommendation_results 记录。"""
+    conn.execute(
+        """INSERT INTO fund_recommendation_runs
+            (recommendation_run_id, candidate_set_id, thesis_id, user_input_id,
+             strategy_policy_id, strategy_policy_version, data_snapshot_id,
+             recommendation_method_version, result_type,
+             evaluated_candidate_count, recommended_count, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("frr_test1", "cs_test1", "th_test1", "ri_test1",
+         "private_equity_growth", 1, "snap_test1",
+         "fund_recommendation_v1", "ranked_recommendations",
+         3, 2, "system"),
+    )
+    conn.execute(
+        """INSERT INTO fund_recommendation_results
+            (recommendation_result_id, recommendation_run_id, candidate_id,
+             fund_code, fund_name, product_category, recommendation_tier,
+             category_rank, theme_exposure_score, thesis_alignment_score,
+             risk_return_score, fund_quality_score, total_score)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("frrr_test1", "frr_test1", "can_test1",
+         "000001", "基金1", "active_fund", "candidate_pool",
+         1, 0.85, 0.70, 0.60, 0.75, 0.78),
+    )
+    conn.commit()
+
+
+class Test0018FundRecommendation:
+    """0018 fund_recommendation migration 测试。"""
+
+    def test_recommendation_tables_exist(self, migrated_db: Path):
+        """新库跑完全部 migration 后，推荐表存在。"""
+        conn = sqlite3.connect(str(migrated_db))
+        try:
+            tables = {
+                r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            assert {"fund_recommendation_runs", "fund_recommendation_results"} <= tables
+            # strategy_policies 有 fund_recommendation_json 列
+            cols = {
+                r[1]
+                for r in conn.execute("PRAGMA table_info(strategy_policies)").fetchall()
+            }
+            assert "fund_recommendation_json" in cols
+        finally:
+            conn.close()
+
+    def test_recommendation_results_are_immutable(self, conn_with_data):
+        """RecommendationResult UPDATE 被 trigger 拒绝，错误含 'immutable'。"""
+        c = conn_with_data
+        _insert_header(c)
+        _insert_candidate(c)
+        _insert_recommendation_run_and_result(c)
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            c.execute(
+                "UPDATE fund_recommendation_results SET total_score = 0"
+            )
+            c.commit()
+
+    def test_recommendation_results_cannot_be_deleted(self, conn_with_data):
+        """RecommendationResult DELETE 被 trigger 拒绝。"""
+        c = conn_with_data
+        _insert_header(c)
+        _insert_candidate(c)
+        _insert_recommendation_run_and_result(c)
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            c.execute(
+                "DELETE FROM fund_recommendation_results "
+                "WHERE recommendation_result_id='frrr_test1'"
+            )
+            c.commit()
+
+    def test_recommendation_run_idempotent_unique(self, conn_with_data):
+        """相同的幂等键组合插入两次抛 IntegrityError。"""
+        c = conn_with_data
+        _insert_header(c)
+        _insert_candidate(c)
+        _insert_recommendation_run_and_result(c)
+        with pytest.raises(sqlite3.IntegrityError):
+            c.execute(
+                """INSERT INTO fund_recommendation_runs
+                    (recommendation_run_id, candidate_set_id, thesis_id, user_input_id,
+                     strategy_policy_id, strategy_policy_version, data_snapshot_id,
+                     recommendation_method_version, result_type,
+                     evaluated_candidate_count, recommended_count, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ("frr_test2", "cs_test1", "th_test1", "ri_test1",
+                 "private_equity_growth", 1, "snap_test1",
+                 "fund_recommendation_v1", "ranked_recommendations",
+                 3, 2, "system"),
+            )
+            c.commit()
+
+    def test_fund_recommendation_json_roundtrip(self, conn_with_data):
+        """fund_recommendation_json 能完整 round-trip。"""
+        c = conn_with_data
+        nested = {
+            "method_version": "fund_recommendation_v1",
+            "source_method_version": "fund_candidate_evidence_v0",
+            "minimum_target_holding_weight": 0.03,
+            "maximum_holding_age_days": 180,
+            "active_fund_limit": 3,
+            "etf_or_index_limit": 3,
+            "alternative_limit": 2,
+            "weights": {
+                "theme_exposure": 0.55,
+                "thesis_alignment": 0.15,
+                "risk_return": 0.15,
+                "fund_quality": 0.15,
+            },
+        }
+        c.execute(
+            "UPDATE strategy_policies SET fund_recommendation_json=? "
+            "WHERE policy_id='private_equity_growth' AND version=1",
+            (json.dumps(nested, ensure_ascii=False),),
+        )
+        c.commit()
+        row = c.execute(
+            "SELECT fund_recommendation_json FROM strategy_policies "
+            "WHERE policy_id='private_equity_growth' AND version=1"
+        ).fetchone()
+        assert row is not None
+        result = json.loads(row[0])
+        assert result["method_version"] == "fund_recommendation_v1"
+        assert result["weights"]["theme_exposure"] == 0.55
+        assert result["active_fund_limit"] == 3

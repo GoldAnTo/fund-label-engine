@@ -1,6 +1,6 @@
 # 阶段 0 · 私募内部投研 smoke 演示报告
 
-> 生成时间:`2026-07-14T07:56:19Z`
+> 生成时间:`2026-07-17T05:53:34Z`
 > data_snapshot_id:`snap_smoke`
 > strategy_policy_id + version:`private_equity_growth` + `v1`
 > business_mode:`private_strategy`(主业务)
@@ -18,9 +18,9 @@
 
 ## A · 投资观点
 
-- research_input_id:`ri_test_api_a`
-- thesis_id:`th_43cdf9487c47`
-- candidate_set_id:`cs_3183087d3745`
+- research_input_id:`ri_test_rec_api_a`
+- thesis_id:`th_0f182ede834d`
+- candidate_set_id:`cs_ee14853d11a5`
 - persist_status:`created`
 - actor_role:`researcher`
 - raw_text:"我看好消费白马(高 ROE、稳定盈利、低估值的龙头企业)。"
@@ -38,15 +38,15 @@
 
 | asset_code | asset_name | 证据 | as_of_date |
 |---|---|---|---|
-| `000001` | 样例消费股票 | `{"consumer_blue_chip_holding_weight": 0.235, "industry_exposure": [{"industry": "电力设备", "weight": 0.11}, {"industry": "银行", "weight": 0.08}, {"industry": "食品饮料", "weight": 0.46}]}` | 2026-03-31 |
+| `000001` | 样例消费股票 | `{"consumer_blue_chip_holding_weight": 0.327, "industry_exposure": [{"industry": "医药", "weight": 0.05}, {"industry": "家电", "weight": 0.05}, {"industry": "汽车", "weight": 0.04}, {"industry": "电力设备", "weight": 0.05}, {"industry": "电池", "weight": 0.05}, {"industry": "银行", "weight": 0.05}, {"industry": "非银金融", "weight": 0.06}, {"industry": "食品饮料", "weight": 0.5}]}` | 2026-03-31 |
 
 ---
 
 ## B · 行业方向
 
-- research_input_id:`ri_test_api_b`
-- thesis_id:`th_d9578b16632d`
-- candidate_set_id:`cs_5dbda344f3b3`
+- research_input_id:`ri_test_rec_api_b`
+- thesis_id:`th_ebf44d6d6e01`
+- candidate_set_id:`cs_39c395eaccb8`
 - persist_status:`created`
 - actor_role:`researcher`
 - raw_text:"我看好食品饮料行业的稳定盈利能力。"
@@ -64,15 +64,15 @@
 
 | asset_code | asset_name | 证据 | as_of_date |
 |---|---|---|---|
-| `000001` | 样例消费股票 | `{"食品饮料_exposure": 0.46}` | 2026-03-31 |
+| `000001` | 样例消费股票 | `{"食品饮料_exposure": 0.5}` | 2026-03-31 |
 
 ---
 
 ## C · 具体标的
 
-- research_input_id:`ri_test_api_c`
-- thesis_id:`th_5b59f9ae7805`
-- candidate_set_id:`cs_b7db5afc627f`
+- research_input_id:`ri_test_rec_api_c`
+- thesis_id:`th_f82d1d2ecc2c`
+- candidate_set_id:`cs_8b38028fecbd`
 - persist_status:`created`
 - actor_role:`researcher`
 - raw_text:"我想知道哪些基金重仓了贵州茅台(600519)。"
@@ -90,7 +90,7 @@
 
 | asset_code | asset_name | 证据 | as_of_date |
 |---|---|---|---|
-| `000001` | 样例消费股票 | `{"stock_weight_in_fund": 0.11, "stock_name_in_holding": "贵州茅台", "report_date": "2026-03-31"}` | 2026-03-31 |
+| `000001` | 样例消费股票 | `{"stock_weight_in_fund": 0.153, "stock_name_in_holding": "贵州茅台", "report_date": "2026-03-31"}` | 2026-03-31 |
 
 ---
 

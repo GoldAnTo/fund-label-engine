@@ -34,6 +34,7 @@ def detect_risk_signals(
     valuation_history: list[dict[str, Any]],
     holding_history: list[dict[str, Any]],
     as_of_today: date | None = None,
+    monitoring_config: dict | None = None,
 ) -> list[dict[str, Any]]:
     """根据估值快照 + 持仓历史检测风险信号。
 
@@ -41,6 +42,9 @@ def detect_risk_signals(
         valuation_history: 按 as_of_date DESC 排序的快照
         holding_history: 按 report_period DESC 排序的持仓摘要
         as_of_today: 用于"过期"判断的当前日期（默认今天）
+        monitoring_config: 监控策略配置（monitoring_policy 字典）。提供后从其中
+            读取 data_stale.days_threshold / holding_change.threshold /
+            risk_breach.drawdown 阈值，缺省回退到模块级常量。
 
     Returns:
         [{code, level, title, detail, value}, ...]
@@ -49,20 +53,36 @@ def detect_risk_signals(
     today = as_of_today or date.today()
     signals: list[dict[str, Any]] = []
 
+    # 从 monitoring_config 读取阈值，缺省回退到模块级常量
+    if monitoring_config:
+        stale_days = monitoring_config.get("data_stale", {}).get(
+            "days_threshold", STALE_VALUATION_DAYS
+        )
+        holding_drift_threshold = monitoring_config.get("holding_change", {}).get(
+            "threshold", 0.05
+        )
+        risk_breach_drawdown = monitoring_config.get("risk_breach", {}).get(
+            "drawdown", 0.15
+        )
+    else:
+        stale_days = STALE_VALUATION_DAYS
+        holding_drift_threshold = 0.05
+        risk_breach_drawdown = 0.15
+
     # 1) stale_valuation
     if valuation_history:
         latest = valuation_history[0]
         latest_date = _date_from_str(latest.get("as_of_date"))
         if latest_date:
             age_days = (today - latest_date).days
-            if age_days > STALE_VALUATION_DAYS:
+            if age_days > stale_days:
                 signals.append({
                     "code": "stale_valuation",
                     "level": "warning",
                     "title": "估值快照过期",
                     "detail": (
                         f"最新估值快照 {latest.get('as_of_date')}, "
-                        f"距今 {age_days} 天（> {STALE_VALUATION_DAYS} 天）"
+                        f"距今 {age_days} 天（> {stale_days} 天）"
                     ),
                     "value": age_days,
                 })

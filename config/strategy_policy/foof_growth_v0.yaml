@@ -69,18 +69,32 @@ valuation_policy:
 monitoring_policy:
   holding_change:
     single_position_drift: 0.05    # 单持仓漂移 > 5pp 触发 warning
+    owner: "基金经理"
+    review_sla_hours: 48
   industry_drift:
     vs_benchmark: 0.10             # 行业偏离基准 > 10pp 触发 warning
+    owner: "研究员"
+    review_sla_hours: 72
   style_drift:
     vs_policy: 0.15                # 风格偏离政策 > 15pp 触发 warning
+    owner: "风控"
+    review_sla_hours: 48
   manager_change:
     trigger: any                   # 任何基金经理变更触发 critical
+    owner: "投决会"
+    review_sla_hours: 24
   data_stale:
     days_threshold: 60             # 数据 60 天未更新触发 warning
+    owner: "数据团队"
+    review_sla_hours: 24
   thesis_invalidation:
     review_days: 180               # 假设 180 天未复核触发 watching
+    owner: "投研负责人"
+    review_sla_hours: 168
   risk_breach:
     drawdown: 0.15                 # 回撤 > 15% 触发 critical
+    owner: "风控"
+    review_sla_hours: 4
 
 # --- 生效期 ---
 effective_from: 2026-07-10

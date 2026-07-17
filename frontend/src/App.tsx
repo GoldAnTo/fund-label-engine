@@ -9,6 +9,7 @@ const SearchPage = lazy(() => import("./pages/SearchPage"));
 const FundReportPage = lazy(() => import("./pages/FundReportPage"));
 const LabelDefinitionsPage = lazy(() => import("./pages/LabelDefinitionsPage"));
 const PriorityWorkbenchPage = lazy(() => import("./pages/PriorityWorkbenchPage"));
+const FundRecommendationPage = lazy(() => import("./pages/FundRecommendationPage"));
 
 const NAV_GROUPS = [
   {
@@ -16,6 +17,7 @@ const NAV_GROUPS = [
     links: [
       { to: "/cognition", label: "认知选基" },
       { to: "/multi-cognition", label: "多认知组合" },
+      { to: "/recommendations", label: "主题基金推荐" },
     ],
   },
   {
@@ -42,6 +44,7 @@ const CRUMB_MAP: Record<string, string> = {
   explorer: "风格总览",
   search: "风格筛选",
   priority: "基金研究优先级",
+  recommendations: "主题基金推荐",
   funds: "基金",
   "label-definitions": "规则定义",
 };
@@ -119,6 +122,7 @@ export default function App() {
             <Route path="/runs/:runId/funds/:fundCode" element={<FundReportPage />} />
             <Route path="/label-definitions" element={<LabelDefinitionsPage />} />
             <Route path="/priority" element={<PriorityWorkbenchPage />} />
+            <Route path="/recommendations" element={<FundRecommendationPage />} />
             <Route path="/ready-pool" element={<Navigate to="/explorer" replace />} />
             <Route path="/portfolio" element={<Navigate to="/cognition" replace />} />
             <Route path="/runs" element={<Navigate to="/cognition" replace />} />

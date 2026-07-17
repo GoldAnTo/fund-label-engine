@@ -644,6 +644,25 @@ class CognitionEngine:
         ).fetchone()
         return row[0] if row else "?"
 
+    def _get_fund_type(self, conn: sqlite3.Connection, fund_code: str) -> str | None:
+        """从 fund_profiles 读取 fund_type，用于产品类别判定。"""
+        try:
+            row = conn.execute(
+                "SELECT fund_type FROM fund_profiles WHERE fund_code = ?", (fund_code,)
+            ).fetchone()
+            return row[0] if row else None
+        except sqlite3.OperationalError:
+            return None
+
+    @staticmethod
+    def _classify_product_category(fund_type: str | None) -> str | None:
+        """根据 fund_type 判定产品类别：指数型/ETF -> etf_or_index，其他 -> active_fund。"""
+        if not fund_type:
+            return None
+        if "指数" in fund_type or "ETF" in fund_type.upper():
+            return "etf_or_index"
+        return "active_fund"
+
     def _load_fund_codes(self, conn: sqlite3.Connection) -> list[str]:
         """加载所有基金代码，复用 HoldingSourceAdapter。"""
         from app.cognition.holding_source import (
@@ -1113,7 +1132,7 @@ class CognitionEngine:
         for link in chain["chain"]:
             if link.get("exclude"):
                 continue
-            if belief_link and link["name"] != belief_link:
+            if belief_link and belief_link not in link["name"]:
                 continue
             all_matched_holdings: list[dict[str, Any]] = []
             for fc, holdings in all_holdings.items():
@@ -1158,7 +1177,7 @@ class CognitionEngine:
         for link in chain["chain"]:
             if link.get("exclude"):
                 continue
-            if belief_link and link["name"] != belief_link:
+            if belief_link and belief_link not in link["name"]:
                 continue
             for la in link_analysis:
                 if la["link_name"] == link["name"] and la["expectation_gap"] != "negative":
@@ -1607,7 +1626,7 @@ class CognitionEngine:
         for link in chain["chain"]:
             if link.get("exclude"):
                 continue
-            if belief_link and link["name"] != belief_link:
+            if belief_link and belief_link not in link["name"]:
                 continue
             all_matched_holdings: list[dict[str, Any]] = []
             for fc, holdings in all_holdings.items():
@@ -1632,18 +1651,16 @@ class CognitionEngine:
 
         link_analysis.sort(key=lambda x: x["score"], reverse=True)
 
-        # 构建匹配关键词（非负预期差的环节）
+        # 构建匹配关键词（所有非排除环节均参与匹配，预期差仅影响 thesis_alignment 评分）
         good_keywords: list[str] = []
         good_industry_kws: list[str] = []
         for link in chain["chain"]:
             if link.get("exclude"):
                 continue
-            if belief_link and link["name"] != belief_link:
+            if belief_link and belief_link not in link["name"]:
                 continue
-            for la in link_analysis:
-                if la["link_name"] == link["name"] and la["expectation_gap"] != "negative":
-                    good_keywords.extend(link.get("stocks", []))
-                    good_industry_kws.extend(link.get("industry_keywords", []))
+            good_keywords.extend(link.get("stocks", []))
+            good_industry_kws.extend(link.get("industry_keywords", []))
 
         # 横截面估值基准和基金经理
         industry_pe_medians = self._get_industry_pe_medians(conn)
@@ -1735,6 +1752,12 @@ class CognitionEngine:
                 holdings, valuation, trend, manager, holding_report_date, link_analysis,
             )
 
+            # NAV 风险收益指标
+            nav_metrics = self._compute_nav_metrics(conn, fc)
+
+            # 基金规模和费率
+            fund_size, mgmt_fee, custody_fee = self._load_fund_quality_data(conn, fc)
+
             evidence = FundCandidateEvidence(
                 fund_code=fc,
                 fund_name=self._get_fund_name(conn, fc),
@@ -1750,6 +1773,13 @@ class CognitionEngine:
                 evidence_types=evidence_types,
                 policy_conflicts=(),
                 data_snapshot_id=data_snapshot_id,
+                product_category=self._classify_product_category(
+                    self._get_fund_type(conn, fc)
+                ),
+                nav_metrics=nav_metrics,
+                fund_size=fund_size,
+                management_fee=mgmt_fee,
+                custody_fee=custody_fee,
             )
 
             all_candidates.append(evidence)
@@ -1779,6 +1809,9 @@ class CognitionEngine:
                         policy_conflicts=(),
                         data_snapshot_id=data_snapshot_id,
                         asset_type="fund",
+                        product_category=self._classify_product_category(
+                            self._get_fund_type(conn, code)
+                        ),
                     )
                 )
 
@@ -1795,6 +1828,100 @@ class CognitionEngine:
     def _has_required_factor(holding: dict[str, Any]) -> bool:
         """检查持仓是否有 pe 或 pb 因子（非 None）。"""
         return holding.get("pe") is not None or holding.get("pb") is not None
+
+    @staticmethod
+    def _compute_nav_metrics(conn: sqlite3.Connection, fund_code: str) -> dict[str, Any] | None:
+        """从 nav_history 计算基金级风险收益指标。
+
+        返回 annualized_return, annualized_volatility, max_drawdown, sharpe_ratio。
+        数据不足（<10 个日收益率）时返回 None。
+        """
+        import math
+
+        # 检测收益率列名
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(nav_history)").fetchall()}
+        return_col = "daily_growth_rate" if "daily_growth_rate" in cols else (
+            "daily_return" if "daily_return" in cols else None
+        )
+        if return_col is None:
+            return None
+
+        rows = conn.execute(
+            f"SELECT {return_col} FROM nav_history WHERE fund_code = ? ORDER BY nav_date",
+            (fund_code,),
+        ).fetchall()
+        returns = [r[0] for r in rows if r[0] is not None]
+
+        if len(returns) < 10:
+            return None
+
+        n = len(returns)
+        mean_daily = sum(returns) / n
+        var_daily = sum((r - mean_daily) ** 2 for r in returns) / max(n - 1, 1)
+        std_daily = math.sqrt(var_daily)
+
+        annualized_return = mean_daily * 252
+        annualized_volatility = std_daily * math.sqrt(252)
+
+        # 最大回撤
+        cumulative = 1.0
+        peak = 1.0
+        max_dd = 0.0
+        for r in returns:
+            cumulative *= (1 + r)
+            if cumulative > peak:
+                peak = cumulative
+            dd = (peak - cumulative) / peak
+            if dd > max_dd:
+                max_dd = dd
+
+        risk_free_rate = 0.02
+        sharpe = (
+            (annualized_return - risk_free_rate) / annualized_volatility
+            if annualized_volatility > 0
+            else 0.0
+        )
+
+        return {
+            "annualized_return": round(annualized_return, 4),
+            "annualized_volatility": round(annualized_volatility, 4),
+            "max_drawdown": round(max_dd, 4),
+            "sharpe_ratio": round(sharpe, 4),
+            "nav_sample_count": n,
+        }
+
+    @staticmethod
+    def _load_fund_quality_data(
+        conn: sqlite3.Connection, fund_code: str
+    ) -> tuple[float | None, float | None, float | None]:
+        """加载基金规模和管理费/托管费。"""
+        fund_size = None
+        mgmt_fee = None
+        custody_fee = None
+
+        # fund_size from fund_profiles
+        try:
+            row = conn.execute(
+                "SELECT fund_size FROM fund_profiles WHERE fund_code = ?", (fund_code,)
+            ).fetchone()
+            if row and row[0] is not None:
+                fund_size = float(row[0])
+        except Exception:
+            pass
+
+        # fees from fee_structures
+        try:
+            row = conn.execute(
+                "SELECT management_fee, custody_fee FROM fee_structures WHERE fund_code = ?",
+                (fund_code,),
+            ).fetchone()
+            if row:
+                mgmt_fee = float(row[0]) if row[0] is not None else None
+                custody_fee = float(row[1]) if row[1] is not None else None
+        except Exception:
+            pass
+
+        return fund_size, mgmt_fee, custody_fee
 
     @staticmethod
     def _build_evidence_types(

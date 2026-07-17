@@ -588,11 +588,13 @@ export default function CognitionPage() {
                         ))}
                       </div>
                     )}
-                    {(result as { step0_thesis?: { falsification_conditions?: string[] } }).step0_thesis?.falsification_conditions && (result as { step0_thesis?: { falsification_conditions?: string[] } }).step0_thesis!.falsification_conditions!.length > 0 && (
-                      <div className="mt-3">
-                        <div className="text-xs text-text-3 mb-1">证伪条件（出现则假设不成立）：</div>
-                        <ul className="text-sm text-neg m-0 pl-5 list-disc space-y-0.5">
-                          {(result as { step0_thesis?: { falsification_conditions?: string[] } }).step0_thesis!.falsification_conditions!.map((c, i) => (
+                    {result.step0_thesis?.falsification_conditions && result.step0_thesis.falsification_conditions.length > 0 && (
+                      <div className="mt-3 p-3 bg-neg-soft border border-neg/30 rounded-lg">
+                        <div className="text-xs font-semibold text-neg mb-1.5 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-neg" />证伪监控
+                        </div>
+                        <ul className="text-sm text-neg-text m-0 pl-5 list-disc space-y-0.5">
+                          {result.step0_thesis.falsification_conditions.map((c, i) => (
                             <li key={i}>{c}</li>
                           ))}
                         </ul>
@@ -648,6 +650,76 @@ export default function CognitionPage() {
                           </p>
                           {gap.summary && <p className="text-xs text-text-3 leading-relaxed">{gap.summary}</p>}
                         </div>
+                      </div>
+                    </CardBody>
+                  </Card>
+                )}
+                {result.step2_chain && result.step2_chain.length > 0 && (
+                  <Card className="mb-4">
+                    <CardHeader title="产业链逐环明细" subtitle={`共 ${result.step2_chain.length} 个环节`} />
+                    <CardBody className="p-0">
+                      <Table>
+                        <thead>
+                          <tr>
+                            <Th>环节名称</Th>
+                            <Th className="text-right">PE</Th>
+                            <Th className="text-right">增速</Th>
+                            <Th className="text-right">PEG</Th>
+                            <Th className="text-right">估值分位</Th>
+                            <Th>预期差</Th>
+                            <Th>预期差原因</Th>
+                            <Th>匹配股票</Th>
+                            <Th>受益逻辑</Th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {result.step2_chain.map((link, i) => {
+                            const gapColor = link.expectation_gap === "positive" ? "text-pos"
+                              : link.expectation_gap === "negative" ? "text-neg" : "text-text-3";
+                            const gapBg = link.expectation_gap === "positive" ? "bg-pos-soft"
+                              : link.expectation_gap === "negative" ? "bg-neg-soft" : "bg-surface-2";
+                            const gapLabel = link.expectation_gap === "positive" ? "正"
+                              : link.expectation_gap === "negative" ? "负"
+                              : link.expectation_gap === "neutral" ? "中" : "未知";
+                            return (
+                              <tr key={i}>
+                                <Td className="font-semibold">{link.link_name}</Td>
+                                <Td className="font-mono text-right text-xs">{fmt(link.pe)}</Td>
+                                <Td className="font-mono text-right text-xs">{fmt(link.growth_pct, "%")}</Td>
+                                <Td className="font-mono text-right text-xs">{fmt(link.peg)}</Td>
+                                <Td className="font-mono text-right text-xs">{fmt(link.val_pct, "%")}</Td>
+                                <Td>
+                                  <span className={`text-xs px-1.5 py-0.5 rounded ${gapBg} ${gapColor}`}>{gapLabel}</span>
+                                </Td>
+                                <Td className="text-xs text-text-2">{link.gap_reason || "-"}</Td>
+                                <Td className="text-xs text-text-2">{link.matched_stocks && link.matched_stocks.length > 0 ? link.matched_stocks.join("、") : "-"}</Td>
+                                <Td className="text-xs text-text-2">{link.benefit_logic || "-"}</Td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </Table>
+                    </CardBody>
+                  </Card>
+                )}
+                {validation?.reasoning_chain && validation.reasoning_chain.length > 0 && (
+                  <Card className="mb-4">
+                    <CardHeader title="结构化推理链" subtitle="认知验证推导路径" />
+                    <CardBody>
+                      <div className="relative">
+                        <div className="absolute left-[11px] top-3 bottom-3 w-px bg-border" />
+                        {validation.reasoning_chain.map((node, i) => (
+                          <div key={i} className="relative pl-8 pb-6 last:pb-0">
+                            <div className="absolute left-1.5 top-1 w-3 h-3 rounded-full bg-accent border-2 border-surface z-10" />
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className="text-xs font-semibold text-accent">步骤 {node.step}</span>
+                              {node.evidence_ref && (
+                                <span className="text-[10px] px-1.5 py-0.5 bg-surface-2 text-text-3 rounded">证据：{node.evidence_ref}</span>
+                              )}
+                            </div>
+                            <p className="text-sm text-text-1 m-0 leading-relaxed">{node.description}</p>
+                          </div>
+                        ))}
                       </div>
                     </CardBody>
                   </Card>
@@ -716,6 +788,31 @@ export default function CognitionPage() {
                           })}
                         </tbody>
                       </Table>
+                    </CardBody>
+                  </Card>
+                )}
+                {gatedOut.length > 0 && (
+                  <Card className="mt-4">
+                    <CardHeader title="为何未入选" subtitle={`共 ${gatedOut.length} 只基金被门禁拦截`} />
+                    <CardBody className="space-y-2">
+                      {gatedOut.map((f) => (
+                        <div key={f.fund_code} className="p-3 bg-surface-2 rounded border-l-4 border-neg/40">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            <span className="text-sm font-semibold">{f.fund_name}</span>
+                            <span className="text-xs text-text-3 font-mono">{f.fund_code}</span>
+                            <span className="text-xs text-text-3 ml-auto">匹配度 {fmt(f.match_pct, "%")}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {f.gate && f.gate.violations.length > 0 ? (
+                              f.gate.violations.map((v, i) => (
+                                <span key={i} className="text-[11px] px-1.5 py-0.5 bg-neg-soft text-neg rounded">{v}</span>
+                              ))
+                            ) : (
+                              <span className="text-[11px] text-text-3">未通过门禁</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                     </CardBody>
                   </Card>
                 )}
@@ -1144,7 +1241,7 @@ function FundDetailInline({ fund }: { fund: CognitionResponse["step4_fund_matche
               {holdings.slice(0, 5).map((h, i) => (
                 <div key={i} className="flex justify-between text-xs">
                   <span className="truncate mr-2">{String(h.stock_name ?? h.stock_code)}</span>
-                  <span className="font-mono text-text-2">{fmt(h.weight as number, "%")}</span>
+                  <span className="font-mono text-text-2">{((h.weight as number) * 100).toFixed(1)}%</span>
                 </div>
               ))}
             </div>

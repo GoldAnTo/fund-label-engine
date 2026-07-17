@@ -28,6 +28,7 @@ import time
 from typing import Any
 
 from app.persistence.candidate_priority import CandidatePriorityRepository
+from app.persistence.fund_recommendation import FundRecommendationRepository
 from app.persistence.governance import GovernanceRepository
 from app.services import cognition_governance_service as _cgs
 from app.services.candidate_priority import CandidatePriorityConfigurationError
@@ -119,6 +120,23 @@ class CreatePriorityRunResponse(BaseModel):
     approved_for_production: bool
 
 
+class CreateRecommendationRunRequest(BaseModel):
+    """创建推荐评价的请求。"""
+    candidate_set_id: str
+    data_snapshot_id: str
+    recommendation_method_version: str
+    actor_id: str
+
+
+class CreateRecommendationRunResponse(BaseModel):
+    """RecommendationRun 创建响应。"""
+    recommendation_run_id: str
+    result_type: str
+    evaluated_candidate_count: int
+    recommended_count: int
+    tier_counts: dict[str, Any] = Field(default_factory=dict)
+
+
 class TransitionThesisRequest(BaseModel):
     """投资假设状态迁移请求。"""
     to_status: str  # draft/researching/validated/approved/watching/invalidated/closed
@@ -183,9 +201,11 @@ def get_cognition_governance_service(request: Request) -> CognitionGovernanceSer
             raise HTTPException(status_code=503, detail="数据库未配置")
         gov_repo = GovernanceRepository(db_path)
         priority_repo = CandidatePriorityRepository(db_path)
+        rec_repo = FundRecommendationRepository(db_path)
         request.app.state.cognition_governance_service = CognitionGovernanceService(
             governance_repo=gov_repo,
             priority_repo=priority_repo,
+            recommendation_repo=rec_repo,
         )
     return request.app.state.cognition_governance_service
 
@@ -244,6 +264,8 @@ def _map_cognition_error(exc: Exception) -> HTTPException:
     if isinstance(exc, _cgs.DuplicateCandidateSetError):
         return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, _cgs.DuplicatePriorityRunError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, _cgs.DuplicateRecommendationRunError):
         return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, _cgs.StructuredIntentIncompleteError):
         return HTTPException(status_code=422, detail=str(exc))
@@ -614,6 +636,72 @@ def list_priority_runs(
 ) -> list[dict[str, Any]]:
     """按投资假设查询历史 PriorityRun 列表。"""
     return service.list_priority_runs(thesis_id)
+
+
+# ============================================================
+# 认知治理 API: FundRecommendationRun 编排
+# ============================================================
+@router.post(
+    "/theses/{thesis_id}/fund-recommendation-runs",
+    response_model=CreateRecommendationRunResponse,
+    status_code=201,
+    summary="创建基金推荐评价",
+)
+def create_recommendation_run(
+    thesis_id: str,
+    request_body: CreateRecommendationRunRequest,
+    request: Request,
+    service: CognitionGovernanceService = Depends(get_cognition_governance_service),
+) -> CreateRecommendationRunResponse:
+    """创建基金推荐评价运行。
+
+    - 校验 thesis / candidate_set / snapshot / policy 对齐
+    - 读取候选证据并在内存中完成评价和类内排序
+    - 原子写入 run + results + audit
+    - 主动基金和 ETF/指数基金分别排名
+    """
+    try:
+        result = service.create_recommendation_run(
+            thesis_id=thesis_id,
+            candidate_set_id=request_body.candidate_set_id,
+            data_snapshot_id=request_body.data_snapshot_id,
+            recommendation_method_version=request_body.recommendation_method_version,
+            actor_id=request_body.actor_id,
+            source_ip=_get_source_ip(request),
+        )
+        return CreateRecommendationRunResponse(**result)
+    except (_cgs.GovernanceError, CandidatePriorityConfigurationError) as exc:
+        raise _map_cognition_error(exc) from exc
+
+
+@router.get(
+    "/fund-recommendation-runs/{recommendation_run_id}",
+    summary="查询基金推荐结果",
+)
+def get_recommendation_run(
+    recommendation_run_id: str,
+    service: CognitionGovernanceService = Depends(get_cognition_governance_service),
+) -> dict[str, Any]:
+    """查询基金推荐详情，按类别和档位分组返回。不存在返回 404。"""
+    result = service.get_recommendation_run(recommendation_run_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"基金推荐评价不存在: {recommendation_run_id}",
+        )
+    return result
+
+
+@router.get(
+    "/theses/{thesis_id}/fund-recommendation-runs",
+    summary="查询投资假设的历史推荐",
+)
+def list_recommendation_runs(
+    thesis_id: str,
+    service: CognitionGovernanceService = Depends(get_cognition_governance_service),
+) -> list[dict[str, Any]]:
+    """按投资假设查询历史 RecommendationRun 列表。"""
+    return service.list_recommendation_runs(thesis_id)
 
 
 # ============================================================

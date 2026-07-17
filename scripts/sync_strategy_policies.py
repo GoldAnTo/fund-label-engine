@@ -71,6 +71,7 @@ def sync_yaml_to_db(yaml_path: Path, db_path: Path) -> dict[str, Any]:
         "monitoring_policy",
         "investment_policy",
         "candidate_priority",
+        "fund_recommendation",
     ]
     json_vals: dict[str, str | None] = {}
     for k in json_keys:

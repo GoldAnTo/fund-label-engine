@@ -382,7 +382,7 @@ export function FundDetailPanel({ fund }: FundDetailProps) {
                   {String(h.stock_name ?? h.stock_code)}
                 </span>
                 <span className="fund-detail-holding-weight">
-                  {fmt2(h.weight as number, "%")}
+                  {((h.weight as number) * 100).toFixed(1)}%
                 </span>
               </div>
             ))}
